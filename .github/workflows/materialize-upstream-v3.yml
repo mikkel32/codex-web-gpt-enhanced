@@ -1,0 +1,102 @@
+name: Materialize pinned upstream source v3
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - UPSTREAM.lock
+      - .github/workflows/materialize-upstream-v3.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: materialize-upstream-v3
+  cancel-in-progress: false
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out fork metadata
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read and validate upstream lock
+        id: lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          source UPSTREAM.lock
+          test -n "${repository:-}"
+          test -n "${sha:-}"
+          test -n "${version:-}"
+          test -n "${branch:-}"
+          [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$branch" =~ ^codex/[A-Za-z0-9._/-]+$ ]]
+          {
+            echo "repository=$repository"
+            echo "sha=$sha"
+            echo "version=$version"
+            echo "branch=$branch"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Fetch exact upstream revision
+        shell: bash
+        env:
+          UPSTREAM_REPOSITORY: ${{ steps.lock.outputs.repository }}
+          UPSTREAM_SHA: ${{ steps.lock.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout "https://github.com/${UPSTREAM_REPOSITORY}.git" "$RUNNER_TEMP/upstream"
+          git -C "$RUNNER_TEMP/upstream" fetch --depth=1 origin "$UPSTREAM_SHA"
+          git -C "$RUNNER_TEMP/upstream" checkout --detach "$UPSTREAM_SHA"
+          test "$(git -C "$RUNNER_TEMP/upstream" rev-parse HEAD)" = "$UPSTREAM_SHA"
+
+      - name: Materialize source without replacing upstream files
+        shell: bash
+        env:
+          TARGET_BRANCH: ${{ steps.lock.outputs.branch }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/fork-meta/.github/workflows"
+          cp FORK.md "$RUNNER_TEMP/fork-meta/FORK.md"
+          cp UPSTREAM.lock "$RUNNER_TEMP/fork-meta/UPSTREAM.lock"
+          cp .github/workflows/materialize-upstream-v3.yml "$RUNNER_TEMP/fork-meta/.github/workflows/materialize-upstream-v3.yml"
+
+          git checkout -B "$TARGET_BRANCH"
+          rsync -a --delete --exclude=.git/ "$RUNNER_TEMP/upstream/" "$GITHUB_WORKSPACE/"
+          cp "$RUNNER_TEMP/fork-meta/FORK.md" FORK.md
+          cp "$RUNNER_TEMP/fork-meta/UPSTREAM.lock" UPSTREAM.lock
+          mkdir -p .github/workflows
+          cp "$RUNNER_TEMP/fork-meta/.github/workflows/materialize-upstream-v3.yml" .github/workflows/materialize-upstream-v3.yml
+
+          git add -A
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: materialize upstream ${{ steps.lock.outputs.version }} (${{ steps.lock.outputs.sha }})"
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install launcher dependencies
+        working-directory: launcher
+        run: bun install --frozen-lockfile
+
+      - name: Run upstream verification
+        run: bun run verify
+
+      - name: Publish verified baseline branch
+        shell: bash
+        env:
+          TARGET_BRANCH: ${{ steps.lock.outputs.branch }}
+        run: git push --force-with-lease origin "$TARGET_BRANCH"
