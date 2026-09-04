@@ -1,0 +1,119 @@
+name: Materialize pinned upstream
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - UPSTREAM.lock
+      - .github/workflows/materialize-upstream.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: materialize-pinned-upstream
+  cancel-in-progress: false
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out fork control branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Read and validate upstream lock
+        id: lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_repo="$(awk -F= '$1 == "repository" { print $2 }' UPSTREAM.lock)"
+          source_sha="$(awk -F= '$1 == "sha" { print $2 }' UPSTREAM.lock)"
+          source_version="$(awk -F= '$1 == "version" { print $2 }' UPSTREAM.lock)"
+          target_branch="$(awk -F= '$1 == "branch" { print $2 }' UPSTREAM.lock)"
+
+          [[ "$source_repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$source_version" =~ ^[A-Za-z0-9._-]+$ ]]
+          [[ "$target_branch" =~ ^codex/[A-Za-z0-9._/-]+$ ]]
+          [[ "$target_branch" != *..* ]]
+          [[ "$target_branch" != *//* ]]
+          [[ "$target_branch" != */ ]]
+
+          echo "repository=$source_repo" >> "$GITHUB_OUTPUT"
+          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "version=$source_version" >> "$GITHUB_OUTPUT"
+          echo "branch=$target_branch" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch exact upstream revision
+        shell: bash
+        env:
+          SOURCE_REPOSITORY: ${{ steps.lock.outputs.repository }}
+          SOURCE_SHA: ${{ steps.lock.outputs.sha }}
+        run: |
+          set -euo pipefail
+          source_dir="$RUNNER_TEMP/upstream-source"
+          git clone --filter=blob:none "https://github.com/${SOURCE_REPOSITORY}.git" "$source_dir"
+          git -C "$source_dir" checkout --detach "$SOURCE_SHA"
+          test "$(git -C "$source_dir" rev-parse HEAD)" = "$SOURCE_SHA"
+
+      - name: Materialize source on a review branch
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.lock.outputs.sha }}
+          SOURCE_VERSION: ${{ steps.lock.outputs.version }}
+          TARGET_BRANCH: ${{ steps.lock.outputs.branch }}
+        run: |
+          set -euo pipefail
+          source_dir="$RUNNER_TEMP/upstream-source"
+          fork_meta="$RUNNER_TEMP/fork-meta"
+          mkdir -p "$fork_meta/.github/workflows"
+          cp README.md "$fork_meta/README.md"
+          cp FORK.md "$fork_meta/FORK.md"
+          cp UPSTREAM.lock "$fork_meta/UPSTREAM.lock"
+          cp .github/workflows/materialize-upstream.yml "$fork_meta/.github/workflows/materialize-upstream.yml"
+
+          rsync -a --delete --exclude='.git/' "$source_dir/" "$GITHUB_WORKSPACE/"
+          mv README.md UPSTREAM_README.md
+          cp "$fork_meta/README.md" README.md
+          cp "$fork_meta/FORK.md" FORK.md
+          cp "$fork_meta/UPSTREAM.lock" UPSTREAM.lock
+          cp "$fork_meta/.github/workflows/materialize-upstream.yml" .github/workflows/materialize-upstream.yml
+
+          git checkout -B "$TARGET_BRANCH"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: materialize upstream ${SOURCE_VERSION} (${SOURCE_SHA})"
+
+      - name: Install pinned dependencies
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Verify imported source
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun install --frozen-lockfile
+          (
+            cd launcher
+            bun install --frozen-lockfile
+          )
+          bun run typecheck
+          bun run test
+          bun run launcher:typecheck
+          bun run launcher:test
+          bun run launcher:build
+
+      - name: Publish review branch
+        shell: bash
+        env:
+          TARGET_BRANCH: ${{ steps.lock.outputs.branch }}
+        run: |
+          set -euo pipefail
+          git fetch origin "$TARGET_BRANCH" || true
+          git push --force-with-lease origin "HEAD:refs/heads/${TARGET_BRANCH}"
