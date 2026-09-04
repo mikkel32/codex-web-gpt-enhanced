@@ -88,8 +88,13 @@ The launcher keeps ChatGPT login, identity-provider navigation, and model turns 
 Electron partition. Allowed login popups are adopted into an in-launcher `WebContentsView` that
 shares that partition; unrelated external links remain outside it. A visible composer alone is not
 authentication evidence: the launcher also requires a valid server session and an exact Temporary
-Chat URL before setup can continue. No cookies, local storage, or browser profile are copied from an
-external browser.
+Chat URL before setup can continue. The optional browser connector transfers only ChatGPT and
+auth.openai.com cookies through an explicitly initiated, short-lived loopback connection. It uses
+the browser's extension cookies API; it does not inspect browser databases, passwords, other sites,
+or history. The native receiver validates cookie attributes, binds the transfer to an extension
+origin and a single-use code, and verifies the resulting Maria session before reporting success.
+Status polling may omit Origin on Chromium, but still requires the same private code after an
+extension origin has been bound by submission. Session data is never returned by the status API.
 
 ### Cross-turn data leakage
 

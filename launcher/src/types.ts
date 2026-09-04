@@ -117,9 +117,18 @@ export interface LauncherSnapshot {
 }
 
 export interface LauncherApi {
+  copyNativeCodexCommand(): Promise<boolean>;
+  signInBrowsers(): Promise<Array<{ id: "chrome" | "edge" | "safari"; name: string; available: boolean }>>;
+  beginBrowserSignIn(browser: string): Promise<{ phase: string; code: string; expiresAt: number }>;
+  browserSignInStatus(): Promise<{ phase: string; browser?: string; message?: string }>;
+  cancelBrowserSignIn(): Promise<unknown>;
+  openSignInBrowser(browser: string, action: "setup" | "connect"): Promise<boolean>;
+  copyBrowserConnectionCode(): Promise<boolean>;
+  showBrowserConnector(): Promise<boolean>;
+  enableSafariConnector(): Promise<boolean>;
   snapshot(): Promise<LauncherSnapshot>;
   setLanguage(language: Language): Promise<LauncherState>;
-  connectionStatus(): Promise<{ nativeAvailable: boolean; browserConnected: boolean; activeBrowserTurns: number }>;
+  connectionStatus(): Promise<{ nativeAvailable: boolean; browserConnected: boolean; activeBrowserTurns: number; recoveryAvailable?: boolean }>;
   completeOnboarding(language: Language, browserInteractionMode: BrowserInteractionMode): Promise<LauncherState>;
   openExternal(url: string): Promise<boolean>;
   setBrowserBounds(bounds: { x: number; y: number; width: number; height: number }): Promise<boolean>;

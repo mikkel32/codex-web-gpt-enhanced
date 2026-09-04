@@ -1,0 +1,14 @@
+:root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #11121b; color: #eeeaf5; }
+body { margin: 0; min-width: 360px; }
+main { max-width: 420px; padding: 28px; margin: 0 auto; }
+.mark { display: grid; place-items: center; width: 42px; height: 42px; color: #241735; background: #d3baff; border-radius: 12px; font-size: 27px; font-weight: 600; }
+.eyebrow { font-size: 10px; letter-spacing: .15em; color: #bda4ed; margin-top: 22px; }
+h1 { font-size: 28px; letter-spacing: -.04em; line-height: 1.15; font-weight: 600; }
+p { font-size: 13px; line-height: 1.7; color: #aeb3c2; }
+label { display: block; margin-top: 24px; font-size: 12px; color: #d6d2e1; }
+input { box-sizing: border-box; width: 100%; padding: 12px; margin: 8px 0 14px; border: 1px solid #ffffff25; border-radius: 9px; background: #ffffff05; color: #e2d1ff; font: 12px ui-monospace, monospace; }
+button { width: 100%; border: 0; border-radius: 9px; padding: 13px; background: #d3baff; color: #22152f; font-weight: 600; cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
+input:focus-visible, button:focus-visible { outline: 2px solid #d3baff; outline-offset: 3px; }
+.help, footer { font-size: 11px; color: #949bab; line-height: 1.6; }
+footer { border-top: 1px solid #ffffff12; padding-top: 18px; margin-top: 24px; }

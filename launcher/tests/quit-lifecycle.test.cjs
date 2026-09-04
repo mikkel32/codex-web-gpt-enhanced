@@ -18,6 +18,7 @@ function fixture({ busyWeb = false, setup = () => null, now = Date.now } = {}) {
     },
     browserHost: { currentOperation: () => null, persistSession: async () => events.push("persist"), destroy: () => events.push("destroy") },
     browserControl: { close: async () => events.push("close") },
+    browserSignIn: null,
     mainWindow: { hide: () => events.push("hide") },
     app: { quit: () => events.push("quit") },
     stopCatalogVerificationMonitor() {}, showMainWindow() {},

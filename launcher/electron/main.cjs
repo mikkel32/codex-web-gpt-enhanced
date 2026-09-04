@@ -1,6 +1,11 @@
 const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
+const os = require("node:os");
+const { NativeRecovery } = require("./native-recovery.cjs");
+const { BrowserSessionConnect } = require("./browser-session-connect.cjs");
+const { signInBrowsers, openSignInBrowser, CONNECTOR_ID } = require("./signin-browsers.cjs");
+const { prepareDevBrowserConnector } = require("./dev-browser-connector.cjs");
 const { spawnSync } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 const {
@@ -28,6 +33,7 @@ const { RuntimeHost } = require("./runtime.cjs");
 const { ensurePackagedRuntime, waitForPackagedRuntimeSource } = require("./runtime-install.cjs");
 const { RuntimeSupervisor } = require("./runtime-supervisor.cjs");
 const { DEVELOPMENT_PROFILE, resolveLauncherProfile } = require("./profile.cjs");
+const { isolatedDevEnvironment } = require("./dev-environment.cjs");
 const { runtimeBundlePaths } = require("./runtime-command.cjs");
 const { createUpdateController } = require("./update.cjs");
 const {
@@ -43,6 +49,12 @@ const {
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const SOURCE_ROOT = path.resolve(__dirname, "../..");
+if (!app.isPackaged) {
+  const isolated = isolatedDevEnvironment(SOURCE_ROOT);
+  for (const key of Object.keys(process.env)) if (!(key in isolated)) delete process.env[key];
+  Object.assign(process.env, isolated);
+  if (!process.argv.includes("--dev-profile")) process.argv.push("--dev-profile");
+}
 const LAUNCHER_PROFILE = resolveLauncherProfile({ appData: app.getPath("appData") });
 const IS_DEV_PROFILE = LAUNCHER_PROFILE.kind === DEVELOPMENT_PROFILE;
 const CORE_HOME = LAUNCHER_PROFILE.coreHome;
@@ -90,6 +102,13 @@ let lastOperation = null;
 let catalogVerificationTimer = null;
 let catalogVerificationInFlight = false;
 let updateController = null;
+let browserSignIn = null;
+let browserConnectionCode = null;
+function signInConnectorBundle() {
+  return app.isPackaged
+    ? { folder: path.join(process.resourcesPath, "browser-connector"), id: CONNECTOR_ID }
+    : prepareDevBrowserConnector(path.join(SOURCE_ROOT, "browser-connector", "extension"), CORE_HOME);
+}
 
 function findFreePort() {
   return new Promise((resolve, reject) => {
@@ -452,13 +471,50 @@ function registerIpc({ logger, stateStore }) {
     return state;
   });
   handle("launcher:connection-status", async () => {
+    if (IS_DEV_PROFILE) return { nativeAvailable: false, browserConnected: browserHost?.snapshot().authenticated === true, activeBrowserTurns: 0, recoveryAvailable: false };
     const config = runtimeSupervisor?.readConfig();
     const health = config ? await runtimeSupervisor.proxyHealthPayload(config) : null;
     return {
       nativeAvailable: health?.service === "codex-chatgpt-web" && health?.accepting_turns === true,
       browserConnected: health?.browser_connected !== false && Boolean(health),
       activeBrowserTurns: health?.active_browser_turns ?? 0,
+      recoveryAvailable: runtimeSupervisor?.nativeRecovery?.status().running === true,
     };
+  });
+  handle("launcher:copy-native-command", () => {
+    require("electron").clipboard.writeText('codex -c model_provider=openai -c openai_base_url=https://chatgpt.com/backend-api/codex');
+    return true;
+  });
+  handle("launcher:signin-browsers", () => signInBrowsers().map(({ id, name, executable }) => ({ id, name, available: Boolean(executable) })));
+  handle("launcher:signin-begin", async (_event, browser) => {
+    const selected = signInBrowsers().find(candidate => candidate.id === browser && candidate.executable);
+    if (!selected) throw new Error("Choose an installed browser");
+    if (browserHost.browserInteractionMode() === "manual") throw new Error("Connect the browser in Automatic mode, then switch back to Manual in Settings");
+    await browserHost.hide();
+    browserSignIn ??= new BrowserSessionConnect({ importSession: transfer => browserHost.importBrowserSession(transfer) });
+    const flow = await browserSignIn.begin(browser);
+    browserConnectionCode = flow.code;
+    return flow;
+  });
+  handle("launcher:signin-status", () => browserSignIn?.snapshot() ?? { phase: "idle" });
+  handle("launcher:signin-cancel", async () => { browserConnectionCode = null; return await browserSignIn?.cancel(); });
+  handle("launcher:signin-open", async (_event, browser, action) => {
+    const selected = signInBrowsers().find(candidate => candidate.id === browser);
+    return openSignInBrowser(selected, action, browserConnectionCode, signInConnectorBundle().id);
+  });
+  handle("launcher:signin-copy-code", () => {
+    if (!browserConnectionCode || browserSignIn?.snapshot().phase !== "waiting") throw new Error("Create a fresh connection code first");
+    require("electron").clipboard.writeText(browserConnectionCode); return true;
+  });
+  handle("launcher:signin-connector-files", async () => {
+    const folder = signInConnectorBundle().folder;
+    const error = await shell.openPath(folder); if (error) throw new Error(error); return true;
+  });
+  handle("launcher:signin-safari", async () => {
+    if (process.platform !== "darwin") throw new Error("Safari sign-in is available on macOS");
+    const companion = app.isPackaged ? path.join(process.resourcesPath, "Maria Browser Sign-in.app") : "/Applications/Maria WebGPT.app/Contents/Resources/Maria Browser Sign-in.app";
+    if (!fs.existsSync(companion)) throw new Error("Install Maria's Safari companion first. Development uses the installed connector without replacing its source.");
+    const error = await shell.openPath(companion); if (error) throw new Error(error); return true;
   });
   handle("launcher:complete-onboarding", (_event, language, rawInteractionMode) => {
     const current = stateStore.read();
@@ -891,6 +947,7 @@ async function requestQuit() {
     await browserHost?.persistSession();
     browserHost?.destroy();
     await browserControl?.close();
+    await browserSignIn?.close();
     exitCommitted = true;
     app.quit();
     return { ok: true };
@@ -993,6 +1050,10 @@ async function start() {
     browserDescriptorPath: BROWSER_DESCRIPTOR_PATH,
     launcherProfile: LAUNCHER_PROFILE.kind,
     publishOperation,
+    nativeRecovery: !IS_DEV_PROFILE && app.isPackaged
+      && path.resolve(CORE_HOME) === path.join(os.homedir(), ".codex-chatgpt-web")
+      && path.resolve(LAUNCHER_PROFILE.codexHome) === path.join(os.homedir(), ".codex")
+      ? new NativeRecovery({ coreHome: CORE_HOME, logger }) : null,
   });
   runtimeHost = new RuntimeHost({
     app,

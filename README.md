@@ -37,6 +37,49 @@ send it, and choose **Sent** in Maria. You have five minutes to prepare the prom
 and a separate 90 seconds for the connector to start. Attach images manually.
 Existing connector names and model IDs stay compatible with your saved setup.
 
+## Reuse an existing browser login
+
+Open Browser in Maria and choose **Use an existing browser login**. Select Chrome,
+Microsoft Edge, or Safari. Enable the bundled Maria Browser Sign-in connector once
+in that browser, then connect the profile where ChatGPT is already signed in.
+
+- Chrome and Edge: open the extensions page, enable Developer mode, choose Load unpacked, and select the folder shown by Maria. Then use Open connector.
+- Safari: open the bundled Safari companion and enable its extension in Safari settings. Local unsigned builds may also require Safari's Develop > Allow Unsigned Extensions setting.
+- The connection code expires after five minutes and accepts one session transfer.
+- Maria verifies the login inside its own browser before reporting success. Passwords, other sites, and browsing history are not imported.
+- Keep the source browser open. The handoff does not close or restart it.
+- If the shared session expires or is revoked, reconnect from the browser. Native Codex sign-in stays separate.
+- Connect in Automatic mode to verify sign-in; you can switch to Manual afterward.
+
+## Keep developing when Maria is stopped
+
+The native connection has an independent recovery guardian. If the transport exits
+while Maria is closed, the guardian starts a native-only replacement. It never
+resends a ChatGPT prompt. On macOS, the installed production app registers recovery
+at login. On other platforms, Launch at login starts Maria and its guardian again.
+
+For a native Codex session that bypasses Maria completely, use this from your project terminal:
+
+```bash
+codex -c model_provider=openai -c openai_base_url=https://chatgpt.com/backend-api/codex
+```
+
+The Overview's **Copy native command** button copies this command. In this source
+repository, `bun run codex:native` provides the same direct route and ignores an
+inherited OPENAI_BASE_URL override.
+
+## Safe development environments
+
+`bun run app` and `bun start` use an isolated DEV profile. Each checkout gets its own
+state directory and private Vite port. Production routing, browser-profile paths,
+and control credentials are removed from the development process environment.
+`bun run dev:chat` uses that same checkout profile.
+
+Source CLI commands that could change production Maria or Codex data require an
+explicit `--allow-production` flag. Standard development commands never need it.
+Use the installed packaged application for production; avoid pointing production
+services at files you are actively editing.
+
 ## Closing Maria without losing Codex
 
 Closing the window keeps your work running. When you quit with a ChatGPT turn
@@ -103,6 +146,8 @@ Packaging produces an installer for the current operating system. macOS builds
 include a signature check and a launch test. Windows and Linux builds run in CI.
 
 ## Release notes
+
+5.2.0 adds existing-browser sign-in, independent native recovery, and isolated checkout development.
 
 5.1.0 introduces Maria's own interface and in-app handbook, removes promotional
 onboarding, and keeps the native connection alive independently of the window.

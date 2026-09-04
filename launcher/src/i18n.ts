@@ -149,7 +149,7 @@ const en = {
   settingsTitle: "Launcher settings",
   general: "General",
   launchAtLogin: "Launch at login",
-  launchAtLoginBody: "Keep the local Responses route available before Codex opens.",
+  launchAtLoginBody: "Start Maria’s ChatGPT browser at login. Native Codex recovery runs separately.",
   keepRunningOnClose: "Keep server running when window closes",
   keepRunningOnCloseBody: "Hide the launcher in the system tray so native and ChatGPT Web models remain available.",
   showDuringTurns: "Show browser during turns",

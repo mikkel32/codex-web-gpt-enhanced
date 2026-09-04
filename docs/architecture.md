@@ -95,8 +95,10 @@ Sign-in uses that same persistent Electron partition. ChatGPT login pages and al
 provider popups are adopted into a temporary `WebContentsView` inside the launcher instead of being
 redirected to another browser. After the provider returns to ChatGPT, the launcher requires both a
 server-authenticated session and the Temporary Chat composer in the primary owned view, then closes
-the temporary auth view. There is no browser-profile handoff, cookie import, CDP login port, or
-temporary session-transfer directory.
+the temporary auth view. Existing-browser sign-in uses the optional Maria Browser Sign-in extension
+and a single-use local pairing channel. Only scoped authentication cookies are transferred; the
+source browser stays open and its profile is not copied. The imported session is verified before
+setup proceeds. Safari uses a separately sandboxed companion extension included in macOS builds.
 
 The current compiled Codex task context is inserted as one inline JSON envelope. Image bytes stay
 out of the JSON and are attached natively with stable references. The runtime does not create a

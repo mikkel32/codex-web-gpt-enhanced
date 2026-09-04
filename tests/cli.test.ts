@@ -141,7 +141,7 @@ test("passkey capture cannot be invoked outside the live Launcher control channe
       process.execPath,
       "--storage-state",
       join(root, "storage-state.json"),
-    ], { ...process.env });
+    ], { ...process.env, CODEX_CHATGPT_WEB_HOME: join(root, "app"), CODEX_HOME: join(root, "codex") });
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("Launcher-controlled passkey login requires a live launcher authorization");
     expect(existsSync(join(root, "storage-state.json"))).toBe(false);

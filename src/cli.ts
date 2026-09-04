@@ -16,6 +16,7 @@ import {
   activateCodexIntegration,
   deactivateCodexIntegration,
   inspectCodexIntegration,
+  getCodexHome,
   readCodexSubagentProtocol,
   setCodexSubagentProtocol,
   uninstallCodexIntegration,
@@ -24,6 +25,8 @@ import { formatDoctorReport, runDoctor } from "./doctor";
 import { runChatGptMcpMain } from "./adapters/chatgpt-web/mcp-main";
 import { runCommand } from "./process";
 import { startServer } from "./server";
+import { runNativeGuardian } from "./native-guardian";
+import { sourceCommandNeedsProductionOptIn } from "./source-scope";
 import { assertServiceIdle, cancelActiveTurns, getServiceStatus, installService, interruptActiveTurn, restartService, startService, stopService, uninstallService } from "./service";
 import { existingFullSetupCredentials, preflightSetup, setup, type SetupOptions } from "./setup";
 import { installRuntimeKeyBytes, managedRuntimeKeyPath, stopTunnel, tunnelStatus, waitForTunnelReady } from "./tunnel";
@@ -551,7 +554,13 @@ async function main(): Promise<void> {
     stdout.write(`${VERSION}\n`);
     return;
   }
+  const allowProduction = takeFlag(args, "--allow-production");
   const command = args.shift() ?? "help";
+  if (!allowProduction && sourceCommandNeedsProductionOptIn({
+    entry: typeof Bun !== "undefined" ? Bun.main : process.argv[1] ?? "", configHome: getConfigDir(), codexHome: getCodexHome(), command, action: args[0],
+  })) {
+    throw new Error("This source command would use production Maria data. Use `bun run app` for isolated development, `bun run codex:native` for direct Codex, or pass --allow-production for intentional production maintenance.");
+  }
   if (command === "dev" && home) {
     throw new Error("--home does not apply to DEV mode; use CODEX_WEB_GPT_DEV_HOME for an explicit isolated DEV profile");
   }
@@ -579,12 +588,14 @@ async function main(): Promise<void> {
       stdout.write("Playwright can launch the configured Chrome executable.\n");
     }
   } else if (command === "serve") {
+    const nativeOnly = takeFlag(args, "--native-only");
     assertNoArgs(args);
     const config = loadConfig();
-    const server = startServer(config);
+    const server = startServer(config, { nativeOnly });
     stdout.write(`codex-chatgpt-web ${VERSION} listening on http://${config.host}:${server.port}/v1 (${config.mode})\n`);
     await new Promise<void>(() => {});
-  } else if (command === "dev") await runDevCommand(args);
+  } else if (command === "guard") { assertNoArgs(args); await runNativeGuardian(); }
+  else if (command === "dev") await runDevCommand(args);
   else if (command === "mcp") await runChatGptMcpMain(args);
   else if (command === "service") await serviceCommand(args);
   else if (command === "hook") {

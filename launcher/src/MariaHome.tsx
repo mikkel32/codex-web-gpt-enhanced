@@ -9,10 +9,11 @@ export function MariaHome({ snapshot, navigate }: {
   snapshot: LauncherSnapshot;
   navigate: (surface: Surface) => void;
 }) {
-  const [status, setStatus] = useState<{ nativeAvailable: boolean; browserConnected: boolean; activeBrowserTurns: number } | null>(null);
+  const [status, setStatus] = useState<{ nativeAvailable: boolean; browserConnected: boolean; activeBrowserTurns: number; recoveryAvailable?: boolean } | null>(null);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const [nativeCommandCopied, setNativeCommandCopied] = useState(false);
   useEffect(() => {
     let alive = true;
     let pending = false;
@@ -31,6 +32,7 @@ export function MariaHome({ snapshot, navigate }: {
     return () => { alive = false; window.clearInterval(timer); };
   }, [refresh]);
   const nativeReady = !error && status?.nativeAvailable === true;
+  const development = snapshot.profile === "development";
   const manual = snapshot.state.browserInteractionMode === "manual";
   const steps = [
     { title: manual ? "Connect your manual harness" : "Sign in to ChatGPT", done: manual ? snapshot.state.mcpSetupComplete : snapshot.browser?.authenticated, surface: manual ? "mcp" : "browser", body: manual ? "Link the connector for manual turns." : "Use your own ChatGPT session." },
@@ -40,7 +42,7 @@ export function MariaHome({ snapshot, navigate }: {
   return (
     <div className="maria-page">
       <header className="maria-hero">
-        <div className="maria-eyebrow"><span className="maria-spark">✦</span> YOUR MODELS. YOUR WORKSPACE.</div>
+        <div className="maria-eyebrow"><span className="maria-spark">✦</span> {development ? "ISOLATED DEVELOPMENT WORKSPACE" : "YOUR MODELS. YOUR WORKSPACE."}</div>
         <h1>A little more <span>possibility.</span></h1>
         <p>Codex when you want it. ChatGPT when you need it.<br />One calm place to keep everything connected.</p>
         <div className="maria-hero-actions">
@@ -52,9 +54,9 @@ export function MariaHome({ snapshot, navigate }: {
 
       <section className="maria-connections" aria-label="Connections">
         <article className={`maria-connection ${nativeReady ? "is-ready" : ""}`}>
-          <div className="maria-card-top"><span className="maria-card-icon"><Icon name="activity" /></span><span className="maria-pill">{nativeReady ? "Connected" : checking && !status ? "Checking" : "Needs setup"}</span></div>
+          <div className="maria-card-top"><span className="maria-card-icon"><Icon name="activity" /></span><span className="maria-pill">{development ? "Separate production environment" : nativeReady ? status?.recoveryAvailable ? "Protected" : "Connected" : checking && !status ? "Checking" : "Needs setup"}</span></div>
           <h2>Native Codex</h2>
-          <p>Your regular models, reasoning controls, and tools. The connection stays available when Maria's window closes.</p>
+          <p>{development ? "This development window has its own browser, files, and port. Your installed Maria and native Codex settings stay separate." : status?.recoveryAvailable ? "Your native connection has independent recovery. It stays available after the window closes and restarts if the transport exits." : "Your regular models, reasoning controls, and tools. The connection stays available when Maria's window closes."}</p>
           <button className="text-button" onClick={() => nativeReady ? navigate("guide") : navigate("setup")}>{nativeReady ? "How it works" : "Set up connection"} <Icon name="chevron" /></button>
         </article>
         <article className="maria-connection maria-web-connection">
@@ -74,6 +76,7 @@ export function MariaHome({ snapshot, navigate }: {
       </section>
 
       <div className="maria-connection-note" role="status"><Icon name={error ? "alert" : "info"} /><span>{error ? "Connection status is unavailable. Check Activity for details." : status?.activeBrowserTurns ? `${status.activeBrowserTurns} ChatGPT turn${status.activeBrowserTurns === 1 ? "" : "s"} running. Closing the window keeps your work going.` : "Close the window, keep your flow. Native Codex stays connected in the background."}</span><button className="text-button" disabled={checking} onClick={() => setRefresh(n => n + 1)}>{checking ? "Checking…" : "Refresh"}</button></div>
+      <div className="maria-connection-note"><Icon name="setup" /><span>Developing Maria? Open a direct native Codex session from your project terminal, even if Maria is completely stopped.</span><button className="text-button" onClick={() => void window.codexWebLauncher!.copyNativeCodexCommand().then(() => setNativeCommandCopied(true)).catch(() => setNativeCommandCopied(false))}>{nativeCommandCopied ? "Copied" : "Copy native command"}</button></div>
       <footer className="maria-signature"><span>{MADE_WITH_LOVE}</span><span>v{snapshot.version}</span></footer>
     </div>
   );

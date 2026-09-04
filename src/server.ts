@@ -770,7 +770,7 @@ export async function compactRequest(
 
 export function startServer(
   config: AppConfig,
-  dependencies: { fetchUpstream?: NativeFetch; adapterFactory?: ChatGptWebAdapterFactory } = {},
+  dependencies: { fetchUpstream?: NativeFetch; adapterFactory?: ChatGptWebAdapterFactory; nativeOnly?: boolean } = {},
 ): ReturnType<typeof Bun.serve> {
   if (config.purpose === "dev-harness") {
     throw new Error("DEV harness configuration cannot start a Responses listener");
@@ -785,7 +785,8 @@ export function startServer(
     });
   }
   let draining = false;
-  let browserDetached = false;
+  let browserDetached = dependencies.nativeOnly === true;
+  turnBroker?.setExternalOwnersAccepted(!browserDetached);
   let shutdownPromise: Promise<void> | undefined;
   let successfulModelCatalogRequests = 0;
   let lastSuccessfulModelCatalogRequestAt: string | null = null;
@@ -835,6 +836,10 @@ export function startServer(
         turnBroker?.setExternalOwnersAccepted(false);
         chatGptTurnSessions.clear();
         return Response.json({ status: "ok", browser_connected: false, ...activity() });
+      }
+      if (req.method === "POST" && url.pathname === "/admin/owner-check") {
+        if (!controlAuthorized(req)) return new Response("Unauthorized", { status: 401 });
+        return Response.json({ status: "ok", pid: process.pid, version: VERSION });
       }
       if (req.method === "POST" && (url.pathname === "/admin/drain" || url.pathname === "/admin/resume")) {
         if (!controlAuthorized(req)) return new Response("Unauthorized", { status: 401 });

@@ -1,5 +1,6 @@
 const os = require("node:os");
 const path = require("node:path");
+const { assertDevStorageIsolated } = require("./dev-environment.cjs");
 
 const PRODUCTION_PROFILE = "production";
 const DEVELOPMENT_PROFILE = "development";
@@ -50,6 +51,7 @@ function resolveLauncherProfile({
   if (path.resolve(coreHome) === path.resolve(productionHome)) {
     throw new Error("DEV profile home must differ from the production codex-chatgpt-web home");
   }
+  assertDevStorageIsolated(coreHome, env, homeDir);
   return {
     kind: DEVELOPMENT_PROFILE,
     displayName: "Maria WebGPT DEV",

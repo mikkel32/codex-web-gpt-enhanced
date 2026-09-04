@@ -922,6 +922,7 @@ class RuntimeHost {
     const previousRuntime = this.runtimeConfigSnapshot();
     this.lifecycleOperation = name;
     try {
+      await this.supervisor.nativeRecovery?.stop();
       try {
         if (previousRuntime.owner === "external") this.supervisor.prepareExternalMigration();
         else await this.supervisor.stopForSetup();

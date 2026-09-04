@@ -9,6 +9,7 @@ import {
 } from "../launcher-browser-host";
 
 import { DEV_LAUNCHER_PROFILE } from "./constants";
+import { assertDevStorageIsolated } from "../../launcher/electron/dev-environment.cjs";
 
 export interface DevProfilePaths {
   home: string;
@@ -53,6 +54,7 @@ export function resolveDevProfilePaths({
   if (home === productionHome) {
     throw new Error("DEV profile home must differ from the production codex-chatgpt-web home");
   }
+  assertDevStorageIsolated(home, environment, homeDirectory);
   const launcherUserData = join(home, "launcher");
   return {
     home,

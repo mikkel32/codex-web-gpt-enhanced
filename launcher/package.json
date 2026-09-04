@@ -1,6 +1,6 @@
 {
   "name": "codex-web-gpt-launcher",
-  "version": "5.1.0",
+  "version": "5.2.0",
   "private": true,
   "description": "Desktop control center for Codex ChatGPT Web",
   "author": "Mikkel & Maria",
@@ -13,8 +13,8 @@
     "build:renderer": "vite build",
     "build": "bun run typecheck && bun run build:renderer",
     "build:runtime": "bun run scripts/prepare-runtime.cjs",
-    "package": "bun run build && bun run build:runtime && bun run scripts/package.cjs",
-    "package:mac": "bun run build && bun run build:runtime && bun run scripts/package.cjs --mac",
+    "package": "bun run build && bun run build:runtime && bun run scripts/prepare-browser-connector.cjs && bun run scripts/package.cjs",
+    "package:mac": "bun run build && bun run build:runtime && bun run scripts/prepare-browser-connector.cjs && bun run scripts/package.cjs --mac",
     "package:win": "bun run build && bun run build:runtime && bun run scripts/package.cjs --win",
     "package:linux": "bun run build && bun run build:runtime && bun run scripts/package.cjs --linux",
     "smoke:package": "bun run scripts/smoke-package.cjs",
@@ -59,17 +59,22 @@
       "package.json"
     ],
     "extraResources": [
+      { "from": "../browser-connector/extension", "to": "browser-connector" },
       {
         "from": "build/runtime",
         "to": "runtime"
       }
     ],
     "mac": {
+      "extraResources": [
+        { "from": "build/safari/Build/Products/Release/Maria Browser Sign-in.app", "to": "Maria Browser Sign-in.app" }
+      ],
       "category": "public.app-category.developer-tools",
       "icon": "assets/icon.png",
       "minimumSystemVersion": "13.0",
       "hardenedRuntime": true,
       "signIgnore": [
+        "Maria Browser Sign-in\\.app(?:[/\\\\]|$)",
         "[/\\\\]Contents[/\\\\]Resources[/\\\\]runtime[/\\\\]runtime[/\\\\]bun$"
       ],
       "target": ["dmg", "zip"]

@@ -83,6 +83,15 @@ try {
     fs.mkdirSync(stage);
     run("ditto", ["-x", "-k", archive, stage]);
     macAppBundle = path.join(stage, "Maria WebGPT.app");
+    const safariCompanion = path.join(macAppBundle, "Contents", "Resources", "Maria Browser Sign-in.app");
+    run("codesign", ["--verify", "--deep", "--strict", safariCompanion]);
+    const extensions = path.join(safariCompanion, "Contents", "PlugIns");
+    const extension = fs.readdirSync(extensions).find(name => name.endsWith(".appex"));
+    if (!extension) throw new Error("Packaged Safari connector extension is missing");
+    const signed = spawnSync("codesign", ["-d", "--entitlements", ":-", path.join(extensions, extension)], { encoding: "utf8" });
+    if (signed.status !== 0 || !/<key>com\.apple\.security\.app-sandbox<\/key>\s*<true\s*\/>/.test(String(signed.stdout))) {
+      throw new Error("Packaged Safari connector lost its sandbox entitlements");
+    }
     executable = path.join(macAppBundle, "Contents", "MacOS", "Maria WebGPT");
     command = executable;
     args = ["--launcher-smoke-test"];

@@ -12,6 +12,7 @@ const {
 } = require("./process-tree.cjs");
 const { runtimeInvocation } = require("./runtime-command.cjs");
 const { monitorBackgroundProcess } = require("./background-process.cjs");
+const { guardianStatus } = require("./native-recovery.cjs");
 
 const RESTART_WINDOW_MS = 60_000;
 const MAX_RESTARTS_PER_WINDOW = 5;
@@ -325,6 +326,7 @@ class RuntimeSupervisor {
     launcherProfile = "production",
     publishOperation,
     runtimeInvocationFactory = runtimeInvocation,
+    nativeRecovery = null,
   }) {
     this.app = app;
     this.logger = logger;
@@ -339,6 +341,7 @@ class RuntimeSupervisor {
     this.launcherProfile = launcherProfile;
     this.publishOperation = publishOperation;
     this.runtimeInvocationFactory = runtimeInvocationFactory;
+    this.nativeRecovery = nativeRecovery;
     this.configPath = path.join(coreHome, "config.json");
     this.statePath = path.join(coreHome, "runtime", "launcher-supervisor.json");
     this.daemon = null;
@@ -1174,6 +1177,24 @@ class RuntimeSupervisor {
     }
   }
 
+  async adoptBackgroundNative(config, { resume = true } = {}) {
+    if (this.daemon || this.launcherProfile === "development") return false;
+    const state = this.readState();
+    const guardian = guardianStatus(this.coreHome);
+    const guardianOwned = state?.manager === "native-guardian" && guardian.running && guardian.pid === state.ownerPid;
+    if (!state || runtimeOwnershipPredatesCurrentBoot(state) || !processRunning(state.daemonPid)
+      || (processRunning(state.ownerPid) && !guardianOwned)) return false;
+    const health = await this.proxyHealthPayload(config);
+    if (health?.background_capable !== true || !await this.proxyHealth(config, 2_000, state.daemonPid)) return false;
+    if (!resume && !guardianOwned) return false;
+    const control = await this.control(config, resume ? "resume" : "owner-check");
+    if (control.status !== "ok") throw new Error("Background native transport ownership could not be verified");
+    this.observeChild("daemon", monitorBackgroundProcess(state.daemonPid));
+    this.restartableChildren.add(this.daemon);
+    this.logger.info("runtime.background_adopted", { pid: state.daemonPid });
+    return true;
+  }
+
   async startConfigured() {
     let config;
     try {
@@ -1231,19 +1252,7 @@ class RuntimeSupervisor {
       return { status: "needs-setup", detail };
     }
     if (!this.daemon && !this.tunnel) {
-      const state = this.readState();
-      if (!tunnelOnly && state && !runtimeOwnershipPredatesCurrentBoot(state)
-        && !processRunning(state.ownerPid) && processRunning(state.daemonPid)) {
-        const health = await this.proxyHealthPayload(config);
-        if (health?.background_capable === true
-          && await this.proxyHealth(config, 2_000, state.daemonPid, true)) {
-          const resumed = await this.control(config, "resume");
-          if (resumed.status !== "ok") throw new Error("Background native transport could not be resumed");
-          this.observeChild("daemon", monitorBackgroundProcess(state.daemonPid));
-          this.restartableChildren.add(this.daemon);
-          this.logger.info("runtime.background_adopted", { pid: state.daemonPid });
-        }
-      }
+      if (!tunnelOnly) await this.adoptBackgroundNative(config);
     }
     if (!this.daemon && !this.tunnel) {
       const healthyRuntime = tunnelOnly ? false : await this.proxyHealth(config);
@@ -1280,6 +1289,10 @@ class RuntimeSupervisor {
       this.restartHistory.daemon = [];
       this.restartHistory.tunnel = [];
       this.writeState("ready");
+      if (this.nativeRecovery) {
+        try { await this.nativeRecovery.ensure(config); }
+        catch (error) { this.logger.warn("native_recovery.unavailable", { message: errorMessage(error) }); }
+      }
       this.publishOperation?.({
         name: "runtime-start",
         status: "completed",
@@ -1950,7 +1963,9 @@ class RuntimeSupervisor {
         this.logger.warn("runtime.start_failed_before_stop", { message: errorMessage(error) });
       }
     }
+    this.nativeRecovery?.pause();
     const config = this.readConfig();
+    if (config && !this.daemon && this.nativeRecovery) await this.adoptBackgroundNative(config, { resume: false });
     this.stopping = true;
     this.stopTunnelMonitor();
     for (const name of ["daemon", "tunnel"]) {

@@ -12,6 +12,7 @@ import { createPortal } from "react-dom";
 import { copyFor, type Copy } from "./i18n";
 import { Icon, type IconName } from "./icons";
 import { MariaHome, MariaGuide, MADE_WITH_LOVE } from "./MariaHome";
+import { BrowserSignIn } from "./BrowserSignIn";
 import type {
   BrowserInteractionMode,
   BrowserState,
@@ -791,9 +792,11 @@ function BrowserSurface({
   setError: (error: string | null) => void;
 }) {
   const [passkeyContinuationRequested, setPasskeyContinuationRequested] = useState(false);
+  const [useBrowserLogin, setUseBrowserLogin] = useState(false);
   const visible = browser?.visible === true;
   const manualInteraction = interactionMode === "manual";
-  const passkeyAvailable = !manualInteraction
+  const browserLoginAvailable = !manualInteraction && browser?.authenticated !== true;
+  const passkeyAvailable = browserLoginAvailable
     && platform === "darwin"
     && browser?.authenticated !== true;
   const selectedManualTab = browser?.tabs.find(tab => tab.active && tab.interactionMode === "manual");
@@ -938,6 +941,11 @@ function BrowserSurface({
           </button>
           <IconButton icon="plus" label={copy.zoomIn} onClick={() => void zoom("in")} />
         </div>
+        {browserLoginAvailable ? (
+          <button className="toolbar-text-button" disabled={operation?.status === "running"} onClick={() => {
+            void api!.hideBrowser().then(() => setUseBrowserLogin(true)).catch(cause => setError(messageOf(cause)));
+          }} type="button">Use browser login</button>
+        ) : null}
         {passkeyAvailable ? (
           <button
             className="toolbar-text-button"
@@ -968,6 +976,7 @@ function BrowserSurface({
       <div className="browser-viewport" ref={browserSlotRef}>
         {!visible ? (
           <div className="browser-empty">
+            {useBrowserLogin && !manualInteraction ? <BrowserSignIn onBack={() => setUseBrowserLogin(false)} setError={setError} /> : <>
             <BrandMark />
             <h1>{manualInteraction
               ? copy.browserReady
@@ -978,6 +987,9 @@ function BrowserSurface({
               ? copy.noActiveTaskBody
               : passkeyWaiting ? copy.passkeyContinueBody : copy.stepAccountBody}</p>
             <div className="browser-empty-actions">
+              {!manualInteraction && browser?.authenticated !== true ? (
+                <PrimaryButton disabled={passkeyWaiting} onClick={() => setUseBrowserLogin(true)}>Use an existing browser login</PrimaryButton>
+              ) : null}
               <PrimaryButton disabled={passkeyWaiting} onClick={() => void toggle()}>
                 {manualInteraction || browser?.authenticated ? copy.openChatgpt : copy.signIn}
               </PrimaryButton>
@@ -992,6 +1004,7 @@ function BrowserSurface({
                 </SecondaryButton>
               ) : null}
             </div>
+            </>}
           </div>
         ) : (
           <div className="browser-underlay" aria-hidden="true">

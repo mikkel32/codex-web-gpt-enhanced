@@ -2822,3 +2822,25 @@ code {
 .maria-page .button-primary:hover { background: #e1ccff; }
 .maria-page .button-secondary { background: #ffffff05; border: 1px solid #ffffff16; color: #d3d4e2; }
 .maria-page .button-secondary:hover { background: #ffffff0d; }
+.browser-signin-card { width: min(100%, 640px); text-align: left; padding: 26px; border: 1px solid #c5aaff20; border-radius: 20px; background: linear-gradient(140deg,#1c1927,#12151f); box-sizing: border-box; max-height: 100%; overflow: auto; }
+.browser-empty .browser-signin-card h1 { font-size: 28px; letter-spacing: -.045em; margin-top: 18px; }
+.browser-empty .browser-signin-card p { max-width: none; font-size: 12px; line-height: 1.8; color: #a8aec0; }
+.signin-browser-choices { display: grid; gap: 10px; margin: 24px 0; }
+.signin-browser-choice { display: flex; gap: 14px; align-items: center; width: 100%; padding: 15px; background: #ffffff04; border: 1px solid #ffffff12; border-radius: 12px; text-align: left; color: #eeeaf5; cursor: pointer; }
+.signin-browser-choice:hover { border-color: #c4a4ff70; background: #ffffff07; }
+.signin-browser-choice:disabled { opacity: .4; cursor: default; }
+.signin-browser-choice strong, .signin-browser-choice small { display: block; }
+.signin-browser-choice small { font-size: 11px; color: #959daf; margin-top: 5px; }
+.signin-browser-choice > svg { margin-left: auto; width: 17px; height: 17px; }
+.signin-browser-letter { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; font-size: 22px; background: #bca5f320; color: #d3baff; }
+.signin-browser-letter.is-chrome { background: #72a17c25; color: #b9dd9d; }
+.signin-browser-letter.is-edge { background: #419fb225; color: #90d7ed; }
+.signin-browser-letter.is-safari { background: #718bdd25; color: #bacfff; }
+.signin-steps > div { display: flex; align-items: flex-start; gap: 12px; margin-top: 22px; }
+.signin-steps > div > span { flex-shrink: 0; display: grid; place-items: center; border: 1px solid #c5aaff30; border-radius: 50%; width: 25px; height: 25px; color: #cdb8f6; font-size: 12px; }
+.signin-steps strong { font-size: 13px; }
+.signin-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.signin-actions svg { width: 14px; height: 14px; }
+.signin-footer { display: flex; flex-wrap: wrap; justify-content: space-between; margin-top: 24px; gap: 10px; }
+.signin-progress { display: flex; align-items: center; gap: 12px; padding: 22px 0; font-size: 13px; line-height: 1.8; color: #cfc1e8; }
+.signin-progress svg { width: 20px; height: 20px; flex-shrink: 0; }

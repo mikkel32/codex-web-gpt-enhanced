@@ -26,10 +26,8 @@ test("launcher publishes native packages for all supported desktop operating sys
   assert.equal(manifest.build.appId, "dev.codexwebgpt.launcher");
   assert.equal(manifest.build.artifactName, "codex-web-gpt-${version}-${os}-${arch}.${ext}");
   assert.deepEqual(manifest.build.mac.target, ["dmg", "zip"]);
-  assert.deepEqual(
-    manifest.build.mac.signIgnore,
-    ["[/\\\\]Contents[/\\\\]Resources[/\\\\]runtime[/\\\\]runtime[/\\\\]bun$"],
-  );
+  assert.ok(manifest.build.mac.signIgnore.includes("[/\\\\]Contents[/\\\\]Resources[/\\\\]runtime[/\\\\]runtime[/\\\\]bun$"));
+  assert.ok(manifest.build.mac.signIgnore.some(pattern => new RegExp(pattern).test("/Contents/Resources/Maria Browser Sign-in.app/Contents/PlugIns/Extension.appex")));
   assert.deepEqual(manifest.build.win.target, ["nsis"]);
   assert.equal(manifest.build.win.icon, "assets/icon.ico");
   assert.deepEqual(manifest.build.linux.target, ["AppImage"]);

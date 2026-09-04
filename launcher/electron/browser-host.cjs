@@ -2399,6 +2399,20 @@ class BrowserHost {
     return tracked;
   }
 
+  importBrowserSession(transfer) {
+    requireAutomaticBrowserInspection(this, "Browser sign-in connection");
+    if (this.loginOperation) throw new Error("Another sign-in is already in progress");
+    const operation = (async () => {
+      if (this.sessionRefreshOperation) {
+        try { await this.sessionRefreshOperation; } catch { /* Explicit connection repairs an expired session. */ }
+      }
+      return this.withManualOperation("Browser sign-in connection", () => this.installPasskeyLogin(transfer));
+    })();
+    const tracked = operation.finally(() => { if (this.loginOperation === tracked) this.loginOperation = null; });
+    this.loginOperation = tracked;
+    return tracked;
+  }
+
   async clearOwnedSessionForPasskey() {
     if (!(this.turnTabs instanceof Map)) throw new Error("Owned ChatGPT tab registry is unavailable");
     if (this.authView) this.closeAuthView(this.authView, true, false);
@@ -2457,10 +2471,10 @@ class BrowserHost {
         })()`, true);
         await contents.loadURL(TEMPORARY_CHAT_URL);
       }
-      result = await this.waitForAuthenticated(60_000);
-      await this.runSessionInspection(false);
       this.activateHomeSurface();
       this.show();
+      result = await this.waitForAuthenticated(60_000);
+      await this.runSessionInspection(false);
       this.logger.info("browser.passkey_login_imported");
     } catch (caught) {
       error = caught;

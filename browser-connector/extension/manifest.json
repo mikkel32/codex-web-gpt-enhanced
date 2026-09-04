@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Maria Browser Sign-in",
+  "version": "1.0.0",
+  "description": "Connect your existing ChatGPT sign-in to Maria WebGPT on this device.",
+  "permissions": [
+    "cookies"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://auth.openai.com/*",
+    "http://127.0.0.1/*"
+  ],
+  "action": {
+    "default_title": "Connect to Maria",
+    "default_popup": "connect.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src http://127.0.0.1:* https://chatgpt.com"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApmeTw4NE13uP7Q3rnZvs7a5uxKshrzd7Fg9QP2Y5gQ/3rzUFRWLeoUw5rmwQNMiylh+qiIbGn6PHgwdbMosSnXXqTAIqDdqIlujgSfeZPVU0qLm3u7tYnTz77ul6Zu080m+xfei+0Eg6uT+/wvuafLCRVxYMd/AX0RTEXzwpTQtx3J0E3HG979tVm4DNPNt3/u2f1pzsf783+oNGqdz66E6OtDlFq7+rwc7wQbcEGt40TFIR5jL6HydAtbI1/fzHxZIOV1l2ALBDf6TOUimzx4LbGp/hZ4va23f2nizopZalW8nW1uFACkvegYO2bgB/PWZ+zUCDNJpcFNcGcWHUaQIDAQAB",
+  "icons": {
+    "128": "icon.png"
+  }
+}

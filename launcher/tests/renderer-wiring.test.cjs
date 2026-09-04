@@ -118,7 +118,8 @@ test("DEV launcher exposes its profile and supervises only its Full-mode MCP run
 test("macOS passkey sign-in is additive to the unchanged embedded login action", () => {
   assert.match(appSource, /onAction=\{openLogin\}/);
   assert.match(appSource, /<BrowserSurface[\s\S]*?operation=\{operation\}[\s\S]*?platform=\{snapshot\.platform\}/);
-  assert.match(appSource, /const passkeyAvailable = !manualInteraction[\s\S]*?platform === "darwin"[\s\S]*?browser\?\.authenticated !== true/);
+  assert.match(appSource, /const browserLoginAvailable = !manualInteraction && browser\?\.authenticated !== true/);
+  assert.match(appSource, /const passkeyAvailable = browserLoginAvailable[\s\S]*?platform === "darwin"/);
   assert.match(appSource, /\{passkeyAvailable \? \([\s\S]*?className="toolbar-text-button"[\s\S]*?copy\.passkeySignIn/);
   assert.match(appSource, /className="browser-empty-actions"[\s\S]*?copy\.passkeySignIn/);
   assert.match(appSource, /passkeyWaiting \? continuePasskeyLogin : openPasskeyLogin/);
