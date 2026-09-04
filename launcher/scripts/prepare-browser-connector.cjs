@@ -10,6 +10,8 @@ if (process.platform !== "darwin") process.exit(0);
 
 const project = path.join(launcherRoot, "build", "safari-project");
 const output = path.join(launcherRoot, "build", "safari");
+const minimumMac = JSON.parse(fs.readFileSync(path.join(launcherRoot, "package.json"), "utf8")).build.mac.minimumSystemVersion;
+if (!/^\d+\.\d+(?:\.\d+)?$/.test(minimumMac)) throw new Error("Maria's minimum macOS version is invalid");
 function run(command, args) {
   const result = spawnSync(command, args, { stdio: "inherit", timeout: 180000 });
   if (result.error) throw result.error;
@@ -27,5 +29,6 @@ fs.writeFileSync(projectFile, fs.readFileSync(projectFile, "utf8").replace(
 ));
 run("xcodebuild", ["-project", path.join(project, "Maria Browser Sign-in", "Maria Browser Sign-in.xcodeproj"),
   "-scheme", "Maria Browser Sign-in", "-configuration", "Release", "-derivedDataPath", output,
+  `MACOSX_DEPLOYMENT_TARGET=${minimumMac}`,
   "CODE_SIGN_IDENTITY=-", "CODE_SIGNING_ALLOWED=YES", "CODE_SIGNING_REQUIRED=YES", "REGISTER_APP_WITH_LAUNCH_SERVICES=NO", "build"]);
 run("codesign", ["--verify", "--deep", "--strict", path.join(output, "Build", "Products", "Release", "Maria Browser Sign-in.app")]);

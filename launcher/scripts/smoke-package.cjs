@@ -85,6 +85,14 @@ try {
     macAppBundle = path.join(stage, "Maria WebGPT.app");
     const safariCompanion = path.join(macAppBundle, "Contents", "Resources", "Maria Browser Sign-in.app");
     run("codesign", ["--verify", "--deep", "--strict", safariCompanion]);
+    const minimum = spawnSync("/usr/libexec/PlistBuddy", ["-c", "Print LSMinimumSystemVersion", path.join(safariCompanion, "Contents", "Info.plist")], { encoding: "utf8" });
+    const required = minimum.stdout.trim().split(".").map(Number);
+    const supported = launcherManifest.build.mac.minimumSystemVersion.split(".").map(Number);
+    const firstDifference = required.findIndex((value, index) => value !== (supported[index] ?? 0));
+    if (minimum.status !== 0 || !required.length || required.some(value => !Number.isFinite(value))
+      || (firstDifference >= 0 && required[firstDifference] > (supported[firstDifference] ?? 0))) {
+      throw new Error("Safari companion requires a newer macOS version than Maria supports");
+    }
     const extensions = path.join(safariCompanion, "Contents", "PlugIns");
     const extension = fs.readdirSync(extensions).find(name => name.endsWith(".appex"));
     if (!extension) throw new Error("Packaged Safari connector extension is missing");
