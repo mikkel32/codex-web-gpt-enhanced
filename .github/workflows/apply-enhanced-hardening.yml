@@ -32,7 +32,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rg -n -C 3 'subagentProtocol|subagent-protocol|compatibility-v1' launcher/electron launcher/src src | head -n 500
+          python3 - <<'PY'
+          from pathlib import Path
+
+          roots = [Path("launcher/electron"), Path("launcher/src"), Path("src")]
+          needles = ("subagentProtocol", "subagent-protocol", "compatibility-v1")
+          shown = 0
+          for root in roots:
+              for path in sorted(root.rglob("*")):
+                  if not path.is_file() or path.suffix not in {".cjs", ".js", ".mjs", ".ts", ".tsx"}:
+                      continue
+                  lines = path.read_text(errors="replace").splitlines()
+                  matches = [i for i, line in enumerate(lines) if any(needle in line for needle in needles)]
+                  for index in matches:
+                      start = max(0, index - 3)
+                      end = min(len(lines), index + 4)
+                      print(f"--- {path}:{index + 1}")
+                      for line_number in range(start, end):
+                          print(f"{line_number + 1}: {lines[line_number]}")
+                      shown += 1
+                      if shown >= 120:
+                          raise SystemExit(0)
+          if shown == 0:
+              raise SystemExit("No protocol wiring matches found")
+          PY
 
       - name: Correct transform root and apply hardening
         shell: bash
