@@ -119,6 +119,7 @@ export class HttpTurnCounter {
     done: Promise<void>;
     finish: () => void;
     identity?: NativeCodexTurnIdentity;
+    web?: boolean;
   }>();
   private readonly interrupted = new Map<string, unknown>();
   private nextId = 1;
@@ -142,6 +143,10 @@ export class HttpTurnCounter {
 
   count(): number {
     return this.active.size;
+  }
+
+  webCount(): number {
+    return [...this.active.values()].filter(turn => turn.web).length;
   }
 
   async cancelAll(reason: unknown = new Error("Active HTTP turns cancelled")): Promise<number> {
@@ -183,6 +188,7 @@ export class HttpTurnCounter {
     run: (
       signal: AbortSignal,
       bindIdentity: (identity: NativeCodexTurnIdentity) => void,
+      bindWebRequest: () => void,
     ) => Promise<Response>,
     clientSignal?: AbortSignal,
     platform: NodeJS.Platform = process.platform,
@@ -197,6 +203,7 @@ export class HttpTurnCounter {
       done: Promise<void>;
       finish: () => void;
       identity?: NativeCodexTurnIdentity;
+      web?: boolean;
     } = { abort, done, finish };
     this.active.set(id, tracked);
     let released = false;
@@ -229,7 +236,7 @@ export class HttpTurnCounter {
         tracked.identity = identity;
         const interruptedReason = this.interrupted.get(this.identityKey(identity));
         if (interruptedReason !== undefined && !abort.signal.aborted) abort.abort(interruptedReason);
-      });
+      }, () => { tracked.web = true; });
       if (!response.body) {
         release();
         return response;
@@ -353,7 +360,8 @@ type ChatGptWebAdapterFactory = (provider: CodexProviderConfig) => ProviderAdapt
 export interface ResponseRequestOptions {
   /** Shared native transport for models, responses, compaction, and search. */
   fetchUpstream?: NativeFetch;
-  browserUnavailable?: boolean;
+  browserUnavailable?: boolean | (() => boolean);
+  onWebRequest?: () => void;
   /** DEV and other in-process harnesses can keep continuation state in their own canonical store. */
   rememberState?: boolean;
   /** Observe the exact production adapter stream when invoking the handler in-process. */
@@ -480,9 +488,10 @@ export async function responseRequest(
       return formatErrorResponse(502, "upstream_error", error instanceof Error ? error.message : String(error));
     }
   }
-  if (options.browserUnavailable) {
+  if (typeof options.browserUnavailable === "function" ? options.browserUnavailable() : options.browserUnavailable) {
     return formatErrorResponse(503, "browser_unavailable", "Open Maria WebGPT to use ChatGPT Web. Regular Codex models are still connected.");
   }
+  options.onWebRequest?.();
   const requestedPreviousResponseId = raw && typeof raw === "object" && !Array.isArray(raw)
     ? (raw as { previous_response_id?: unknown }).previous_response_id
     : undefined;
@@ -642,7 +651,7 @@ export async function compactRequest(
   req: Request,
   config: AppConfig,
   adapterFactory: ChatGptWebAdapterFactory = createChatGptWebAdapter,
-  options: Pick<ResponseRequestOptions, "onTurnIdentity" | "fetchUpstream" | "browserUnavailable"> = {},
+  options: Pick<ResponseRequestOptions, "onTurnIdentity" | "fetchUpstream" | "browserUnavailable" | "onWebRequest"> = {},
 ): Promise<Response> {
   const nativeRequest = req.clone();
   let raw: Record<string, unknown>;
@@ -691,9 +700,10 @@ export async function compactRequest(
       return formatErrorResponse(502, "upstream_error", error instanceof Error ? error.message : String(error));
     }
   }
-  if (options.browserUnavailable) {
+  if (typeof options.browserUnavailable === "function" ? options.browserUnavailable() : options.browserUnavailable) {
     return formatErrorResponse(503, "browser_unavailable", "Open Maria WebGPT to compact a ChatGPT Web task. Regular Codex models are still connected.");
   }
+  options.onWebRequest?.();
   let route: ChatGptWebModelRoute;
   try {
     route = requireChatGptWebModelRoute(raw.model, config);
@@ -783,6 +793,7 @@ export function startServer(
   const httpTurns = new HttpTurnCounter();
   const activity = () => ({
     active_http_turns: httpTurns.count(),
+    active_web_requests: httpTurns.webCount(),
     active_browser_turns: chatGptTurnSessions.activeCount() + (turnBroker?.externalOwnerActiveCount() ?? 0),
   });
   const controlAuthorized = (req: Request): boolean => {
@@ -817,7 +828,7 @@ export function startServer(
       }
       if (req.method === "POST" && url.pathname === "/admin/browser-detach") {
         if (!controlAuthorized(req)) return new Response("Unauthorized", { status: 401 });
-        if (activity().active_browser_turns > 0) {
+        if (activity().active_browser_turns > 0 || httpTurns.webCount() > 0) {
           return Response.json({ status: "busy", ...activity() }, { status: 409 });
         }
         browserDetached = true;
@@ -995,11 +1006,11 @@ export function startServer(
       if (req.method === "POST" && url.pathname === "/v1/responses") {
         if (draining) return formatErrorResponse(503, "server_error", "codex-chatgpt-web is draining for a requested service operation");
         return httpTurns.track(
-          (signal, bindIdentity) => responseRequest(
+          (signal, bindIdentity, bindWebRequest) => responseRequest(
             new Request(req, { signal }),
             config,
             dependencies.adapterFactory,
-            { onTurnIdentity: bindIdentity, fetchUpstream: dependencies.fetchUpstream, browserUnavailable: browserDetached },
+            { onTurnIdentity: bindIdentity, fetchUpstream: dependencies.fetchUpstream, browserUnavailable: () => browserDetached, onWebRequest: bindWebRequest },
           ),
           req.signal,
           process.platform,
@@ -1009,11 +1020,11 @@ export function startServer(
       if (req.method === "POST" && url.pathname === "/v1/responses/compact") {
         if (draining) return formatErrorResponse(503, "server_error", "codex-chatgpt-web is draining for a requested service operation");
         return httpTurns.track(
-          (signal, bindIdentity) => compactRequest(
+          (signal, bindIdentity, bindWebRequest) => compactRequest(
             new Request(req, { signal }),
             config,
             dependencies.adapterFactory,
-            { onTurnIdentity: bindIdentity, fetchUpstream: dependencies.fetchUpstream, browserUnavailable: browserDetached },
+            { onTurnIdentity: bindIdentity, fetchUpstream: dependencies.fetchUpstream, browserUnavailable: () => browserDetached, onWebRequest: bindWebRequest },
           ),
           req.signal,
           process.platform,

@@ -1,6 +1,43 @@
 import { expect, test } from "bun:test";
 import { defaultConfig } from "../src/config";
-import { startServer } from "../src/server";
+import { HttpTurnCounter, responseRequest, startServer } from "../src/server";
+
+test("a Web request still reading its body observes a concurrent UI detachment", async () => {
+  let input!: ReadableStreamDefaultController<Uint8Array>;
+  let detached = false;
+  let started = false;
+  const request = new Request("http://localhost/v1/responses", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: new ReadableStream({ start(controller) { input = controller; } }),
+  });
+  const pending = responseRequest(request, defaultConfig("browser-only"), () => {
+    started = true; throw new Error("Detached UI must not receive a prompt");
+  }, { browserUnavailable: () => detached });
+  detached = true;
+  input.enqueue(new TextEncoder().encode('{"model":"chatgpt-web/high","input":[]}')); input.close();
+  expect((await pending).status).toBe(503);
+  expect(started).toBe(false);
+});
+
+test("pending Web streams remain classified until their HTTP owner settles", async () => {
+  const turns = new HttpTurnCounter();
+  const webAbort = new AbortController();
+  const nativeAbort = new AbortController();
+  const web = await turns.track(async (_signal, _identity, bindWeb) => {
+    bindWeb(); return new Response(new ReadableStream());
+  }, webAbort.signal);
+  const native = await turns.track(async () => new Response(new ReadableStream()), nativeAbort.signal);
+  expect(turns.count()).toBe(2);
+  expect(turns.webCount()).toBe(1);
+  const webCancelled = web.body!.cancel();
+  webAbort.abort();
+  await webCancelled;
+  expect(turns.webCount()).toBe(0);
+  expect(turns.count()).toBe(1);
+  const nativeCancelled = native.body!.cancel();
+  nativeAbort.abort();
+  await nativeCancelled;
+});
 
 test("UI detachment preserves an in-flight native stream and future native requests", async () => {
   const config = { ...defaultConfig("browser-only"), port: 0 };

@@ -871,14 +871,19 @@ async function requestQuit() {
   }
   shutdownInProgress = true;
   try {
-    const activeOperation = runtimeHost?.currentOperation() || browserHost?.currentOperation();
-    if (activeOperation) {
-      throw new Error(`Wait for ${activeOperation} to finish before quitting Maria WebGPT`);
+    const quitWaitStarted = Date.now();
+    while (runtimeHost?.currentOperation() || browserHost?.currentOperation()) {
+      if (Date.now() - quitWaitStarted >= 10_000) {
+        mainWindow?.hide();
+        runtimeSupervisor?.logger?.info("launcher.background_for_setup", {});
+        return { ok: true, background: true };
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
     const handoff = await runtimeSupervisor?.leaveNativeTransportRunning();
     if (handoff?.status === "browser-busy") {
       mainWindow?.hide();
-      logger.info("launcher.background_for_active_web_turn", {});
+      runtimeSupervisor?.logger?.info("launcher.background_for_active_web_turn", {});
       return { ok: true, background: true };
     }
     stopCatalogVerificationMonitor();

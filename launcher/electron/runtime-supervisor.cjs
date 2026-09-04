@@ -2118,8 +2118,12 @@ class RuntimeSupervisor {
       || health?.background_capable !== true) {
       throw new Error("The running transport cannot continue without the launcher. Update or repair the runtime first.");
     }
-    if (health.active_browser_turns > 0) return { status: "browser-busy" };
-    await this.control(config, "browser-detach");
+    if (health.active_browser_turns > 0 || health.active_web_requests > 0) return { status: "browser-busy" };
+    try { await this.control(config, "browser-detach"); }
+    catch (error) {
+      if (errorMessage(error) === "HTTP 409") return { status: "browser-busy" };
+      throw error;
+    }
     try {
       if (this.tunnel) await this.stopTunnelGracefully(config);
     } catch (error) {
