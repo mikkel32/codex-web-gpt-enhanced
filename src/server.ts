@@ -353,6 +353,7 @@ type ChatGptWebAdapterFactory = (provider: CodexProviderConfig) => ProviderAdapt
 export interface ResponseRequestOptions {
   /** Shared native transport for models, responses, compaction, and search. */
   fetchUpstream?: NativeFetch;
+  browserUnavailable?: boolean;
   /** DEV and other in-process harnesses can keep continuation state in their own canonical store. */
   rememberState?: boolean;
   /** Observe the exact production adapter stream when invoking the handler in-process. */
@@ -478,6 +479,9 @@ export async function responseRequest(
     } catch (error) {
       return formatErrorResponse(502, "upstream_error", error instanceof Error ? error.message : String(error));
     }
+  }
+  if (options.browserUnavailable) {
+    return formatErrorResponse(503, "browser_unavailable", "Open Maria WebGPT to use ChatGPT Web. Regular Codex models are still connected.");
   }
   const requestedPreviousResponseId = raw && typeof raw === "object" && !Array.isArray(raw)
     ? (raw as { previous_response_id?: unknown }).previous_response_id
@@ -638,7 +642,7 @@ export async function compactRequest(
   req: Request,
   config: AppConfig,
   adapterFactory: ChatGptWebAdapterFactory = createChatGptWebAdapter,
-  options: Pick<ResponseRequestOptions, "onTurnIdentity" | "fetchUpstream"> = {},
+  options: Pick<ResponseRequestOptions, "onTurnIdentity" | "fetchUpstream" | "browserUnavailable"> = {},
 ): Promise<Response> {
   const nativeRequest = req.clone();
   let raw: Record<string, unknown>;
@@ -686,6 +690,9 @@ export async function compactRequest(
     } catch (error) {
       return formatErrorResponse(502, "upstream_error", error instanceof Error ? error.message : String(error));
     }
+  }
+  if (options.browserUnavailable) {
+    return formatErrorResponse(503, "browser_unavailable", "Open Maria WebGPT to compact a ChatGPT Web task. Regular Codex models are still connected.");
   }
   let route: ChatGptWebModelRoute;
   try {
@@ -768,6 +775,7 @@ export function startServer(
     });
   }
   let draining = false;
+  let browserDetached = false;
   let shutdownPromise: Promise<void> | undefined;
   let successfulModelCatalogRequests = 0;
   let lastSuccessfulModelCatalogRequestAt: string | null = null;
@@ -799,15 +807,28 @@ export function startServer(
           port: config.port,
           uptime: (Date.now() - startedAt) / 1_000,
           accepting_turns: !draining,
+          background_capable: true,
+          browser_connected: !browserDetached,
           successful_model_catalog_requests: successfulModelCatalogRequests,
           last_successful_model_catalog_request_at: lastSuccessfulModelCatalogRequestAt,
           model_catalog_status: modelCatalogStatus,
           ...activity(),
         });
       }
+      if (req.method === "POST" && url.pathname === "/admin/browser-detach") {
+        if (!controlAuthorized(req)) return new Response("Unauthorized", { status: 401 });
+        if (activity().active_browser_turns > 0) {
+          return Response.json({ status: "busy", ...activity() }, { status: 409 });
+        }
+        browserDetached = true;
+        turnBroker?.setExternalOwnersAccepted(false);
+        chatGptTurnSessions.clear();
+        return Response.json({ status: "ok", browser_connected: false, ...activity() });
+      }
       if (req.method === "POST" && (url.pathname === "/admin/drain" || url.pathname === "/admin/resume")) {
         if (!controlAuthorized(req)) return new Response("Unauthorized", { status: 401 });
         draining = url.pathname === "/admin/drain";
+        if (!draining) browserDetached = false;
         turnBroker?.setExternalOwnersAccepted(!draining);
         return Response.json({ status: "ok", accepting_turns: !draining, ...activity() });
       }
@@ -939,7 +960,7 @@ export function startServer(
         }
         return httpTurns.track(async signal => {
           let catalogConfig: AppConfig;
-          let nativeOnly = false;
+          let nativeOnly = browserDetached;
           try {
             catalogConfig = {
               ...config,
@@ -978,7 +999,7 @@ export function startServer(
             new Request(req, { signal }),
             config,
             dependencies.adapterFactory,
-            { onTurnIdentity: bindIdentity, fetchUpstream: dependencies.fetchUpstream },
+            { onTurnIdentity: bindIdentity, fetchUpstream: dependencies.fetchUpstream, browserUnavailable: browserDetached },
           ),
           req.signal,
           process.platform,
@@ -992,7 +1013,7 @@ export function startServer(
             new Request(req, { signal }),
             config,
             dependencies.adapterFactory,
-            { onTurnIdentity: bindIdentity, fetchUpstream: dependencies.fetchUpstream },
+            { onTurnIdentity: bindIdentity, fetchUpstream: dependencies.fetchUpstream, browserUnavailable: browserDetached },
           ),
           req.signal,
           process.platform,

@@ -87,11 +87,11 @@ test("release installers resolve checksummed native launcher assets", () => {
   const windowsPathPattern = windowsInstaller.match(/return \$Path -match '([^']+)'/)?.[1];
   assert.ok(windowsPathPattern, "the Windows installer must expose its absolute-path contract");
   const fullyQualifiedWindowsPath = new RegExp(windowsPathPattern);
-  assert.equal(fullyQualifiedWindowsPath.test("C:\\Users\\tester\\Codex Web GPT"), true);
-  assert.equal(fullyQualifiedWindowsPath.test("\\\\server\\share\\Codex Web GPT"), true);
-  assert.equal(fullyQualifiedWindowsPath.test("C:Codex Web GPT"), false);
-  assert.equal(fullyQualifiedWindowsPath.test("\\Codex Web GPT"), false);
-  assert.equal(fullyQualifiedWindowsPath.test("Codex Web GPT"), false);
+  assert.equal(fullyQualifiedWindowsPath.test("C:\\Users\\tester\\Maria WebGPT"), true);
+  assert.equal(fullyQualifiedWindowsPath.test("\\\\server\\share\\Maria WebGPT"), true);
+  assert.equal(fullyQualifiedWindowsPath.test("C:Maria WebGPT"), false);
+  assert.equal(fullyQualifiedWindowsPath.test("\\Maria WebGPT"), false);
+  assert.equal(fullyQualifiedWindowsPath.test("Maria WebGPT"), false);
   assert.ok(windowsInstaller.includes(`HKCU:\\Software\\${manifest.build.nsis.guid}`));
   assert.ok(devProfile.includes(`WINDOWS_LAUNCHER_GUID = "${manifest.build.nsis.guid}"`));
   assert.match(windowsInstaller, /Get-ItemPropertyValue[\s\S]*InstallLocation/);
@@ -136,7 +136,7 @@ test("CI packages and smoke-launches on macOS, Windows, and Linux", () => {
   assert.match(release, /archlinux:base/);
   assert.match(release, /prepare-windows-baseline-bun\.ps1 -Version 1\.4\.0/);
   assert.match(release, /codesign --verify --deep --strict --verbose=2/);
-  assert.match(release, /Codex Web GPT\.app/);
+  assert.match(release, /Maria WebGPT\.app/);
   assert.doesNotMatch(release, /gh release create[\s\S]*?--draft/);
 });
 
@@ -150,7 +150,7 @@ test("Linux AppImage fallback uses one owned extraction and removes it on exit",
   if (process.platform !== "linux") return;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-appimage-runner-"));
   const runtime = path.join(root, "runtime");
-  const appImage = path.join(root, "Codex Web GPT.AppImage");
+  const appImage = path.join(root, "Maria WebGPT.AppImage");
   const appRunSource = path.join(root, "AppRun");
   const marker = path.join(root, "launched");
   const runner = path.join(launcherRoot, "assets", "linux-appimage-runner.sh");

@@ -1,14 +1,12 @@
 export type Language = "en" | "zh-CN" | "ja";
 export type LauncherProfile = "production" | "development";
 export type BrowserInteractionMode = "automatic" | "manual";
-export type Surface = "browser" | "setup" | "mcp" | "activity" | "settings";
+export type Surface = "home" | "guide" | "browser" | "setup" | "mcp" | "activity" | "settings";
 
 export interface LauncherState {
   version: 1;
   language: Language | null;
   onboardingComplete: boolean;
-  githubOpened: boolean;
-  xOpened: boolean;
   autoStart: boolean;
   keepRunningOnClose: boolean;
   showBrowserDuringTurns: boolean;
@@ -106,7 +104,6 @@ export interface LauncherSnapshot {
   logs: LogRecord[];
   urls: {
     github: string;
-    x: string;
     connectors: string;
     tunnels: string;
     keys: string;
@@ -122,7 +119,7 @@ export interface LauncherSnapshot {
 export interface LauncherApi {
   snapshot(): Promise<LauncherSnapshot>;
   setLanguage(language: Language): Promise<LauncherState>;
-  openSocial(target: "github" | "x"): Promise<LauncherState>;
+  connectionStatus(): Promise<{ nativeAvailable: boolean; browserConnected: boolean; activeBrowserTurns: number }>;
   completeOnboarding(language: Language, browserInteractionMode: BrowserInteractionMode): Promise<LauncherState>;
   openExternal(url: string): Promise<boolean>;
   setBrowserBounds(bounds: { x: number; y: number; width: number; height: number }): Promise<boolean>;

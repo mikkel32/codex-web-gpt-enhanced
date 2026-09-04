@@ -223,3 +223,21 @@ launcher error.
 - Do not retry or switch modes to evade product usage limits.
 
 See the complete [security model](security-model.md).
+# Maria 5.1 lifecycle
+
+The native transport and the UI have separate lifetimes. The daemon starts with
+private file-backed output rather than pipes owned by Electron. On ordinary UI
+quit, an authenticated browser-detach operation blocks new Web turns while leaving
+native responses, compaction, and existing native SSE streams intact. Active Web
+turns keep the UI process hidden until the user quits again after they finish.
+
+A private ownership marker records the background daemon. A new UI validates its
+PID, boot epoch, version, mode, health, and control capability, then adopts the same
+process instead of draining or replacing it. Explicit integration removal and
+runtime upgrades retain the separate drain-and-stop path. Launch at login restores
+availability after an OS restart; this is not a promise of recovery from every OS
+or network failure.
+
+Regression coverage includes a real parent-process exit followed by daemon
+adoption, a native SSE stream crossing UI detachment, later native requests,
+authenticated detachment, and protection of active Web work.

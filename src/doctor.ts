@@ -49,10 +49,11 @@ function launcherOwnershipError(config: AppConfig, health: Record<string, unknow
     || (state.ownerPid as number) < 1
     || !Number.isInteger(state.daemonPid)
     || (state.daemonPid as number) < 1
-    || state.status !== "ready") {
+    || !["ready", "background"].includes(String(state.status))) {
     return "Launcher runtime ownership marker is incomplete or not ready";
   }
-  if (!processRunning(state.ownerPid)) {
+  if (!processRunning(state.ownerPid)
+    && !(state.status === "background" && health.browser_connected === false)) {
     return `Launcher owner process is not running (pid ${String(state.ownerPid)})`;
   }
   if (health.pid !== state.daemonPid) {

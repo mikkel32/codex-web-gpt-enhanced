@@ -72,8 +72,8 @@ test("installed launcher discovery has explicit platform candidates", () => {
     homeDirectory: "/Users/tester",
     environment: {},
   })).toEqual([
-    "/Applications/Codex Web GPT.app/Contents/MacOS/Codex Web GPT",
-    "/Users/tester/Applications/Codex Web GPT.app/Contents/MacOS/Codex Web GPT",
+    "/Applications/Maria WebGPT.app/Contents/MacOS/Maria WebGPT",
+    "/Users/tester/Applications/Maria WebGPT.app/Contents/MacOS/Maria WebGPT",
   ]);
   expect(installedLauncherCandidates({
     platform: "linux",
@@ -89,15 +89,15 @@ test("installed launcher discovery has explicit platform candidates", () => {
     homeDirectory: "C:\\Users\\tester",
     environment: { LOCALAPPDATA: "C:\\Users\\tester\\AppData\\Local" },
   })).toEqual([
-    "C:\\Users\\tester\\AppData\\Local\\Programs\\Codex Web GPT\\Codex Web GPT.exe",
+    "C:\\Users\\tester\\AppData\\Local\\Programs\\Maria WebGPT\\Maria WebGPT.exe",
   ]);
   expect(installedLauncherCandidates({
     platform: "win32",
     homeDirectory: "C:\\Users\\tester",
     environment: { LOCALAPPDATA: "C:\\Users\\tester\\AppData\\Local" },
-    windowsInstallLocation: "D:\\Apps\\Codex Web GPT",
+    windowsInstallLocation: "D:\\Apps\\Maria WebGPT",
   })).toEqual([
-    "D:\\Apps\\Codex Web GPT\\Codex Web GPT.exe",
+    "D:\\Apps\\Maria WebGPT\\Maria WebGPT.exe",
   ]);
 });
 

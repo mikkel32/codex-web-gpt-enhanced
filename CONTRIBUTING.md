@@ -1,9 +1,7 @@
 # Contributing
 
-Codex Web GPT was created and is primarily developed and maintained by
-[@miuuyy](https://github.com/miuuyy). Product direction, core architecture, and release decisions
-remain with the creator. Other contributors listed by GitHub have provided focused external fixes
-rather than shared product or architectural ownership.
+Maria WebGPT is maintained by Mikkel and Maria. Our priorities are reliable native
+Codex access, clear interaction states, and reproducible releases.
 
 External contributions are welcome, but this is an intentionally maintainer-led project. Pull
 requests are expected to be small, focused, and easy to review and verify. Good contributions

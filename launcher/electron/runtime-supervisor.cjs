@@ -11,6 +11,7 @@ const {
   terminateOwnedProcessTree,
 } = require("./process-tree.cjs");
 const { runtimeInvocation } = require("./runtime-command.cjs");
+const { monitorBackgroundProcess } = require("./background-process.cjs");
 
 const RESTART_WINDOW_MS = 60_000;
 const MAX_RESTARTS_PER_WINDOW = 5;
@@ -29,6 +30,7 @@ const CURRENT_BOOT_STARTED_AT_MS = Date.now() - (os.uptime() * 1_000);
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 function collectLines(stream, onLine, onError) {
+  if (!stream) return;
   let buffered = "";
   stream.on("data", (chunk) => {
     buffered += chunk.toString("utf8");
@@ -478,16 +480,33 @@ class RuntimeSupervisor {
   }
 
   spawnChild(name, invocation) {
-    const child = spawn(invocation.executable, invocation.args, {
+    // Pipes die with the UI. A private file descriptor lets the native transport
+    // survive an ordinary quit or renderer/main-process crash without EPIPE.
+    let logFd;
+    if (name === "daemon") {
+      const directory = path.join(path.dirname(this.configPath), "logs");
+      fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+      const log = path.join(directory, "native-runtime.log");
+      if ((fs.statSync(log, { throwIfNoEntry: false })?.size ?? 0) > 5 * 1024 * 1024) {
+        fs.renameSync(log, `${log}.previous`);
+      }
+      logFd = fs.openSync(log, "a", 0o600);
+    }
+    let child;
+    try { child = spawn(invocation.executable, invocation.args, {
       cwd: invocation.cwd,
       detached: DETACH_OWNED_CHILD,
       env: {
         ...process.env,
         CODEX_CHATGPT_WEB_BROWSER_HOST_DESCRIPTOR: this.browserDescriptorPath,
       },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: logFd === undefined ? ["ignore", "pipe", "pipe"] : ["ignore", logFd, logFd],
       windowsHide: true,
-    });
+    }); } finally { if (logFd !== undefined) fs.closeSync(logFd); }
+    return this.observeChild(name, child);
+  }
+
+  observeChild(name, child) {
     this[name] = child;
     this.lastChildFailure[name] = null;
     this.lastChildOutput[name] = null;
@@ -1210,6 +1229,21 @@ class RuntimeSupervisor {
       this.writeState("needs-setup", detail);
       this.logger.warn("runtime.setup_required", { detail });
       return { status: "needs-setup", detail };
+    }
+    if (!this.daemon && !this.tunnel) {
+      const state = this.readState();
+      if (!tunnelOnly && state && !runtimeOwnershipPredatesCurrentBoot(state)
+        && !processRunning(state.ownerPid) && processRunning(state.daemonPid)) {
+        const health = await this.proxyHealthPayload(config);
+        if (health?.background_capable === true
+          && await this.proxyHealth(config, 2_000, state.daemonPid, true)) {
+          const resumed = await this.control(config, "resume");
+          if (resumed.status !== "ok") throw new Error("Background native transport could not be resumed");
+          this.observeChild("daemon", monitorBackgroundProcess(state.daemonPid));
+          this.restartableChildren.add(this.daemon);
+          this.logger.info("runtime.background_adopted", { pid: state.daemonPid });
+        }
+      }
     }
     if (!this.daemon && !this.tunnel) {
       const healthyRuntime = tunnelOnly ? false : await this.proxyHealth(config);
@@ -2073,6 +2107,37 @@ class RuntimeSupervisor {
       if (!force) throw error;
       return this.forceStopOwnedRuntime(error);
     }
+  }
+
+  async leaveNativeTransportRunning() {
+    if (this.launcherProfile === "development") return this.shutdown();
+    const config = this.readConfig();
+    if (!config || !this.daemon) return { status: "not-running" };
+    const health = await this.proxyHealthPayload(config);
+    if (!await this.proxyHealth(config, 2_000, this.daemon.pid, true)
+      || health?.background_capable !== true) {
+      throw new Error("The running transport cannot continue without the launcher. Update or repair the runtime first.");
+    }
+    if (health.active_browser_turns > 0) return { status: "browser-busy" };
+    await this.control(config, "browser-detach");
+    try {
+      if (this.tunnel) await this.stopTunnelGracefully(config);
+    } catch (error) {
+      await this.control(config, "resume");
+      throw error;
+    }
+    this.stopping = true;
+    this.stopTunnelMonitor();
+    for (const name of ["daemon", "tunnel"]) {
+      if (this.restartTimers[name]) clearTimeout(this.restartTimers[name]);
+      this.restartTimers[name] = null;
+    }
+    this.writeState("background");
+    this.daemon.unref?.();
+    this.daemon.release?.();
+    this.daemon.removeAllListeners();
+    this.logger.info("runtime.native_transport_background", { pid: this.daemon.pid });
+    return { status: "background", daemonPid: this.daemon.pid };
   }
 }
 

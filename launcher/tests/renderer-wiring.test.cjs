@@ -73,7 +73,7 @@ test("a foreground launch request survives hidden startup until the launcher win
 test("normal shutdown persists the ChatGPT session before closing browser views", () => {
   assert.match(
     electronMain,
-    /runtimeSupervisor\?\.shutdown\(\{ cancelActiveTurns: true, force: true \}\)/,
+    /runtimeSupervisor\?\.leaveNativeTransportRunning\(\)/,
   );
   const persist = electronMain.indexOf("await browserHost?.persistSession()");
   const destroy = electronMain.indexOf("browserHost?.destroy()", persist);
@@ -103,7 +103,7 @@ test("packaged runtime is verified before launcher browser surfaces can bind por
 test("DEV launcher exposes its profile and supervises only its Full-mode MCP runtime", () => {
   assert.match(electronMain, /profile:\s*LAUNCHER_PROFILE\.kind/);
   assert.match(electronMain, /if \(IS_DEV_PROFILE\) \{[\s\S]*?config\?\.mode === "full"[\s\S]*?runtimeSupervisor\.startIfConfigured\(\)[\s\S]*?\} else void \(async \(\) => \{/);
-  assert.match(electronMain, /await runtimeSupervisor\?\.shutdown\(\{ cancelActiveTurns: true, force: true \}\)/);
+  assert.match(electronMain, /await runtimeSupervisor\?\.leaveNativeTransportRunning\(\)/);
   assert.match(electronMain, /packaged:\s*app\.isPackaged && !IS_DEV_PROFILE/);
   assert.match(electronMain, /IS_DEV_PROFILE && !stateStore\.read\(\)\.onboardingComplete/);
   assert.match(electronMain, /onboardingComplete:\s*true,[\s\S]*?autoStart:\s*false/);
@@ -166,7 +166,7 @@ test("Zero Risk is selectable during onboarding and later switches transactional
   assert.match(appSource, /completeOnboarding\(selectedLanguage, selectedInteractionMode\)/);
   assert.match(preloadSource, /completeOnboarding: \(language, browserInteractionMode\)[\s\S]*?launcher:complete-onboarding/);
   assert.match(electronMain, /launcher:complete-onboarding[\s\S]*?validateBrowserInteractionMode\(rawInteractionMode\)/);
-  assert.match(appSource, /firstRunZeroRiskSetup \? "mcp"/);
+  assert.match(appSource, /surface === "home" \? <MariaHome/);
   assert.match(appSource, /api!\.setBrowserInteractionMode\(mode\)/);
   assert.match(preloadSource, /launcher:browser-interaction-mode/);
   assert.match(preloadSource, /launcher:manual-prompt-copy/);
@@ -214,10 +214,6 @@ test("Zero Risk is selectable during onboarding and later switches transactional
   assert.match(appSource, /zero-risk-model-info[\s\S]*?copy\.zeroRiskProProfileInfo/);
   assert.match(appSource, /!proEnabled \? <span className="zero-risk-model-radio"><Icon name="check" \/><\/span> : null/);
   assert.match(appSource, /proEnabled \? <span className="zero-risk-model-radio"><Icon name="check" \/><\/span> : null/);
-  assert.match(appSource, /mcp-create-tunnel\.mp4[\s\S]*?mcp-connect-connector\.mp4/);
-  assert.match(appSource, /function TutorialVideo[\s\S]*?autoPlay loop muted playsInline[\s\S]*?className="guide-media-expand"[\s\S]*?<Icon name="expand"/);
-  assert.match(appSource, /createPortal\([\s\S]*?className="guide-media is-expanded"[\s\S]*?document\.body/);
-  assert.match(stylesSource, /\.guide-media\.is-expanded\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0;/s);
   assert.match(preloadSource, /setZeroRiskPro:[\s\S]*?launcher:zero-risk-pro/);
   assert.match(electronMain, /runtimeHost\.setZeroRiskPro\(enabled === true\)/);
 });

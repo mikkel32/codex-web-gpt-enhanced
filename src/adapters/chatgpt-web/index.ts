@@ -542,7 +542,7 @@ export function createChatGptWebAdapter(
           if (!parsed._compactionRequest) {
             trace.push({
               kind: "commentary",
-              text: "**Send this turn in ChatGPT**\n\n1. Open Codex Web GPT and paste the copied prompt into its ChatGPT tab.\n2. Select your model and the `Codex Zero Risk` connector. Attach any images manually.\n3. Send the prompt, then choose **Sent** in the launcher.\n\nYou have five minutes. To use a regular Codex model, cancel this turn and choose it in Codex's model picker.",
+              text: "**Send this turn in ChatGPT**\n\n1. Open Maria WebGPT and paste the copied prompt into its ChatGPT tab.\n2. Select your model and the `Codex Zero Risk` connector. Attach any images manually.\n3. Send the prompt, then choose **Sent** in the launcher.\n\nYou have five minutes. To use a regular Codex model, cancel this turn and choose it in Codex's model picker.",
             });
           }
           await zeroRiskManualControl.start(retainedLauncherDescriptor, {

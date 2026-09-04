@@ -19,9 +19,9 @@
   --red-300: #ff6764;
   --red-400: #fa423e;
 
-  --color-background-surface-under: #000000;
-  --color-background-surface: var(--gray-900);
-  --color-background-sidebar: var(--gray-800);
+  --color-background-surface-under: #090a10;
+  --color-background-surface: #10111a;
+  --color-background-sidebar: #14141e;
   --color-background-elevated: var(--gray-750);
   --color-background-control: rgb(255 255 255 / 3%);
   --color-background-control-hover: rgb(255 255 255 / 7%);
@@ -36,7 +36,7 @@
   --color-text-secondary: rgb(255 255 255 / 70%);
   --color-text-tertiary: rgb(255 255 255 / 50%);
   --color-text-disabled: rgb(255 255 255 / 32%);
-  --color-text-accent: var(--blue-100);
+  --color-text-accent: #d6c3ff;
   --color-text-success: var(--green-300);
   --color-text-warning: var(--orange-300);
   --color-text-error: var(--red-300);
