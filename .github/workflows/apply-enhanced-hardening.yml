@@ -99,6 +99,16 @@ jobs:
           if setup_anchor not in text:
               raise SystemExit("Codex protocol fallback anchor did not match the pinned transform")
           text = text.replace(setup_anchor, setup_patch, 1)
+
+          old_import_before = "  '} from \\\"./codex-integration-document\\\";\\\\n',"
+          new_import_before = "  '  textFormat,\\\\n} from \\\"./codex-integration-document\\\";\\\\n',"
+          old_import_after = "  '} from \\\"./codex-integration-document\\\";\\\\nimport { preserveNativeCodexModelDefault } from \\\"./native-model-default\\\";\\\\n',"
+          new_import_after = "  '  textFormat,\\\\n} from \\\"./codex-integration-document\\\";\\\\nimport { preserveNativeCodexModelDefault } from \\\"./native-model-default\\\";\\\\n',"
+          if text.count(old_import_before) != 1 or text.count(old_import_after) != 1:
+              raise SystemExit("migration import rule did not match the pinned transform")
+          text = text.replace(old_import_before, new_import_before, 1)
+          text = text.replace(old_import_after, new_import_after, 1)
+
           path.write_text(text)
           PY
 
