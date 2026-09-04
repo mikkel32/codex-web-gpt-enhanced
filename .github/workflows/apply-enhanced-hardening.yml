@@ -100,14 +100,14 @@ jobs:
               raise SystemExit("Codex protocol fallback anchor did not match the pinned transform")
           text = text.replace(setup_anchor, setup_patch, 1)
 
-          old_import_before = "  '} from \\\"./codex-integration-document\\\";\\\\n',"
-          new_import_before = "  '  textFormat,\\\\n} from \\\"./codex-integration-document\\\";\\\\n',"
-          old_import_after = "  '} from \\\"./codex-integration-document\\\";\\\\nimport { preserveNativeCodexModelDefault } from \\\"./native-model-default\\\";\\\\n',"
-          new_import_after = "  '  textFormat,\\\\n} from \\\"./codex-integration-document\\\";\\\\nimport { preserveNativeCodexModelDefault } from \\\"./native-model-default\\\";\\\\n',"
-          if text.count(old_import_before) != 1 or text.count(old_import_after) != 1:
-              raise SystemExit("migration import rule did not match the pinned transform")
-          text = text.replace(old_import_before, new_import_before, 1)
-          text = text.replace(old_import_after, new_import_after, 1)
+          generated_marker = 'writeGenerated("src/native-model-default.ts", nativeDefaultModule);'
+          marker_index = text.index(generated_marker)
+          block_start = text.index('replaceLiteral(\n  "src/codex-integration.ts",', marker_index)
+          block_end = text.index(');\n', block_start) + len(');\n')
+          import_rule = text[block_start:block_end]
+          if 'preserveNativeCodexModelDefault' not in import_rule:
+              raise SystemExit("first post-generation integration rule was not the migration import")
+          text = text[:block_start] + text[block_end:]
 
           path.write_text(text)
           PY
@@ -116,13 +116,24 @@ jobs:
 
           python3 - <<'PY'
           from pathlib import Path
-          path = Path("ENHANCED.md")
-          text = path.read_text()
+
+          integration = Path("src/codex-integration.ts")
+          source = integration.read_text()
+          import_line = 'import { preserveNativeCodexModelDefault } from "./native-model-default";\n'
+          if import_line not in source:
+              anchor = '  textFormat,\n} from "./codex-integration-document";\n'
+              if source.count(anchor) != 1:
+                  raise SystemExit("parser import anchor was not unique after hardening")
+              source = source.replace(anchor, anchor + import_line, 1)
+              integration.write_text(source)
+
+          notes = Path("ENHANCED.md")
+          text = notes.read_text()
           text = text.replace(
               "The former Manual mode branding now appears as Manual mode.",
               "The former Zero Risk branding now appears as Manual mode.",
           )
-          path.write_text(text)
+          notes.write_text(text)
           PY
 
       - name: Install pinned dependencies
