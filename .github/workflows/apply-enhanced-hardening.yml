@@ -28,6 +28,12 @@ jobs:
         with:
           bun-version: 1.4.0
 
+      - name: Inspect current protocol wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          rg -n -C 3 'subagentProtocol|subagent-protocol|compatibility-v1' launcher/electron launcher/src src | head -n 500
+
       - name: Correct transform root and apply hardening
         shell: bash
         run: |
