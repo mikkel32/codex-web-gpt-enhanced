@@ -1,1 +1,0 @@
-Temporary bootstrap for importing the verified local Codex Web GPT Enhanced Git bundle. This commit will be replaced by the exact verified local history.
