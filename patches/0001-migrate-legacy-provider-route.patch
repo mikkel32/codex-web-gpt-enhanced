@@ -1,0 +1,454 @@
+diff --git a/src/codex-integration-legacy-provider.ts b/src/codex-integration-legacy-provider.ts
+new file mode 100644
+index 0000000..4fc98ad
+--- /dev/null
++++ b/src/codex-integration-legacy-provider.ts
+@@ -0,0 +1,105 @@
++import type { PreviousAssignment } from "./codex-integration-shared";
++import {
++  findTopLevelAssignment,
++  parseDocument,
++  removeDocumentLine,
++  renderDocument,
++} from "./codex-integration-document";
++
++export const LEGACY_CHATGPT_WEB_PROVIDER = "chatgpt_web_bridge";
++const LEGACY_PROVIDER_ASSIGNMENT = `model_provider = ${JSON.stringify(LEGACY_CHATGPT_WEB_PROVIDER)}`;
++const LEGACY_PROVIDER_TABLE = "model_providers.chatgpt_web_bridge";
++
++interface TableRange {
++  headerIndex: number;
++  endIndex: number;
++}
++
++function findTable(lines: string[], tableName: string): TableRange | undefined {
++  const escaped = tableName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
++  const header = new RegExp(`^\\s*\\[${escaped}\\]\\s*(?:#.*)?$`);
++  const matches = lines
++    .map((line, index) => header.test(line) ? index : -1)
++    .filter(index => index >= 0);
++  if (matches.length > 1) throw new Error(`Codex config contains duplicate [${tableName}] tables`);
++  const headerIndex = matches[0];
++  if (headerIndex === undefined) return undefined;
++  const relativeEnd = lines
++    .slice(headerIndex + 1)
++    .findIndex(line => /^\s*\[\[?[^\]]+\]\]?\s*(?:#.*)?$/.test(line));
++  return {
++    headerIndex,
++    endIndex: relativeEnd < 0 ? lines.length : headerIndex + 1 + relativeEnd,
++  };
++}
++
++function exactLegacyProviderTable(
++  lines: string[],
++  installedUrl: string,
++): { state: "absent" | "exact" | "modified"; range?: TableRange } {
++  const range = findTable(lines, LEGACY_PROVIDER_TABLE);
++  if (!range) return { state: "absent" };
++  const expected = new Map<string, string>([
++    ["name", JSON.stringify("ChatGPT Web Bridge")],
++    ["base_url", JSON.stringify(installedUrl)],
++    ["wire_api", JSON.stringify("responses")],
++    ["requires_openai_auth", "true"],
++    ["supports_websockets", "false"],
++  ]);
++  const actual = new Map<string, string>();
++  for (let index = range.headerIndex + 1; index < range.endIndex; index += 1) {
++    const line = lines[index]!;
++    if (!line.trim() || /^\s*#/.test(line)) continue;
++    const match = /^\s*([A-Za-z0-9_-]+)\s*=\s*(.+?)\s*$/.exec(line);
++    if (!match || !expected.has(match[1]!)) return { state: "modified", range };
++    if (actual.has(match[1]!)) return { state: "modified", range };
++    actual.set(match[1]!, match[2]!);
++  }
++  if (actual.size !== expected.size) return { state: "modified", range };
++  for (const [key, value] of expected) {
++    if (actual.get(key) !== value) return { state: "modified", range };
++  }
++  return { state: "exact", range };
++}
++
++/**
++ * Releases the provider override written by pre-v5 launchers. Those builds selected a custom
++ * provider globally, causing every official Codex model to depend on the browser bridge. Ownership
++ * is proven twice: the old journal must contain the exact generated assignment and the active file
++ * must contain the exact generated provider table. Edited or ambiguous state fails closed.
++ */
++export function migrateLegacyChatGptWebProvider(
++  text: string,
++  installedUrl: string,
++  previousModelProvider: PreviousAssignment,
++): { text: string; migrated: boolean } {
++  if (!previousModelProvider.present
++    || previousModelProvider.rawLine !== LEGACY_PROVIDER_ASSIGNMENT
++    || previousModelProvider.value !== LEGACY_CHATGPT_WEB_PROVIDER) {
++    return { text, migrated: false };
++  }
++
++  const document = parseDocument(text);
++  const current = findTopLevelAssignment(document.lines, "model_provider");
++  const table = exactLegacyProviderTable(document.lines, installedUrl);
++  if (!current.present) {
++    if (table.state === "exact" && table.range) {
++      for (let index = table.range.endIndex - 1; index >= table.range.headerIndex; index -= 1) {
++        removeDocumentLine(document, index);
++      }
++    }
++    return { text: renderDocument(document), migrated: true };
++  }
++  if (current.rawLine !== LEGACY_PROVIDER_ASSIGNMENT
++    || current.value !== LEGACY_CHATGPT_WEB_PROVIDER
++    || current.index === undefined) {
++    throw new Error(
++      "The legacy ChatGPT Web model_provider assignment was edited; refusing to overwrite the current Codex provider",
++    );
++  }
++  if (table.state !== "exact" || !table.range) {
++    throw new Error(
++      "The legacy ChatGPT Web provider table was edited; refusing to remove configuration that is no longer provably launcher-owned",
++    );
++  }
++  for (let index = table.range.endIndex - 1; index >= table.range.headerIndex; index -= 1) {
++    removeDocumentLine(document, index);
++  }
++  removeDocumentLine(document, current.index);
++  return { text: renderDocument(document), migrated: true };
++}
+diff --git a/src/codex-integration.ts b/src/codex-integration.ts
+index 3d1376c..3c6dcb4 100644
+--- a/src/codex-integration.ts
++++ b/src/codex-integration.ts
+@@ -30,6 +30,7 @@ import {
+   splitLines,
+   textFormat,
+ } from "./codex-integration-document";
++import { migrateLegacyChatGptWebProvider } from "./codex-integration-legacy-provider";
+ import {
+   assertPreservedPreviousAssignments,
+   assertPreservedPreviousRealtimeAssignment,
+@@ -91,6 +92,26 @@ function journalProtocol(journal: Exclude<AnyCodexIntegrationJournal, { version:
+     : "native";
+ }
+ 
++type ManagedJournal = Exclude<AnyCodexIntegrationJournal, { version: 2 }>;
++
++function migrateLegacyProviderBaseline(
++  baseline: string,
++  journal: ManagedJournal,
++): {
++  text: string;
++  migrated: boolean;
++  previous: ManagedJournal["previous"];
++} {
++  const result = migrateLegacyChatGptWebProvider(
++    baseline,
++    journal.installed.openai_base_url,
++    journal.previous.model_provider,
++  );
++  return {
++    text: result.text,
++    migrated: result.migrated,
++    previous: result.migrated
++      ? { ...journal.previous, model_provider: { present: false } }
++      : journal.previous,
++  };
++}
++
+ export {
+   getCodexConfigPath,
+   getCodexHome,
+@@ -181,17 +202,21 @@ export function preflightCodexIntegration(
+       if (options.replaceExistingRoute !== true) throw error;
++      const replacement = migrateLegacyProviderBaseline(
++        replacementBaseline(currentText, configExists, existing),
++        existing,
++      );
+       installConfiguredRoute(
+-        replacementBaseline(currentText, configExists, existing),
++        replacement.text,
+         installedUrl,
+         config,
+         true,
+         true,
+       );
+       return;
+     }
+-    if (existing.version === 10) return;
+     const baseline = managedJournalIsActive(existing)
+       ? restoreManagedRoute(currentText, existing)
+       : currentText;
++    const migration = migrateLegacyProviderBaseline(baseline, existing);
++    if (existing.version === 10 && !migration.migrated) return;
+     installConfiguredRoute(
+-      baseline,
++      migration.text,
+       installedUrl,
+       config,
+       true,
+@@ -249,6 +274,9 @@ export function installCodexIntegration(
+       baseline = replacementBaseline(currentText, configExists, existing);
+       preservePrevious = false;
+     }
++    const migration = migrateLegacyProviderBaseline(baseline, existing);
++    baseline = migration.text;
++    if (migration.migrated) preservePrevious = false;
+     const patched = installConfiguredRoute(
+       baseline,
+       installedUrl,
+@@ -351,18 +379,27 @@ export function deactivateCodexIntegration(): SetCodexIntegrationActiveResult {
+   assertJournalTargetsConfig(existing, getCodexConfigPath());
+   if (!existsSync(existing.configPath)) throw new Error(`Codex config is missing: ${existing.configPath}`);
+   const current = readFileSync(existing.configPath, "utf8");
+-  if ((existing.version === 4 || existing.version === 5 || existing.version === 6 || existing.version === 7 || existing.version === 8 || existing.version === 9 || existing.version === 10) && !existing.active) {
++  const inactive = (existing.version === 4 || existing.version === 5 || existing.version === 6
++    || existing.version === 7 || existing.version === 8 || existing.version === 9 || existing.version === 10)
++    && !existing.active;
++  if (inactive) {
+     verifyRestoredRoute(current, existing);
+-    return { changed: false, active: false };
+   }
+-  const restored = restoreManagedRoute(current, existing);
++  const restored = inactive ? current : restoreManagedRoute(current, existing);
++  const migration = migrateLegacyProviderBaseline(restored, existing);
++  if (inactive && !migration.migrated) return { changed: false, active: false };
++  const normalizedExisting = migration.migrated
++    ? { ...existing, previous: migration.previous }
++    : existing;
+   const disconnected:
+     | CodexIntegrationJournal
+     | LegacyCodexIntegrationJournalV9
+@@ -373,11 +410,12 @@ export function deactivateCodexIntegration(): SetCodexIntegrationActiveResult {
+     | LegacyCodexIntegrationJournalV7
+     | LegacyCodexIntegrationJournalV5
+-    | LegacyCodexIntegrationJournalV4 = existing.version === 6 || existing.version === 5
+-      || existing.version === 7 || existing.version === 8 || existing.version === 9 || existing.version === 10
+-      ? { ...existing, active: false }
+-      : { ...existing, version: 4, active: false };
+-  writeIntegrationState(disconnected, { path: existing.configPath, data: restored }, [getCodexModelsCachePath()]);
++    | LegacyCodexIntegrationJournalV4 = normalizedExisting.version === 6 || normalizedExisting.version === 5
++      || normalizedExisting.version === 7 || normalizedExisting.version === 8
++      || normalizedExisting.version === 9 || normalizedExisting.version === 10
++      ? { ...normalizedExisting, active: false }
++      : { ...normalizedExisting, version: 4, active: false };
++  writeIntegrationState(disconnected, { path: existing.configPath, data: migration.text }, [getCodexModelsCachePath()]);
+   return { changed: true, active: false };
+ }
+ 
+@@ -392,11 +430,17 @@ export function activateCodexIntegration(): SetCodexIntegrationActiveResult {
+   const current = readFileSync(existing.configPath, "utf8");
+   if (existing.version === 10 && existing.active) {
+     verifyInstalledRoute(current, existing);
+-    return { changed: false, active: true };
+   }
+   let baseline: string;
+-  if ((existing.version === 4 || existing.version === 5 || existing.version === 6 || existing.version === 7 || existing.version === 8 || existing.version === 9 || existing.version === 10) && !existing.active) {
++  if ((existing.version === 4 || existing.version === 5 || existing.version === 6
++    || existing.version === 7 || existing.version === 8 || existing.version === 9 || existing.version === 10)
++    && !existing.active) {
+     verifyRestoredRoute(current, existing);
+     baseline = current;
+   } else {
+-    verifyInstalledRoute(current, existing);
++    if (!(existing.version === 10 && existing.active)) verifyInstalledRoute(current, existing);
+     baseline = restoreManagedRoute(current, existing);
+   }
++  const migration = migrateLegacyProviderBaseline(baseline, existing);
++  if (existing.version === 10 && existing.active && !migration.migrated) {
++    return { changed: false, active: true };
++  }
++  baseline = migration.text;
+   const protocol = journalProtocol(existing);
+   const hookConfig = existing.version === 10
+     ? { interruptHookCommand: existing.interruptHook.command }
+@@ -412,12 +456,14 @@ export function activateCodexIntegration(): SetCodexIntegrationActiveResult {
+     true,
+     existing.version === 9 || existing.version === 10,
+   );
+-  assertPreservedPreviousAssignments(route.previous, existing.previous);
+-  if (existing.version === 9 || existing.version === 10) {
++  if (!migration.migrated) {
++    assertPreservedPreviousAssignments(route.previous, existing.previous);
++  }
++  if (!migration.migrated && (existing.version === 9 || existing.version === 10)) {
+     assertPreservedPreviousRealtimeAssignment(
+       route.previousRealtimeWebrtcCallBaseUrl,
+       existing.previousRealtimeWebrtcCallBaseUrl,
+@@ -436,8 +482,8 @@ export function activateCodexIntegration(): SetCodexIntegrationActiveResult {
+         agent_max_depth: route.installedAgentMaxDepth,
+       } : {}),
+     },
+-    previous: existing.previous,
+-    previousRealtimeWebrtcCallBaseUrl: existing.version === 9 || existing.version === 10
++    previous: migration.migrated ? route.previous : existing.previous,
++    previousRealtimeWebrtcCallBaseUrl: !migration.migrated && (existing.version === 9 || existing.version === 10)
+       ? existing.previousRealtimeWebrtcCallBaseUrl
+       : route.previousRealtimeWebrtcCallBaseUrl,
+@@ -475,6 +521,9 @@ export function uninstallCodexIntegration(): UninstallCodexIntegrationResult {
+   } else {
+     restored = restoreManagedRoute(current, journal);
+   }
++  if (journal.version !== 2) {
++    restored = migrateLegacyProviderBaseline(restored, journal).text;
++  }
+   const configSnapshot = snapshotFile(journal.configPath);
+   const catalogSnapshot = journal.version === 2 ? snapshotFile(journal.catalogPath) : undefined;
+diff --git a/tests/codex-integration-legacy-provider.test.ts b/tests/codex-integration-legacy-provider.test.ts
+new file mode 100644
+index 0000000..e42dd27
+--- /dev/null
++++ b/tests/codex-integration-legacy-provider.test.ts
+@@ -0,0 +1,170 @@
++import { afterEach, describe, expect, test } from "bun:test";
++import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
++import { dirname, join } from "node:path";
++import {
++  activateCodexIntegration,
++  deactivateCodexIntegration,
++  getCodexJournalPath,
++  getCodexJournalRecoveryPath,
++  getCodexModelsCachePath,
++  installCodexIntegration,
++  uninstallCodexIntegration,
++} from "../src/codex-integration";
++import { defaultConfig } from "../src/config";
++import { MANAGED_COMMENT } from "../src/codex-integration-shared";
++
++const roots: string[] = [];
++const routeUrl = "http://127.0.0.1:17841/v1";
++
++function fixture(): { root: string; codexHome: string; configPath: string } {
++  const root = join(
++    process.env.TMPDIR ?? "/tmp",
++    `codex-web-legacy-provider-${process.pid}-${Date.now()}-${Math.random()}`,
++  );
++  const codexHome = join(root, "codex");
++  mkdirSync(codexHome, { recursive: true });
++  roots.push(root);
++  process.env.CODEX_HOME = codexHome;
++  process.env.CODEX_CHATGPT_WEB_HOME = join(root, "app");
++  return { root, codexHome, configPath: join(codexHome, "config.toml") };
++}
++
++function legacyConfig(extraProviderLine?: string): string {
++  return [
++    'model = "gpt-6-astra"',
++    'model_provider = "chatgpt_web_bridge"',
++    "model_context_window = 1000000",
++    "model_auto_compact_token_limit = 900000",
++    "model_reasoning_effort = \"xhigh\"",
++    MANAGED_COMMENT,
++    `openai_base_url = ${JSON.stringify(routeUrl)}`,
++    "[model_providers.chatgpt_web_bridge]",
++    'name = "ChatGPT Web Bridge"',
++    `base_url = ${JSON.stringify(routeUrl)}`,
++    'wire_api = "responses"',
++    "requires_openai_auth = true",
++    "supports_websockets = false",
++    ...(extraProviderLine ? [extraProviderLine] : []),
++    "",
++    "[marketplaces.sample]",
++    'name = "Sample"',
++    "",
++  ].join("\n");
++}
++
++function legacyJournal(configPath: string) {
++  return {
++    version: 8,
++    active: true,
++    configPath,
++    installed: {
++      openai_base_url: routeUrl,
++      subagent_protocol: "native",
++    },
++    previous: {
++      openai_base_url: { present: false },
++      model_provider: {
++        present: true,
++        rawLine: 'model_provider = "chatgpt_web_bridge"',
++        value: "chatgpt_web_bridge",
++        index: 1,
++      },
++      model_catalog_json: { present: false },
++    },
++    format: { lineEnding: "\n", trailingNewline: true },
++  } as const;
++}
++
++function writeLegacyState(configPath: string, configText: string): string {
++  writeFileSync(configPath, configText);
++  const encoded = `${JSON.stringify(legacyJournal(configPath), null, 2)}\n`;
++  mkdirSync(dirname(getCodexJournalPath()), { recursive: true });
++  writeFileSync(getCodexJournalPath(), encoded);
++  writeFileSync(getCodexJournalRecoveryPath(), encoded);
++  writeFileSync(getCodexModelsCachePath(), "stale cache");
++  return encoded;
++}
++
++afterEach(() => {
++  delete process.env.CODEX_HOME;
++  delete process.env.CODEX_CHATGPT_WEB_HOME;
++  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
++});
++
++describe("legacy global provider migration", () => {
++  test("adopts the clean native route and never restores the bridge provider", () => {
++    const { configPath } = fixture();
++    writeLegacyState(configPath, legacyConfig());
++    const config = defaultConfig("browser-only");
++    config.subagentProtocol = "native";
++
++    const upgraded = installCodexIntegration(config);
++    const installed = readFileSync(configPath, "utf8");
++    expect(upgraded.version).toBe(10);
++    expect(upgraded.previous.model_provider).toEqual({ present: false });
++    expect(installed).toContain('model = "gpt-6-astra"');
++    expect(installed).toContain("model_context_window = 1000000");
++    expect(installed).toContain("[marketplaces.sample]");
++    expect(installed).toContain(`openai_base_url = ${JSON.stringify(routeUrl)}`);
++    expect(installed).not.toContain('model_provider = "chatgpt_web_bridge"');
++    expect(installed).not.toContain("[model_providers.chatgpt_web_bridge]");
++    expect(existsSync(getCodexModelsCachePath())).toBe(false);
++
++    expect(deactivateCodexIntegration()).toEqual({ changed: true, active: false });
++    const nativeOnly = readFileSync(configPath, "utf8");
++    expect(nativeOnly).toContain('model = "gpt-6-astra"');
++    expect(nativeOnly).not.toContain("openai_base_url");
++    expect(nativeOnly).not.toContain("chatgpt_web_bridge");
++
++    expect(activateCodexIntegration()).toEqual({ changed: true, active: true });
++    expect(readFileSync(configPath, "utf8")).not.toContain("chatgpt_web_bridge");
++    expect(uninstallCodexIntegration()).toEqual({ changed: true });
++    const uninstalled = readFileSync(configPath, "utf8");
++    expect(uninstalled).toContain('model = "gpt-6-astra"');
++    expect(uninstalled).not.toContain("openai_base_url");
++    expect(uninstalled).not.toContain("chatgpt_web_bridge");
++  });
++
++  test("adopts a provider assignment that the user already removed manually", () => {
++    const { configPath } = fixture();
++    const manuallyCleaned = legacyConfig()
++      .replace('model_provider = "chatgpt_web_bridge"\n', "")
++      .replace(/\[model_providers\.chatgpt_web_bridge\][\s\S]*?\n\n(?=\[marketplaces\.sample\])/, "");
++    writeLegacyState(configPath, manuallyCleaned);
++    const config = defaultConfig("browser-only");
++    config.subagentProtocol = "native";
++
++    const upgraded = installCodexIntegration(config);
++    expect(upgraded.previous.model_provider).toEqual({ present: false });
++    expect(readFileSync(configPath, "utf8")).not.toContain("chatgpt_web_bridge");
++  });
++
++  test("fails closed when the old provider table was edited", () => {
++    const { configPath } = fixture();
++    const originalConfig = legacyConfig("custom_setting = true");
++    const originalJournal = writeLegacyState(configPath, originalConfig);
++    const config = defaultConfig("browser-only");
++    config.subagentProtocol = "native";
++
++    expect(() => installCodexIntegration(config)).toThrow("provider table was edited");
++    expect(readFileSync(configPath, "utf8")).toBe(originalConfig);
++    expect(readFileSync(getCodexJournalPath(), "utf8")).toBe(originalJournal);
++    expect(readFileSync(getCodexJournalRecoveryPath(), "utf8")).toBe(originalJournal);
++  });
++});
