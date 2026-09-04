@@ -71,14 +71,11 @@ jobs:
           source_dir="$RUNNER_TEMP/upstream-source"
           fork_meta="$RUNNER_TEMP/fork-meta"
           mkdir -p "$fork_meta/.github/workflows"
-          cp README.md "$fork_meta/README.md"
           cp FORK.md "$fork_meta/FORK.md"
           cp UPSTREAM.lock "$fork_meta/UPSTREAM.lock"
           cp .github/workflows/materialize-upstream.yml "$fork_meta/.github/workflows/materialize-upstream.yml"
 
           rsync -a --delete --exclude='.git/' "$source_dir/" "$GITHUB_WORKSPACE/"
-          mv README.md UPSTREAM_README.md
-          cp "$fork_meta/README.md" README.md
           cp "$fork_meta/FORK.md" FORK.md
           cp "$fork_meta/UPSTREAM.lock" UPSTREAM.lock
           cp "$fork_meta/.github/workflows/materialize-upstream.yml" .github/workflows/materialize-upstream.yml
