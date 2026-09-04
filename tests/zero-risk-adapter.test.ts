@@ -125,9 +125,9 @@ test("Zero Risk adapter never starts the automatic browser worker and completes 
     expect(calls).toEqual(["start", "sent", "started", "end:completed:true"]);
     expect(events.some(event => event.type === "text_delta"
       && event.phase === "commentary"
-      && event.text.startsWith("**Send this turn in ChatGPT**")
-      && event.text.includes("`Codex Zero Risk` connector")
-      && event.text.includes("**Sent** in the launcher"))).toBeTrue();
+      && event.text.startsWith("> **Action required in Zero Risk**")
+      && event.text.includes("select the `Codex Zero Risk` plugin")
+      && event.text.includes("confirm it was sent in the launcher"))).toBeTrue();
     expect(events.filter((event): event is Extract<AdapterEvent, { type: "text_delta" }> => (
       event.type === "text_delta" && event.phase === "final_answer"
     )).map(event => event.text).join(""))
@@ -213,7 +213,7 @@ test("Zero Risk keeps image handoff manual and says so in the paste instruction"
     expect(manualPrompt).toContain("image the user manually attached to this ChatGPT message");
     expect(events.some(event => event.type === "text_delta"
       && event.phase === "commentary"
-      && event.text.includes("Attach any images manually"))).toBeTrue();
+      && event.text.includes("add any images yourself because Zero Risk cannot transfer them"))).toBeTrue();
     expect(events.filter((event): event is Extract<AdapterEvent, { type: "text_delta" }> => (
       event.type === "text_delta" && event.phase === "final_answer"
     )).map(event => event.text).join(""))

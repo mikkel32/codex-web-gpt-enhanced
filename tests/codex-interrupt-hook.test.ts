@@ -49,20 +49,20 @@ test("trusts the canonical Codex config path before a new config file exists", (
 
 test("Interrupt hook command is absolute, quoted, and bound to the exact application home", () => {
   expect(codexInterruptHookCommand(
-    { runtimeCommand: ["/Applications/Maria WebGPT.app/runtime/bun", "/Applications/Maria WebGPT.app/app/cli.js"] },
-    "/Users/test/Application Support/Maria WebGPT",
+    { runtimeCommand: ["/Applications/Codex Web GPT.app/runtime/bun", "/Applications/Codex Web GPT.app/app/cli.js"] },
+    "/Users/test/Application Support/Codex Web GPT",
     "darwin",
   )).toBe(
-    "'/Applications/Maria WebGPT.app/runtime/bun' '/Applications/Maria WebGPT.app/app/cli.js'"
-      + " '--home' '/Users/test/Application Support/Maria WebGPT' 'hook' 'interrupt'",
+    "'/Applications/Codex Web GPT.app/runtime/bun' '/Applications/Codex Web GPT.app/app/cli.js'"
+      + " '--home' '/Users/test/Application Support/Codex Web GPT' 'hook' 'interrupt'",
   );
   expect(codexInterruptHookCommand(
-    { runtimeCommand: ["C:\\Program Files\\Maria WebGPT\\bun.exe", "C:\\Program Files\\Maria WebGPT\\cli.js"] },
-    "C:\\Users\\test\\Maria WebGPT",
+    { runtimeCommand: ["C:\\Program Files\\Codex Web GPT\\bun.exe", "C:\\Program Files\\Codex Web GPT\\cli.js"] },
+    "C:\\Users\\test\\Codex Web GPT",
     "win32",
   )).toBe(
-    '"C:\\Program Files\\Maria WebGPT\\bun.exe" "C:\\Program Files\\Maria WebGPT\\cli.js"'
-      + ' "--home" "C:\\Users\\test\\Maria WebGPT" "hook" "interrupt"',
+    '"C:\\Program Files\\Codex Web GPT\\bun.exe" "C:\\Program Files\\Codex Web GPT\\cli.js"'
+      + ' "--home" "C:\\Users\\test\\Codex Web GPT" "hook" "interrupt"',
   );
 });
 

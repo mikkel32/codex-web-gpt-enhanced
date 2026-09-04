@@ -224,8 +224,8 @@ export interface ChatGptWebAccountCapabilities {
 
 export const CHATGPT_WEB_ZERO_RISK_MODEL_ROUTE: ChatGptWebZeroRiskModelRoute = {
   slug: "chatgpt-web/zero-risk",
-  displayName: "Maria Web — Manual",
-  description: "Paste and send in the launcher; choose the ChatGPT model yourself. Regular Codex models remain available separately.",
+  displayName: "ChatGPT Web — Zero Risk",
+  description: "Zero Risk keeps model selection and prompt submission under your control while preserving the native Codex harness.",
   interactionMode: "manual",
   backendModel: CHATGPT_WEB_ZERO_RISK_BACKEND_MODEL,
   codexEffort: "low",
@@ -235,8 +235,8 @@ export const CHATGPT_WEB_ZERO_RISK_MODEL_ROUTE: ChatGptWebZeroRiskModelRoute = {
 
 export const CHATGPT_WEB_ZERO_RISK_PRO_MODEL_ROUTE: ChatGptWebZeroRiskModelRoute = {
   slug: "chatgpt-web/zero-risk-pro",
-  displayName: "Maria Web — Manual Pro",
-  description: "Manual submission with a larger context budget. Requires selecting ChatGPT Pro in the launcher for each turn.",
+  displayName: "ChatGPT Web — Zero Risk Pro",
+  description: "Explicit Pro-sized Zero Risk context; select ChatGPT Pro manually for every turn.",
   interactionMode: "manual",
   backendModel: CHATGPT_WEB_ZERO_RISK_PRO_BACKEND_MODEL,
   codexEffort: "low",
@@ -246,7 +246,7 @@ export const CHATGPT_WEB_ZERO_RISK_PRO_MODEL_ROUTE: ChatGptWebZeroRiskModelRoute
 
 export const CHATGPT_WEB_LUNA_MODEL_ROUTE: ChatGptWebAutomaticModelRoute = {
   slug: "chatgpt-web/luna",
-  displayName: "Maria Web — Luna",
+  displayName: "ChatGPT Web — Luna",
   description: "ChatGPT Web Luna for accounts without the Sol model selector.",
   interactionMode: "automatic",
   backendModel: CHATGPT_WEB_LUNA_BACKEND_MODEL,
@@ -257,7 +257,7 @@ export const CHATGPT_WEB_LUNA_MODEL_ROUTE: ChatGptWebAutomaticModelRoute = {
 
 export const CHATGPT_WEB_LUNA_THINK_MODEL_ROUTE: ChatGptWebModelRoute = {
   slug: "chatgpt-web/think",
-  displayName: "Maria Web — Think",
+  displayName: "ChatGPT Web — Think",
   description: "ChatGPT Web Think for Luna-only accounts.",
   interactionMode: "automatic",
   backendModel: CHATGPT_WEB_LUNA_BACKEND_MODEL,
@@ -282,7 +282,7 @@ export const CHATGPT_WEB_LUNA_MODEL_ROUTES: readonly ChatGptWebModelRoute[] = [
 export const CHATGPT_WEB_MODEL_ROUTES: readonly ChatGptWebAutomaticModelRoute[] = [
   {
     slug: "chatgpt-web/light",
-    displayName: "Maria Web — Instant",
+    displayName: "ChatGPT Web — Instant",
     description: "ChatGPT Web Instant through the native Codex harness.",
     interactionMode: "automatic",
     backendModel: CHATGPT_WEB_BACKEND_MODEL,
@@ -292,7 +292,7 @@ export const CHATGPT_WEB_MODEL_ROUTES: readonly ChatGptWebAutomaticModelRoute[] 
   },
   {
     slug: "chatgpt-web/medium",
-    displayName: "Maria Web — Medium",
+    displayName: "ChatGPT Web — Medium",
     description: "ChatGPT Web Medium through the native Codex harness.",
     interactionMode: "automatic",
     backendModel: CHATGPT_WEB_BACKEND_MODEL,
@@ -302,7 +302,7 @@ export const CHATGPT_WEB_MODEL_ROUTES: readonly ChatGptWebAutomaticModelRoute[] 
   },
   {
     slug: "chatgpt-web/high",
-    displayName: "Maria Web — High",
+    displayName: "ChatGPT Web — High",
     description: "ChatGPT Web High through the native Codex harness.",
     interactionMode: "automatic",
     backendModel: CHATGPT_WEB_BACKEND_MODEL,
@@ -312,7 +312,7 @@ export const CHATGPT_WEB_MODEL_ROUTES: readonly ChatGptWebAutomaticModelRoute[] 
   },
   {
     slug: "chatgpt-web/extra-high",
-    displayName: "Maria Web — Extra High",
+    displayName: "ChatGPT Web — Extra High",
     description: "Account-gated ChatGPT Web Extra High through the native Codex harness.",
     interactionMode: "automatic",
     backendModel: CHATGPT_WEB_BACKEND_MODEL,
@@ -322,7 +322,7 @@ export const CHATGPT_WEB_MODEL_ROUTES: readonly ChatGptWebAutomaticModelRoute[] 
   },
   {
     slug: "chatgpt-web/pro",
-    displayName: "Maria Web — Pro",
+    displayName: "ChatGPT Web — Pro",
     description: "Account-gated ChatGPT Pro through the native Codex harness.",
     interactionMode: "automatic",
     backendModel: CHATGPT_WEB_BACKEND_MODEL,

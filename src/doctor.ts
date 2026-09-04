@@ -49,11 +49,10 @@ function launcherOwnershipError(config: AppConfig, health: Record<string, unknow
     || (state.ownerPid as number) < 1
     || !Number.isInteger(state.daemonPid)
     || (state.daemonPid as number) < 1
-    || !["ready", "background"].includes(String(state.status))) {
+    || state.status !== "ready") {
     return "Launcher runtime ownership marker is incomplete or not ready";
   }
-  if (!processRunning(state.ownerPid)
-    && !(state.status === "background" && health.browser_connected === false)) {
+  if (!processRunning(state.ownerPid)) {
     return `Launcher owner process is not running (pid ${String(state.ownerPid)})`;
   }
   if (health.pid !== state.daemonPid) {
@@ -88,13 +87,6 @@ async function proxyCheck(config: AppConfig): Promise<DoctorCheck> {
     const ownershipError = launcherOwnershipError(config, body);
     if (ownershipError) {
       return { id: "proxy", status: "error", message: "Responses proxy ownership could not be verified", detail: ownershipError };
-    }
-    if (body.model_catalog_status === "native-only") {
-      return {
-        id: "proxy", status: "warning",
-        message: "Native Codex models are available; ChatGPT Web model discovery needs repair",
-        detail: "Rerun Install models in the launcher and check the runtime log for web_catalog_unavailable or catalog_integration_unavailable.",
-      };
     }
     return { id: "proxy", status: "ok", message: `Responses proxy is healthy on 127.0.0.1:${config.port}` };
   } catch (error) {

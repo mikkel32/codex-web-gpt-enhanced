@@ -124,18 +124,14 @@ export function scrubBridgeArtifactsForNative(value: unknown): { value: unknown;
 
 function endToEndHeaders(source: Headers): Headers {
   const headers = new Headers();
-  const connectionHeaders = new Set((source.get("connection") ?? "")
-    .split(",").map(name => name.trim().toLowerCase()).filter(Boolean));
   for (const [name, value] of source) {
-    if (!HOP_BY_HOP_HEADERS.has(name.toLowerCase()) && !connectionHeaders.has(name.toLowerCase())) {
-      headers.append(name, value);
-    }
+    if (!HOP_BY_HOP_HEADERS.has(name.toLowerCase())) headers.append(name, value);
   }
   headers.delete("content-length");
   return headers;
 }
 
-/** Some native Responses streams end at response.completed without sending [DONE]. */
+/** Terminator every Responses SSE stream ends with; nothing after it carries meaning. */
 const SSE_TERMINATOR = "data: [DONE]";
 
 /**
@@ -157,61 +153,22 @@ function withUncleanCloseTolerance(
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let lineBuffer = "";
-  let oversizedLine = false;
   let completed = false;
   let bytes = 0;
-  let eventName = "";
-  let eventData = "";
-  let oversizedEvent = false;
-  // Observation must not retain an unbounded copy of a streamed response. Oversized events
-  // continue through untouched, but cannot supply evidence for tolerating a later reset.
-  const maxObservationChars = 8 * 1024 * 1024;
-  const inspectLine = (line: string): void => {
-    if (line === SSE_TERMINATOR) completed = true;
-    if (line === "") {
-      if (!oversizedEvent && eventData) {
-        try {
-          const event = JSON.parse(eventData);
-          const terminal = ["response.completed", "response.failed", "response.incomplete"];
-          if (terminal.includes(event?.type) && (!eventName || eventName === event.type)
-            && event.response && typeof event.response === "object") completed = true;
-        } catch { /* A partial or non-JSON event is not terminal evidence. */ }
-      }
-      eventName = "";
-      eventData = "";
-      oversizedEvent = false;
-    } else if (line.startsWith("event:")) {
-      eventName = line.slice(6).trim();
-    } else if (line.startsWith("data:") && !oversizedEvent) {
-      const data = line.slice(5).replace(/^ /, "");
-      if (eventData.length + data.length > maxObservationChars) {
-        oversizedEvent = true;
-        eventData = "";
-      } else {
-        eventData += `${eventData ? "\n" : ""}${data}`;
-      }
-    }
-  };
   const inspectLines = (text: string): void => {
     lineBuffer += text;
     let newline = lineBuffer.indexOf("\n");
     while (newline >= 0) {
       const line = lineBuffer.slice(0, newline).replace(/\r$/, "");
       lineBuffer = lineBuffer.slice(newline + 1);
-      if (!oversizedLine) inspectLine(line);
-      oversizedLine = false;
+      if (line === SSE_TERMINATOR) completed = true;
       newline = lineBuffer.indexOf("\n");
-    }
-    if (lineBuffer.length > maxObservationChars) {
-      oversizedEvent = true;
-      oversizedLine = true;
-      lineBuffer = "";
     }
   };
   const inspectTrailingLine = (): void => {
     // A reset can arrive before the final line separator. Treat only an exact unterminated
     // terminator line as complete; text embedded in a JSON data payload must not qualify.
-    if (!oversizedLine && lineBuffer.replace(/\r$/, "") === SSE_TERMINATOR) completed = true;
+    if (lineBuffer.replace(/\r$/, "") === SSE_TERMINATOR) completed = true;
   };
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
@@ -283,8 +240,6 @@ export async function forwardNativeCodexRequest(
   });
   const upstream = await fetchUpstream(upstreamRequest);
   const responseHeaders = endToEndHeaders(upstream.headers);
-  // Fetch decodes content encodings. Forwarding the original encoding makes Codex decode twice.
-  responseHeaders.delete("content-encoding");
   const isEventStream = (upstream.headers.get("content-type") ?? "")
     .toLowerCase()
     .includes("text/event-stream");

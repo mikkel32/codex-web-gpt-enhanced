@@ -8,8 +8,6 @@ import { atomicWriteFile, expandUserPath, getConfigDir } from "./config";
 export const MANAGED_COMMENT = "# Managed by codex-chatgpt-web; `codex-chatgpt-web uninstall` restores prior values.";
 export const MANAGED_ROUTE_COMMENT =
   "# Managed by codex-chatgpt-web: Responses use the local bridge; Voice stays on ChatGPT.";
-export const MANAGED_NATIVE_PROVIDER_LINE =
-  'model_provider = "openai" # Managed by codex-chatgpt-web: preserves native Codex models.';
 export const CODEX_REALTIME_WEBRTC_CALL_BASE_URL = "https://chatgpt.com/backend-api/codex";
 export const MANAGED_REMOTE_COMPACTION_LINE =
   "remote_compaction_v2 = false # Managed by codex-chatgpt-web: bounds retained Web image history.";
@@ -63,8 +61,6 @@ export interface CodexIntegrationJournal {
     agent_max_depth?: number;
   };
   previous: Record<ManagedAssignmentKey, PreviousAssignment>;
-  /** Present only when setup repaired a custom provider pointing at this same bridge. */
-  previousBridgeProvider?: PreviousAssignment;
   previousRealtimeWebrtcCallBaseUrl: PreviousAssignment;
   interruptHook: InstalledCodexInterruptHook;
   previousMultiAgent?: PreviousFeatureAssignment;

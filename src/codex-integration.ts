@@ -59,7 +59,6 @@ function installConfiguredRoute(
 ): {
   text: string;
   previous: CodexIntegrationJournal["previous"];
-  previousBridgeProvider?: CodexIntegrationJournal["previousBridgeProvider"];
   previousRealtimeWebrtcCallBaseUrl: CodexIntegrationJournal["previousRealtimeWebrtcCallBaseUrl"];
   previousMultiAgent?: CodexIntegrationJournal["previousMultiAgent"];
   previousMultiAgentV2?: CodexIntegrationJournal["previousMultiAgentV2"];
@@ -79,7 +78,6 @@ function installConfiguredRoute(
         return {
           text: features.text,
           previous: route.previous,
-          previousBridgeProvider: route.previousBridgeProvider,
           previousRealtimeWebrtcCallBaseUrl: route.previousRealtimeWebrtcCallBaseUrl,
           previousMultiAgent: features.previousMultiAgent,
           previousMultiAgentV2: features.previousMultiAgentV2,
@@ -285,7 +283,6 @@ export function installCodexIntegration(
         } : {}),
       },
       previous: preservePrevious ? existing.previous : patched.previous,
-      ...(patched.previousBridgeProvider ? { previousBridgeProvider: patched.previousBridgeProvider } : {}),
       previousRealtimeWebrtcCallBaseUrl: preservePrevious && (existing.version === 9 || existing.version === 10)
         ? existing.previousRealtimeWebrtcCallBaseUrl
         : patched.previousRealtimeWebrtcCallBaseUrl,
@@ -328,7 +325,6 @@ export function installCodexIntegration(
       } : {}),
     },
     previous: patched.previous,
-    ...(patched.previousBridgeProvider ? { previousBridgeProvider: patched.previousBridgeProvider } : {}),
     previousRealtimeWebrtcCallBaseUrl: patched.previousRealtimeWebrtcCallBaseUrl,
     interruptHook: patched.interruptHook,
     ...(config.subagentProtocol === "compatibility-v1" ? {
@@ -424,7 +420,6 @@ export function activateCodexIntegration(): SetCodexIntegrationActiveResult {
       } : {}),
     },
     previous: existing.previous,
-    ...(route.previousBridgeProvider ? { previousBridgeProvider: route.previousBridgeProvider } : {}),
     previousRealtimeWebrtcCallBaseUrl: existing.version === 9 || existing.version === 10
       ? existing.previousRealtimeWebrtcCallBaseUrl
       : route.previousRealtimeWebrtcCallBaseUrl,

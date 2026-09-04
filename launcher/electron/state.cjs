@@ -8,6 +8,8 @@ const DEFAULT_STATE = Object.freeze({
   version: 1,
   language: null,
   onboardingComplete: false,
+  githubOpened: false,
+  xOpened: false,
   autoStart: true,
   keepRunningOnClose: true,
   showBrowserDuringTurns: true,
@@ -33,13 +35,13 @@ function readState(filePath) {
     if (!parsed || parsed.version !== 1) return { ...DEFAULT_STATE };
     const state = { ...DEFAULT_STATE, ...parsed };
     delete state.bridgeEnabled;
-    delete state.githubOpened;
-    delete state.xOpened;
     if (state.language !== null && state.language !== "en" && state.language !== "zh-CN" && state.language !== "ja") {
       state.language = DEFAULT_STATE.language;
     }
     for (const key of [
       "onboardingComplete",
+      "githubOpened",
+      "xOpened",
       "autoStart",
       "keepRunningOnClose",
       "showBrowserDuringTurns",

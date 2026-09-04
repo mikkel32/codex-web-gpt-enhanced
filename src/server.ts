@@ -119,7 +119,6 @@ export class HttpTurnCounter {
     done: Promise<void>;
     finish: () => void;
     identity?: NativeCodexTurnIdentity;
-    web?: boolean;
   }>();
   private readonly interrupted = new Map<string, unknown>();
   private nextId = 1;
@@ -143,10 +142,6 @@ export class HttpTurnCounter {
 
   count(): number {
     return this.active.size;
-  }
-
-  webCount(): number {
-    return [...this.active.values()].filter(turn => turn.web).length;
   }
 
   async cancelAll(reason: unknown = new Error("Active HTTP turns cancelled")): Promise<number> {
@@ -188,7 +183,6 @@ export class HttpTurnCounter {
     run: (
       signal: AbortSignal,
       bindIdentity: (identity: NativeCodexTurnIdentity) => void,
-      bindWebRequest: () => void,
     ) => Promise<Response>,
     clientSignal?: AbortSignal,
     platform: NodeJS.Platform = process.platform,
@@ -203,7 +197,6 @@ export class HttpTurnCounter {
       done: Promise<void>;
       finish: () => void;
       identity?: NativeCodexTurnIdentity;
-      web?: boolean;
     } = { abort, done, finish };
     this.active.set(id, tracked);
     let released = false;
@@ -236,7 +229,7 @@ export class HttpTurnCounter {
         tracked.identity = identity;
         const interruptedReason = this.interrupted.get(this.identityKey(identity));
         if (interruptedReason !== undefined && !abort.signal.aborted) abort.abort(interruptedReason);
-      }, () => { tracked.web = true; });
+      });
       if (!response.body) {
         release();
         return response;
@@ -358,10 +351,6 @@ export class HttpTurnCounter {
 type ChatGptWebAdapterFactory = (provider: CodexProviderConfig) => ProviderAdapter;
 
 export interface ResponseRequestOptions {
-  /** Shared native transport for models, responses, compaction, and search. */
-  fetchUpstream?: NativeFetch;
-  browserUnavailable?: boolean | (() => boolean);
-  onWebRequest?: () => void;
   /** DEV and other in-process harnesses can keep continuation state in their own canonical store. */
   rememberState?: boolean;
   /** Observe the exact production adapter stream when invoking the handler in-process. */
@@ -386,7 +375,6 @@ export async function modelsRequest(
   config: AppConfig,
   fetchUpstream?: NativeFetch,
   contextOverride?: () => CodexModelContextOverride | undefined,
-  nativeOnly = false,
 ): Promise<Response> {
   let upstream: Response;
   try {
@@ -395,33 +383,17 @@ export async function modelsRequest(
     return formatErrorResponse(502, "upstream_error", error instanceof Error ? error.message : String(error));
   }
   if (!upstream.ok) return upstream;
-  let nativeCatalog: unknown;
+  let catalog: Record<string, unknown>;
   try {
-    nativeCatalog = await upstream.json();
+    catalog = augmentNativeModelCatalog(await upstream.json(), config, contextOverride?.());
   } catch (error) {
     return formatErrorResponse(502, "invalid_response_error", error instanceof Error ? error.message : String(error));
-  }
-  if (!nativeCatalog || typeof nativeCatalog !== "object" || Array.isArray(nativeCatalog)
-    || !Array.isArray((nativeCatalog as Record<string, unknown>).models)) {
-    return formatErrorResponse(502, "invalid_response_error", "Native Codex models response is missing a models array");
-  }
-  let catalog = nativeCatalog as Record<string, unknown>;
-  let catalogStatus = "augmented";
-  try {
-    if (nativeOnly) catalogStatus = "native-only";
-    else catalog = augmentNativeModelCatalog(nativeCatalog, config, contextOverride?.());
-  } catch (error) {
-    // A Web capability/template mismatch must never hide the account's official models.
-    // No guessed Web model is advertised: the native catalog remains authoritative.
-    catalogStatus = "native-only";
-    console.warn(`[codex-chatgpt-web] web_catalog_unavailable: ${error instanceof Error ? error.message : String(error)}`);
   }
   const body = JSON.stringify(catalog);
   const headers = new Headers(upstream.headers);
   headers.delete("content-encoding");
   headers.delete("content-length");
   headers.set("content-type", "application/json");
-  headers.set("x-webgpt-catalog-status", catalogStatus);
   headers.set("etag", `W/\"${createHash("sha256").update(body).digest("base64url")}\"`);
   return new Response(body, { status: upstream.status, statusText: upstream.statusText, headers });
 }
@@ -483,15 +455,11 @@ export async function responseRequest(
   }
   if (typeof requestedModel === "string" && !isChatGptWebModelSlug(requestedModel)) {
     try {
-      return await forwardNativeCodexRequest(nativeRequest, "responses", options.fetchUpstream, raw);
+      return await forwardNativeCodexRequest(nativeRequest, "responses", undefined, raw);
     } catch (error) {
       return formatErrorResponse(502, "upstream_error", error instanceof Error ? error.message : String(error));
     }
   }
-  if (typeof options.browserUnavailable === "function" ? options.browserUnavailable() : options.browserUnavailable) {
-    return formatErrorResponse(503, "browser_unavailable", "Open Maria WebGPT to use ChatGPT Web. Regular Codex models are still connected.");
-  }
-  options.onWebRequest?.();
   const requestedPreviousResponseId = raw && typeof raw === "object" && !Array.isArray(raw)
     ? (raw as { previous_response_id?: unknown }).previous_response_id
     : undefined;
@@ -651,7 +619,7 @@ export async function compactRequest(
   req: Request,
   config: AppConfig,
   adapterFactory: ChatGptWebAdapterFactory = createChatGptWebAdapter,
-  options: Pick<ResponseRequestOptions, "onTurnIdentity" | "fetchUpstream" | "browserUnavailable" | "onWebRequest"> = {},
+  options: Pick<ResponseRequestOptions, "onTurnIdentity"> = {},
 ): Promise<Response> {
   const nativeRequest = req.clone();
   let raw: Record<string, unknown>;
@@ -695,15 +663,11 @@ export async function compactRequest(
   }
   if (!isChatGptWebModelSlug(raw.model)) {
     try {
-      return await forwardNativeCodexRequest(nativeRequest, "responses/compact", options.fetchUpstream, raw);
+      return await forwardNativeCodexRequest(nativeRequest, "responses/compact", undefined, raw);
     } catch (error) {
       return formatErrorResponse(502, "upstream_error", error instanceof Error ? error.message : String(error));
     }
   }
-  if (typeof options.browserUnavailable === "function" ? options.browserUnavailable() : options.browserUnavailable) {
-    return formatErrorResponse(503, "browser_unavailable", "Open Maria WebGPT to compact a ChatGPT Web task. Regular Codex models are still connected.");
-  }
-  options.onWebRequest?.();
   let route: ChatGptWebModelRoute;
   try {
     route = requireChatGptWebModelRoute(raw.model, config);
@@ -785,15 +749,12 @@ export function startServer(
     });
   }
   let draining = false;
-  let browserDetached = false;
   let shutdownPromise: Promise<void> | undefined;
   let successfulModelCatalogRequests = 0;
   let lastSuccessfulModelCatalogRequestAt: string | null = null;
-  let modelCatalogStatus = "unverified";
   const httpTurns = new HttpTurnCounter();
   const activity = () => ({
     active_http_turns: httpTurns.count(),
-    active_web_requests: httpTurns.webCount(),
     active_browser_turns: chatGptTurnSessions.activeCount() + (turnBroker?.externalOwnerActiveCount() ?? 0),
   });
   const controlAuthorized = (req: Request): boolean => {
@@ -818,28 +779,14 @@ export function startServer(
           port: config.port,
           uptime: (Date.now() - startedAt) / 1_000,
           accepting_turns: !draining,
-          background_capable: true,
-          browser_connected: !browserDetached,
           successful_model_catalog_requests: successfulModelCatalogRequests,
           last_successful_model_catalog_request_at: lastSuccessfulModelCatalogRequestAt,
-          model_catalog_status: modelCatalogStatus,
           ...activity(),
         });
-      }
-      if (req.method === "POST" && url.pathname === "/admin/browser-detach") {
-        if (!controlAuthorized(req)) return new Response("Unauthorized", { status: 401 });
-        if (activity().active_browser_turns > 0 || httpTurns.webCount() > 0) {
-          return Response.json({ status: "busy", ...activity() }, { status: 409 });
-        }
-        browserDetached = true;
-        turnBroker?.setExternalOwnersAccepted(false);
-        chatGptTurnSessions.clear();
-        return Response.json({ status: "ok", browser_connected: false, ...activity() });
       }
       if (req.method === "POST" && (url.pathname === "/admin/drain" || url.pathname === "/admin/resume")) {
         if (!controlAuthorized(req)) return new Response("Unauthorized", { status: 401 });
         draining = url.pathname === "/admin/drain";
-        if (!draining) browserDetached = false;
         turnBroker?.setExternalOwnersAccepted(!draining);
         return Response.json({ status: "ok", accepting_turns: !draining, ...activity() });
       }
@@ -971,26 +918,25 @@ export function startServer(
         }
         return httpTurns.track(async signal => {
           let catalogConfig: AppConfig;
-          let nativeOnly = browserDetached;
           try {
             catalogConfig = {
               ...config,
               subagentProtocol: readCodexSubagentProtocol(config.subagentProtocol),
             };
           } catch (error) {
-            console.warn(`[codex-chatgpt-web] catalog_integration_unavailable: ${error instanceof Error ? error.message : String(error)}`);
-            catalogConfig = config;
-            nativeOnly = true;
+            return formatErrorResponse(
+              500,
+              "server_error",
+              `Could not resolve the installed subagent protocol: ${error instanceof Error ? error.message : String(error)}`,
+            );
           }
           const response = await modelsRequest(
             new Request(req, { signal }),
             catalogConfig,
             dependencies.fetchUpstream,
             readCodexModelContextOverride,
-            nativeOnly,
           );
-          modelCatalogStatus = response.ok ? response.headers.get("x-webgpt-catalog-status") ?? "unverified" : "unavailable";
-          if (response.ok && modelCatalogStatus === "augmented") {
+          if (response.ok) {
             successfulModelCatalogRequests += 1;
             lastSuccessfulModelCatalogRequestAt = new Date().toISOString();
           }
@@ -1006,11 +952,11 @@ export function startServer(
       if (req.method === "POST" && url.pathname === "/v1/responses") {
         if (draining) return formatErrorResponse(503, "server_error", "codex-chatgpt-web is draining for a requested service operation");
         return httpTurns.track(
-          (signal, bindIdentity, bindWebRequest) => responseRequest(
+          (signal, bindIdentity) => responseRequest(
             new Request(req, { signal }),
             config,
             dependencies.adapterFactory,
-            { onTurnIdentity: bindIdentity, fetchUpstream: dependencies.fetchUpstream, browserUnavailable: () => browserDetached, onWebRequest: bindWebRequest },
+            { onTurnIdentity: bindIdentity },
           ),
           req.signal,
           process.platform,
@@ -1020,11 +966,11 @@ export function startServer(
       if (req.method === "POST" && url.pathname === "/v1/responses/compact") {
         if (draining) return formatErrorResponse(503, "server_error", "codex-chatgpt-web is draining for a requested service operation");
         return httpTurns.track(
-          (signal, bindIdentity, bindWebRequest) => compactRequest(
+          (signal, bindIdentity) => compactRequest(
             new Request(req, { signal }),
             config,
             dependencies.adapterFactory,
-            { onTurnIdentity: bindIdentity, fetchUpstream: dependencies.fetchUpstream, browserUnavailable: () => browserDetached, onWebRequest: bindWebRequest },
+            { onTurnIdentity: bindIdentity },
           ),
           req.signal,
           process.platform,

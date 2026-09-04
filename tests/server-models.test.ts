@@ -7,45 +7,6 @@ import {
 } from "../src/chatgpt-web-models";
 import { modelsRequest } from "../src/server";
 
-test("a Web catalog failure keeps every official model and its metadata available", async () => {
-  const config = defaultConfig("full");
-  config.browserInteractionMode = "manual";
-  config.experimentalBiggerContext = true;
-  const catalog = { models: [{
-    slug: "native-only", visibility: "list", supported_in_api: false,
-    supported_reasoning_levels: [], tool_mode: "code_mode_only", multi_agent_version: "v2",
-  }], revision: "official" };
-  const response = await modelsRequest(new Request("http://localhost/v1/models", {
-    headers: { authorization: "Bearer test" },
-  }), config, async () => Response.json(catalog));
-  expect(response.status).toBe(200);
-  expect(response.headers.get("x-webgpt-catalog-status")).toBe("native-only");
-  expect(await response.json()).toEqual(catalog);
-});
-
-test("a missing Web template and a broken context override do not break native discovery", async () => {
-  for (const catalog of [{ models: [] }, { models: [{ slug: "future-native", visibility: "list" }] }]) {
-    const response = await modelsRequest(new Request("http://localhost/v1/models", {
-      headers: { authorization: "Bearer test" },
-    }), defaultConfig("full"), async () => Response.json(catalog), () => { throw new Error("invalid override"); });
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual(catalog);
-  }
-});
-
-test("catalog fallback does not hide upstream authentication or malformed response failures", async () => {
-  for (const status of [401, 403, 429, 503]) {
-    const response = await modelsRequest(new Request("http://localhost/v1/models", {
-      headers: { authorization: "Bearer test" },
-    }), defaultConfig("full"), async () => new Response("upstream error", { status }));
-    expect(response.status).toBe(status);
-  }
-  const malformed = await modelsRequest(new Request("http://localhost/v1/models", {
-    headers: { authorization: "Bearer test" },
-  }), defaultConfig("full"), async () => Response.json({ unexpected: true }));
-  expect(malformed.status).toBe(502);
-});
-
 test("proxies official /models auth and query, then appends the fixed ChatGPT Web models", async () => {
   const request = new Request("http://127.0.0.1:17841/v1/models?client_version=1.2.3", {
     headers: { authorization: "Bearer codex-oauth-token", "if-none-match": "native-etag" },

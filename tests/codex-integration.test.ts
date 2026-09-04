@@ -59,42 +59,6 @@ afterEach(() => {
 });
 
 describe("reversible native Codex route integration", () => {
-  test("repairs a bridge custom provider and restores it exactly across reconnect and uninstall", () => {
-    const { codexHome } = fixture();
-    const configPath = join(codexHome, "config.toml");
-    const original = 'model = "gpt-6-astra"\nmodel_provider = "chatgpt_web_bridge" # old setup\n\n'
-      + '[model_providers.chatgpt_web_bridge]\nbase_url = "http://127.0.0.1:17841/v1"\nrequires_openai_auth = true\n';
-    writeFileSync(configPath, original);
-    const config = nativeConfig("full");
-    const journal = installCodexIntegration(config);
-    expect(journal.previousBridgeProvider?.value).toBe("chatgpt_web_bridge");
-    expect((Bun.TOML.parse(readFileSync(configPath, "utf8")) as { model_provider: string }).model_provider).toBe("openai");
-    expect(inspectCodexIntegration().errors).toEqual([]);
-    installCodexIntegration(config);
-    deactivateCodexIntegration();
-    expect(readFileSync(configPath, "utf8")).toBe(original);
-    activateCodexIntegration();
-    expect((Bun.TOML.parse(readFileSync(configPath, "utf8")) as { model_provider: string }).model_provider).toBe("openai");
-    uninstallCodexIntegration();
-    expect(readFileSync(configPath, "utf8")).toBe(original);
-  });
-
-  test("provider repair preserves a newer user choice and never rewrites unrelated providers", () => {
-    const { codexHome } = fixture();
-    const configPath = join(codexHome, "config.toml");
-    const original = 'model_provider = "other"\n\n[model_providers.other]\n'
-      + 'base_url = "https://example.com/v1"\nrequires_openai_auth = true\n';
-    writeFileSync(configPath, original);
-    expect(installCodexIntegration(nativeConfig("full")).previousBridgeProvider).toBeUndefined();
-    expect((Bun.TOML.parse(readFileSync(configPath, "utf8")) as { model_provider: string }).model_provider).toBe("other");
-    uninstallCodexIntegration();
-    writeFileSync(configPath, original.replace("https://example.com/v1", "http://127.0.0.1:17841/v1"));
-    installCodexIntegration(nativeConfig("full"));
-    const newer = readFileSync(configPath, "utf8").replace('model_provider = "openai"', 'model_provider = "sakana"');
-    writeFileSync(configPath, newer);
-    expect(() => deactivateCodexIntegration()).toThrow("model_provider changed");
-    expect(readFileSync(configPath, "utf8")).toBe(newer);
-  });
   test("expands a configured tilde Codex home consistently with launcher paths", () => {
     process.env.CODEX_HOME = "~/custom-codex-home";
     expect(getCodexHome()).toBe(join(homedir(), "custom-codex-home"));

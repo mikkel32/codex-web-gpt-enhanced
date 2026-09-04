@@ -944,7 +944,7 @@ class RuntimeHost {
           embedded: true,
           env: this.launcherControlEnvironment(),
           message: "Restoring the previous Codex route",
-          successMessage: "Maria WebGPT integration removed",
+          successMessage: "Codex Web GPT integration removed",
           timeoutMs: UNINSTALL_TIMEOUT_MS,
         });
         const verified = await this.bridgeStatus(name);

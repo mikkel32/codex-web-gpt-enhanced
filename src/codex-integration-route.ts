@@ -4,7 +4,6 @@ import {
   CODEX_REALTIME_WEBRTC_CALL_BASE_URL,
   MANAGED_COMMENT,
   MANAGED_ROUTE_COMMENT,
-  MANAGED_NATIVE_PROVIDER_LINE,
   MANAGED_MULTI_AGENT_LINE,
   MANAGED_REMOTE_COMPACTION_LINE,
   managedAgentMaxDepthLine,
@@ -51,27 +50,6 @@ import {
   verifyInstalledFeatures,
   verifyCompatibilityV1Features,
 } from "./codex-integration-document";
-
-function restoreBridgeProvider(text: string, journal: ManagedRouteJournal): string {
-  if (journal.version !== 10 || !journal.previousBridgeProvider) return text;
-  const document = parseDocument(text);
-  const current = findTopLevelAssignment(document.lines, "model_provider");
-  if (current.rawLine === MANAGED_NATIVE_PROVIDER_LINE && current.index !== undefined) {
-    document.lines[current.index] = journal.previousBridgeProvider.rawLine!;
-  }
-  return renderDocument(document);
-}
-
-/** A provider targeting our own URL hides ChatGPT-only native rows in Codex's custom-provider mode. */
-function isBridgeProvider(text: string, provider: PreviousAssignment, installedUrl: string): boolean {
-  if (!provider.present || provider.value === "openai") return false;
-  const config = Bun.TOML.parse(text.replace(/^\uFEFF/, "")) as {
-    model_providers?: Record<string, { base_url?: string; requires_openai_auth?: boolean }>;
-  };
-  const definition = config.model_providers?.[provider.value!];
-  return definition?.base_url?.replace(/\/$/, "") === installedUrl.replace(/\/$/, "")
-    && definition.requires_openai_auth === true;
-}
 
 function compatibilityV1Evidence(
   journal: CodexIntegrationJournal | LegacyCodexIntegrationJournalV9 | LegacyCodexIntegrationJournalV8,
@@ -204,7 +182,7 @@ export function replacementBaseline(
     const withoutHook = journal.version === 10
       ? restoreCodexInterruptHook(currentText, journal.interruptHook)
       : currentText;
-    const baseline = restoreBridgeProvider(restoreOwnedManagedFeatures(withoutHook, journal), journal);
+    const baseline = restoreOwnedManagedFeatures(withoutHook, journal);
     const document = parseDocument(baseline);
     removeManagedComment(document);
     for (const [key, installedValue, previous] of [
@@ -258,16 +236,9 @@ export function installRoute(
   text: string;
   previous: CodexIntegrationJournal["previous"];
   previousRealtimeWebrtcCallBaseUrl: PreviousAssignment;
-  previousBridgeProvider?: PreviousAssignment;
 } {
   const document = parseDocument(text);
   const previous = assignments(document.lines);
-  const previousBridgeProvider = isBridgeProvider(text, previous.model_provider, installedUrl)
-    ? previous.model_provider
-    : undefined;
-  if (previousBridgeProvider?.index !== undefined) {
-    document.lines[previousBridgeProvider.index] = MANAGED_NATIVE_PROVIDER_LINE;
-  }
   if (previous.openai_base_url.present && !replaceExistingRoute) {
     throw new Error(
       `Codex already configures model routing (openai_base_url=${JSON.stringify(previous.openai_base_url.value)}). `
@@ -306,16 +277,12 @@ export function installRoute(
   removeManagedComment(document);
   const installedBaseUrl = findTopLevelAssignment(document.lines, "openai_base_url");
   insertDocumentLine(document, installedBaseUrl.index!, MANAGED_ROUTE_COMMENT);
-  return { text: renderDocument(document), previous, previousRealtimeWebrtcCallBaseUrl, previousBridgeProvider };
+  return { text: renderDocument(document), previous, previousRealtimeWebrtcCallBaseUrl };
 }
 
 export function verifyInstalledRoute(text: string, journal: ManagedRouteJournal): void {
   const lines = splitLines(text);
   const current = assignments(lines);
-  if (journal.version === 10 && journal.previousBridgeProvider
-    && current.model_provider.rawLine !== MANAGED_NATIVE_PROVIDER_LINE) {
-    throw new Error("Codex model_provider changed after setup; refusing to overwrite the user's newer value");
-  }
   if (current.openai_base_url.value !== journal.installed.openai_base_url) {
     throw new Error("Codex openai_base_url changed after setup; refusing to overwrite the user's newer value");
   }
@@ -368,10 +335,6 @@ export function verifyRestoredRoute(
 ): void {
   const lines = splitLines(text);
   const current = assignments(lines);
-  if (journal.version === 10 && journal.previousBridgeProvider
-    && !previousAssignmentMatchesExactly(current.model_provider, journal.previousBridgeProvider)) {
-    throw new Error("Codex model_provider changed while the bridge was disconnected; refusing to overwrite it");
-  }
   const keys = journal.version === 7 || journal.version === 8 || journal.version === 9 || journal.version === 10
     ? (["openai_base_url"] as const)
     : (["openai_base_url", "model_provider", "model_catalog_json"] as const);
@@ -471,7 +434,7 @@ export function restoreManagedRoute(text: string, journal: ManagedRouteJournal):
   const withoutHook = journal.version === 10
     ? restoreCodexInterruptHook(text, journal.interruptHook)
     : text;
-  const document = parseDocument(restoreBridgeProvider(withoutHook, journal));
+  const document = parseDocument(withoutHook);
   removeManagedComment(document);
   const currentBaseUrl = findTopLevelAssignment(document.lines, "openai_base_url");
   if (currentBaseUrl.index === undefined) throw new Error("Managed Codex openai_base_url is missing");

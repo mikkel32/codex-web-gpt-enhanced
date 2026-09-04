@@ -57,9 +57,6 @@ function parseJournal(path: string): AnyCodexIntegrationJournal {
         && Number.isSafeInteger(installed.agent_max_depth)
         && installed.agent_max_depth >= 2))
     && value.previous
-    && (value.previousBridgeProvider === undefined
-      || (isPreviousAssignment(value.previousBridgeProvider)
-        && (value.previousBridgeProvider as Record<string, unknown>).present === true))
     && isPreviousAssignment(value.previousRealtimeWebrtcCallBaseUrl)
     && isInstalledInterruptHook(value.interruptHook)
     && typeof value.configPath === "string") {

@@ -20,14 +20,12 @@ const {
   isTemporaryChatUrl,
   loadCommittedBrowserSurface,
   MANUAL_SUBMIT_TIMEOUT_MS,
-  MANUAL_CONNECT_TIMEOUT_MS,
   navigationErrorForLog,
   navigationOriginForLog,
 } = require("../electron/browser-host.cjs");
 
 test("manual prompt handoff has one thirty-second user deadline", () => {
-  assert.equal(MANUAL_SUBMIT_TIMEOUT_MS, 300_000);
-  assert.equal(MANUAL_CONNECT_TIMEOUT_MS, 90_000);
+  assert.equal(MANUAL_SUBMIT_TIMEOUT_MS, 30_000);
 });
 
 test("Electron and Bun agree on the exact launcher idle surface", () => {

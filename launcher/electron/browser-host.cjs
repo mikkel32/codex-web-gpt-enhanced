@@ -31,8 +31,7 @@ const PRIMARY_VIEW_BOOTSTRAP_TIMEOUT_MS = 10_000;
 const MAX_BROWSER_VIEW_DIMENSION = 16_384;
 const MAX_BROWSER_TABS = 5;
 const MAX_CANCELLED_TURN_TRACES = 256;
-const MANUAL_SUBMIT_TIMEOUT_MS = 5 * 60_000;
-const MANUAL_CONNECT_TIMEOUT_MS = 90_000;
+const MANUAL_SUBMIT_TIMEOUT_MS = 30_000;
 const MAX_MANUAL_TERMINAL_SIGNALS = 256;
 const MAX_MANUAL_PROMPT_CHARS = 1_000_000;
 const INTERACTION_MODE_CHANGE_OPERATION = "browser interaction mode change";
@@ -1865,8 +1864,8 @@ class BrowserHost {
       const waitingForConnector = tab.manualState === "sent";
       tab.status = "error";
       tab.message = waitingForConnector
-        ? "ChatGPT did not connect within 90 seconds. Check that Codex Zero Risk is selected and the tunnel is running."
-        : "Prompt submission was not confirmed within 5 minutes. Start the turn again when ready.";
+        ? "ChatGPT did not start through the Codex harness within 30 seconds"
+        : "Prompt submission was not confirmed within 30 seconds";
       this.signalManualTerminal(tab, "timeout");
       this.publishState?.(this.snapshot());
       this.logger.warn("browser.manual_turn_timed_out", {
@@ -2076,7 +2075,7 @@ class BrowserHost {
     }
     if (tab.manualDeadlineTimer) clearTimeout(tab.manualDeadlineTimer);
     tab.manualState = "sent";
-    tab.manualDeadlineAt = Date.now() + MANUAL_CONNECT_TIMEOUT_MS;
+    tab.manualDeadlineAt = Date.now() + MANUAL_SUBMIT_TIMEOUT_MS;
     tab.sentAt = new Date().toISOString();
     tab.prompt = null;
     tab.message = "Prompt sent; waiting for ChatGPT to start through the Codex harness";
@@ -2879,7 +2878,6 @@ module.exports = {
   isTemporaryChatUrl,
   loadCommittedBrowserSurface,
   MANUAL_SUBMIT_TIMEOUT_MS,
-  MANUAL_CONNECT_TIMEOUT_MS,
   navigationErrorForLog,
   navigationOriginForLog,
   TEMPORARY_CHAT_URL,

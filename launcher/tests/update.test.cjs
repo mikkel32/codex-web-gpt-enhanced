@@ -17,7 +17,7 @@ const {
 test("Linux auto-update fails closed without the stable installer wrapper", () => {
   const previousAppImage = process.env.CODEX_WEB_GPT_APPIMAGE;
   const previousWrapper = process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE;
-  process.env.CODEX_WEB_GPT_APPIMAGE = "/opt/codex/Maria WebGPT.AppImage";
+  process.env.CODEX_WEB_GPT_APPIMAGE = "/opt/codex/Codex Web GPT.AppImage";
   delete process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE;
   try {
     assert.throws(() => buildJob({
@@ -55,11 +55,11 @@ test("checksums and release URLs bind the exact expected asset", () => {
   assert.throws(() => expectedChecksum(`${hash}  other.zip\n`, "launcher.zip"), /no entry/);
   assert.equal(
     validateReleaseAssetUrl(
-      "https://github.com/mikkel32/codex-web-gpt-enhanced/releases/download/v1.2.0/launcher.zip",
+      "https://github.com/miuuyy/codex-chatgpt-web/releases/download/v1.2.0/launcher.zip",
       "1.2.0",
       "launcher.zip",
     ),
-    "https://github.com/mikkel32/codex-web-gpt-enhanced/releases/download/v1.2.0/launcher.zip",
+    "https://github.com/miuuyy/codex-chatgpt-web/releases/download/v1.2.0/launcher.zip",
   );
   assert.throws(
     () => validateReleaseAssetUrl("https://example.com/launcher.zip", "1.2.0", "launcher.zip"),
@@ -69,10 +69,10 @@ test("checksums and release URLs bind the exact expected asset", () => {
 
 test("macOS bundle resolution never guesses outside Contents/MacOS", () => {
   assert.equal(
-    macApplicationPath("/Applications/Maria WebGPT.app/Contents/MacOS/Maria WebGPT"),
-    "/Applications/Maria WebGPT.app",
+    macApplicationPath("/Applications/Codex Web GPT.app/Contents/MacOS/Codex Web GPT"),
+    "/Applications/Codex Web GPT.app",
   );
-  assert.throws(() => macApplicationPath("/tmp/Maria WebGPT"), /Could not resolve/);
+  assert.throws(() => macApplicationPath("/tmp/Codex Web GPT"), /Could not resolve/);
 });
 
 test("startup check runs once and exposes only a newer complete release", async () => {
@@ -95,11 +95,11 @@ test("startup check runs once and exposes only a newer complete release", async 
           assets: [
             {
               name: "codex-web-gpt-1.2.0-linux-x64.AppImage",
-              browser_download_url: "https://github.com/mikkel32/codex-web-gpt-enhanced/releases/download/v1.2.0/codex-web-gpt-1.2.0-linux-x64.AppImage",
+              browser_download_url: "https://github.com/miuuyy/codex-chatgpt-web/releases/download/v1.2.0/codex-web-gpt-1.2.0-linux-x64.AppImage",
             },
             {
               name: "checksums.txt",
-              browser_download_url: "https://github.com/mikkel32/codex-web-gpt-enhanced/releases/download/v1.2.0/checksums.txt",
+              browser_download_url: "https://github.com/miuuyy/codex-chatgpt-web/releases/download/v1.2.0/checksums.txt",
             },
           ],
         };
@@ -114,7 +114,7 @@ test("startup check runs once and exposes only a newer complete release", async 
 
 test("verified update is handed to one detached worker", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "launcher-update-test-"));
-  const oldAppImage = path.join(root, "versions", "1.1.4", "Maria WebGPT.AppImage");
+  const oldAppImage = path.join(root, "versions", "1.1.4", "Codex Web GPT.AppImage");
   const wrapper = path.join(root, "bin", "codex-web-gpt");
   fs.mkdirSync(path.dirname(oldAppImage), { recursive: true });
   fs.mkdirSync(path.dirname(wrapper), { recursive: true });
@@ -142,11 +142,11 @@ test("verified update is handed to one detached worker", async () => {
           assets: [
             {
               name: "codex-web-gpt-1.2.0-linux-x64.AppImage",
-              browser_download_url: "https://github.com/mikkel32/codex-web-gpt-enhanced/releases/download/v1.2.0/codex-web-gpt-1.2.0-linux-x64.AppImage",
+              browser_download_url: "https://github.com/miuuyy/codex-chatgpt-web/releases/download/v1.2.0/codex-web-gpt-1.2.0-linux-x64.AppImage",
             },
             {
               name: "checksums.txt",
-              browser_download_url: "https://github.com/mikkel32/codex-web-gpt-enhanced/releases/download/v1.2.0/checksums.txt",
+              browser_download_url: "https://github.com/miuuyy/codex-chatgpt-web/releases/download/v1.2.0/checksums.txt",
             },
           ],
         }),
@@ -186,8 +186,8 @@ test("detached worker replaces an installed Linux AppImage and removes the old v
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "launcher-worker-test-"));
   const jobRoot = path.join(root, "job");
   const versionsRoot = path.join(root, "versions");
-  const oldTarget = path.join(versionsRoot, "1.1.4", "Maria WebGPT.AppImage");
-  const newTarget = path.join(versionsRoot, "1.2.0", "Maria WebGPT.AppImage");
+  const oldTarget = path.join(versionsRoot, "1.1.4", "Codex Web GPT.AppImage");
+  const newTarget = path.join(versionsRoot, "1.2.0", "Codex Web GPT.AppImage");
   const wrapper = path.join(root, "bin", "codex-web-gpt");
   const marker = path.join(root, "launched");
   const source = path.join(jobRoot, "update.AppImage");
@@ -220,7 +220,7 @@ test("detached worker replaces an installed Linux AppImage and removes the old v
     assert.equal(result.status, 0, result.stderr);
     assert.equal(fs.existsSync(newTarget), true);
     assert.equal(fs.existsSync(path.dirname(oldTarget)), false);
-    assert.match(fs.readFileSync(wrapper, "utf8"), /versions\/1\.2\.0\/Maria WebGPT\.AppImage/);
+    assert.match(fs.readFileSync(wrapper, "utf8"), /versions\/1\.2\.0\/Codex Web GPT\.AppImage/);
     assert.doesNotMatch(fs.readFileSync(wrapper, "utf8"), /APPIMAGE_EXTRACT_AND_RUN/);
     assert.equal(fs.existsSync(path.join(versionsRoot, "run-appimage")), true);
     const deadline = Date.now() + 3_000;

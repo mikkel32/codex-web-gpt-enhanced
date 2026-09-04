@@ -3,80 +3,12 @@ name: Release
 on:
   push:
     tags: ["v*"]
-  workflow_run:
-    workflows: ["CI"]
-    branches: [main]
-    types: [completed]
 
 permissions:
   contents: write
 
-concurrency:
-  group: release-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
-  cancel-in-progress: false
-
 jobs:
-  prepare:
-    if: github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      publish: ${{ steps.release.outputs.publish }}
-      source_sha: ${{ steps.release.outputs.source_sha }}
-      tag: ${{ steps.release.outputs.tag }}
-    steps:
-      - name: Check out the exact release source
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-          fetch-depth: 0
-      - name: Resolve and, after green main CI, create the version tag
-        id: release
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PUSH_TAG: ${{ github.ref_name }}
-          WORKFLOW_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-          WORKFLOW_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          version="$(jq -r '.version' package.json)"
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
-          tag="v${version}"
-          source_sha="$(git rev-parse HEAD)"
-          publish=true
-
-          if [ "$EVENT_NAME" = "push" ]; then
-            test "$PUSH_TAG" = "$tag"
-          else
-            test "$WORKFLOW_HEAD_BRANCH" = "main"
-            test "$WORKFLOW_HEAD_SHA" = "$source_sha"
-            git fetch origin main --tags
-            test "$(git rev-parse origin/main)" = "$source_sha"
-
-            if tagged_sha="$(git rev-list -n 1 "$tag" 2>/dev/null)"; then
-              test "$tagged_sha" = "$source_sha"
-              if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-                publish=false
-              fi
-            else
-              git config user.name "github-actions[bot]"
-              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-              git tag -a "$tag" "$source_sha" -m "Maria WebGPT ${version}"
-              git push origin "refs/tags/${tag}"
-            fi
-          fi
-
-          {
-            echo "publish=$publish"
-            echo "source_sha=$source_sha"
-            echo "tag=$tag"
-          } >> "$GITHUB_OUTPUT"
-
   build:
-    needs: prepare
-    if: needs.prepare.outputs.publish == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -92,8 +24,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.prepare.outputs.source_sha }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
@@ -136,7 +66,7 @@ jobs:
           test -n "$archive"
           stage="$(mktemp -d)"
           ditto -x -k "$archive" "$stage"
-          codesign --verify --deep --strict --verbose=2 "$stage/Maria WebGPT.app"
+          codesign --verify --deep --strict --verbose=2 "$stage/Codex Web GPT.app"
       - name: Archive runtime
         if: runner.os != 'Windows'
         run: tar -czf "${{ matrix.runtime_asset }}" -C launcher/build/runtime .
@@ -156,15 +86,10 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [prepare, build]
-    if: needs.prepare.outputs.publish == 'true'
+    needs: build
     runs-on: ubuntu-latest
-    env:
-      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
     steps:
       - uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.prepare.outputs.source_sha }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
@@ -179,7 +104,7 @@ jobs:
       - name: Verify release tag matches package version
         run: |
           expected="v$(jq -r .version package.json)"
-          test "$RELEASE_TAG" = "$expected"
+          test "$GITHUB_REF_NAME" = "$expected"
       - name: Add licenses and installers
         run: |
           cp LICENSE release-assets/LICENSE
@@ -232,27 +157,27 @@ jobs:
           mapfile -d '' release_files < <(find release-assets -type f -print0)
           test "${#release_files[@]}" -gt 0
           release_flags=(--latest)
-          if [[ "$RELEASE_TAG" == *-* ]]; then
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
             release_flags=(--prerelease --latest=false)
           fi
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "${release_files[@]}" \
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${release_files[@]}" \
               --repo "$GITHUB_REPOSITORY" \
               --clobber
-            gh release edit "$RELEASE_TAG" \
+            gh release edit "$GITHUB_REF_NAME" \
               --repo "$GITHUB_REPOSITORY" \
               --draft=false \
               "${release_flags[@]}"
           else
-            gh release create "$RELEASE_TAG" "${release_files[@]}" \
+            gh release create "$GITHUB_REF_NAME" "${release_files[@]}" \
               --repo "$GITHUB_REPOSITORY" \
-              --title "$RELEASE_TAG" \
+              --title "$GITHUB_REF_NAME" \
               "${release_flags[@]}" \
               --generate-notes
           fi
 
           published_manifest="$(mktemp)"
-          gh release view "$RELEASE_TAG" \
+          gh release view "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             --json assets \
             --jq '.assets[] | select(.name != "checksums.txt") | [.name, .digest] | @tsv' \
@@ -266,7 +191,7 @@ jobs:
             | LC_ALL=C sort -k2 > "$published_manifest"
           test -s "$published_manifest"
           mv "$published_manifest" release-assets/checksums.txt
-          gh release upload "$RELEASE_TAG" release-assets/checksums.txt \
+          gh release upload "$GITHUB_REF_NAME" release-assets/checksums.txt \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
 
@@ -277,13 +202,13 @@ jobs:
               echo "Published asset checksum mismatch: $name" >&2
               exit 1
             fi
-          done < <(gh release view "$RELEASE_TAG" \
+          done < <(gh release view "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             --json assets \
             --jq '.assets[] | [.name, .digest] | @tsv')
 
           local_manifest_digest="$(sha256sum release-assets/checksums.txt | awk '{ print $1 }')"
-          remote_manifest_digest="$(gh release view "$RELEASE_TAG" \
+          remote_manifest_digest="$(gh release view "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             --json assets \
             --jq '.assets[] | select(.name == "checksums.txt") | .digest')"

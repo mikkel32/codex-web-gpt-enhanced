@@ -81,11 +81,11 @@ test("packaged runtime paths are native on Windows and Unix", () => {
 test("Linux autostart launches the durable AppImage invisibly", () => {
   const entry = linuxDesktopEntry(
     { getPath: () => "/tmp/transient-electron" },
-    "/home/example/Applications/Maria WebGPT.AppImage",
+    "/home/example/Applications/Codex Web GPT.AppImage",
   );
   assert.match(
     entry,
-    /^Exec="\/home\/example\/Applications\/Maria WebGPT\.AppImage" --hidden$/m,
+    /^Exec="\/home\/example\/Applications\/Codex Web GPT\.AppImage" --hidden$/m,
   );
   assert.doesNotMatch(entry, /APPIMAGE_EXTRACT_AND_RUN/);
   assert.match(entry, /^Terminal=false$/m);
@@ -95,9 +95,9 @@ test("Linux autostart launches the durable AppImage invisibly", () => {
 test("Linux autostart escapes desktop-entry field codes in executable paths", () => {
   const entry = linuxDesktopEntry(
     { getPath: () => "/tmp/transient-electron" },
-    "/home/example/100% ready/Maria WebGPT.AppImage",
+    "/home/example/100% ready/Codex Web GPT.AppImage",
   );
-  assert.match(entry, /"\/home\/example\/100%% ready\/Maria WebGPT\.AppImage" --hidden/);
+  assert.match(entry, /"\/home\/example\/100%% ready\/Codex Web GPT\.AppImage" --hidden/);
 });
 
 test("Linux autostart follows the stable installer wrapper across app updates", () => {
@@ -234,7 +234,7 @@ test("launcher runtime validation rejects a relative full-mode executable before
 });
 
 test("launcher runtime validation accepts native Windows paths and a named pipe", () => {
-  const descriptorPath = "C:\\Users\\Example\\AppData\\Local\\Maria WebGPT\\launcher-browser.json";
+  const descriptorPath = "C:\\Users\\Example\\AppData\\Local\\Codex Web GPT\\launcher-browser.json";
   const config = {
     version: 3,
     releaseVersion: "0.2.0",
@@ -246,7 +246,7 @@ test("launcher runtime validation accepts native Windows paths and a named pipe"
     browserHost: "launcher",
     browserHostDescriptorPath: descriptorPath.toLowerCase(),
     chromeExecutablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-    storageStatePath: "C:\\Users\\Example\\AppData\\Local\\Maria WebGPT\\storage-state.json",
+    storageStatePath: "C:\\Users\\Example\\AppData\\Local\\Codex Web GPT\\storage-state.json",
     brokerSocketPath: "\\\\.\\pipe\\codex-chatgpt-web-runtime-supervisor-test",
     headed: true,
     solAvailable: true,
@@ -276,14 +276,14 @@ test("launcher delegates long-lived tunnel supervision to native runtimes connec
     },
   });
   const invocation = {
-    executable: "C:\\Program Files\\Maria WebGPT\\resources\\runtime\\bun.exe",
+    executable: "C:\\Program Files\\Codex Web GPT\\resources\\runtime\\bun.exe",
     args: [
-      "C:\\Program Files\\Maria WebGPT\\resources\\runtime\\app\\cli.js",
+      "C:\\Program Files\\Codex Web GPT\\resources\\runtime\\app\\cli.js",
       "mcp",
       "--broker-socket",
       config.brokerSocketPath,
     ],
-    cwd: "C:\\Program Files\\Maria WebGPT\\resources\\runtime",
+    cwd: "C:\\Program Files\\Codex Web GPT\\resources\\runtime",
   };
   const args = managedTunnelConnectArgs(config, invocation);
   assert.deepEqual(args.slice(0, 4), [

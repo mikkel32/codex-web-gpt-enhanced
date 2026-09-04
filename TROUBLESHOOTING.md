@@ -5,8 +5,8 @@ editing Codex configuration, or opening a new issue.
 
 ## The first five minutes
 
-1. Install the [latest release](https://github.com/mikkel32/codex-web-gpt-enhanced/releases/latest). Quit
-   **Maria WebGPT** before running the installer again; updating preserves its private ChatGPT
+1. Install the [latest release](https://github.com/miuuyy/codex-chatgpt-web/releases/latest). Quit
+   **Codex Web GPT** before running the installer again; updating preserves its private ChatGPT
    profile and launcher configuration.
 2. In the launcher, confirm that ChatGPT sign-in, the browser smoke test, and **Install models** (or
    **Repair Codex setup**) are green.
@@ -39,20 +39,20 @@ not repair an unrelated ChatGPT browser or model-turn failure.
 
 The launcher deliberately refuses to overwrite a route changed by another tool. Only one program
 can own Codex's `openai_base_url` at a time. Wrappers and routers such as OpenCodex, Headroom,
-OmniRoute, Codex++, CC Switch, or a manually configured provider may replace the Maria WebGPT route
+OmniRoute, Codex++, CC Switch, or a manually configured provider may replace the Codex Web GPT route
 for the whole installation or only for the process they launch.
 
 Choose one route owner:
 
-- To use Maria WebGPT, disable the other wrapper's provider/proxy mode, run **Repair Codex setup**,
+- To use Codex Web GPT, disable the other wrapper's provider/proxy mode, run **Repair Codex setup**,
   fully restart Codex, and start Codex directly rather than through the wrapper command.
 - A tool may remain enabled only as an MCP integration if it does not replace `openai_base_url`.
 - To switch away cleanly, use **Settings → Remove Codex integration** first. This restores the exact
-  route that existed before Maria WebGPT was installed.
+  route that existed before Codex Web GPT was installed.
 
 Do not hand-edit the launcher's route journal. It exists so setup and removal can fail closed instead
 of silently destroying another provider's configuration. First-class external-router composition is
-tracked in [#205](https://github.com/mikkel32/codex-web-gpt-enhanced/issues/205), but is not supported today.
+tracked in [#205](https://github.com/miuuyy/codex-chatgpt-web/issues/205), but is not supported today.
 
 ## ChatGPT sign-in does not complete
 
@@ -65,7 +65,7 @@ window does not automatically transfer that session.
   running.
 - If the account offers **Try another way**, an alternate authentication method can avoid a
   platform-passkey limitation.
-- Passkey-only macOS accounts have a known open issue: [#209](https://github.com/mikkel32/codex-web-gpt-enhanced/issues/209).
+- Passkey-only macOS accounts have a known open issue: [#209](https://github.com/miuuyy/codex-chatgpt-web/issues/209).
   If no alternate method exists, follow that issue rather than repeatedly deleting the browser
   profile; there is no safe generic workaround to claim yet.
 
@@ -91,9 +91,10 @@ missing paid selector on those accounts is not itself a sign-in failure.
 
 ## Full harness or MCP verification fails
 
-Open **Guide & README** in Maria for the current setup instructions. The MCP page
-walks through creating the tunnel, connecting the harness, and selecting the
-ChatGPT connector with the exact name for your chosen interaction mode.
+Video walkthroughs:
+
+- [Create an OpenAI tunnel and API key](launcher/src/assets/mcp-create-tunnel.mp4)
+- [Connect the local harness and attach the ChatGPT connector](launcher/src/assets/mcp-connect-connector.mp4)
 
 Browser-only mode needs no connector. Full harness mode requires all of the following:
 
@@ -178,7 +179,7 @@ current contract. This is tracked as a possible future feature, not as a text-st
 
 ## Update, repair, and remove
 
-To update, quit **Maria WebGPT** and run the same installer command from the README. The installer
+To update, quit **Codex Web GPT** and run the same installer command from the README. The installer
 replaces the application and runtime while preserving the launcher configuration and private
 ChatGPT profile.
 

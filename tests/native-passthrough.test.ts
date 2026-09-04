@@ -361,59 +361,6 @@ test("an upstream reset after the turn completed closes the client stream normal
   expect(body).toEndWith("data: [DONE]\n\n");
 });
 
-test("native terminal Responses events finish without a legacy DONE marker", async () => {
-  for (const type of ["response.completed", "response.failed", "response.incomplete"]) {
-    const frame = `event: ${type}\r\ndata: ${JSON.stringify({ type, response: { id: "resp_native", status: type.split(".")[1] } })}\r\n\r\n`;
-    // Split every character to exercise arbitrary network packet boundaries.
-    const response = await forwardNativeCodexRequest(nativeRequest(), "responses",
-      async () => resettingEventStream([...frame]));
-    expect(await response.text()).toBe(frame);
-  }
-});
-
-test("partial or conflicting terminal frames never conceal a truncated turn", async () => {
-  for (const frame of [
-    'event: response.completed\ndata: {"type":"response.completed","response":{}}\n',
-    'event: response.output_text.delta\ndata: {"type":"response.completed","response":{}}\n\n',
-    'data: {"type":"response.output_text.delta","delta":"response.completed"}\n\n',
-  ]) {
-    const response = await forwardNativeCodexRequest(nativeRequest(), "responses",
-      async () => resettingEventStream([frame]));
-    await expect(response.text()).rejects.toThrow();
-  }
-});
-
-test("oversized unterminated data cannot forge a later DONE line", async () => {
-  const response = await forwardNativeCodexRequest(nativeRequest(), "responses",
-    async () => resettingEventStream(["data: " + "x".repeat(8 * 1024 * 1024), "data: [DONE]\n\n"]));
-  await expect(response.text()).rejects.toThrow();
-});
-
-test("hop-by-hop extension headers and decoded response encoding do not leak downstream", async () => {
-  const request = nativeRequest();
-  request.headers.set("connection", "keep-alive, x-private-hop");
-  request.headers.set("x-private-hop", "transport-only");
-  const response = await forwardNativeCodexRequest(request, "responses", async forwarded => {
-    expect(forwarded.headers.has("x-private-hop")).toBe(false);
-    return new Response("decoded", { headers: {
-      connection: "x-upstream-hop", "x-upstream-hop": "transport-only", "content-encoding": "gzip",
-    } });
-  });
-  expect(response.headers.has("x-upstream-hop")).toBe(false);
-  expect(response.headers.has("content-encoding")).toBe(false);
-  expect(await response.text()).toBe("decoded");
-});
-
-test("cancelling a native stream cancels its upstream reader", async () => {
-  let cancelled = false;
-  const response = await forwardNativeCodexRequest(nativeRequest(), "responses", async () => new Response(
-    new ReadableStream({ cancel() { cancelled = true; } }),
-    { headers: { "content-type": "text/event-stream" } },
-  ));
-  await response.body!.cancel();
-  expect(cancelled).toBe(true);
-});
-
 test("event-stream media type matching is case-insensitive", async () => {
   const response = await forwardNativeCodexRequest(
     nativeRequest(),

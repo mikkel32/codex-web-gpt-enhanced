@@ -1,9 +1,9 @@
 {
   "name": "codex-web-gpt-launcher",
-  "version": "5.1.0",
+  "version": "5.0.1",
   "private": true,
   "description": "Desktop control center for Codex ChatGPT Web",
-  "author": "Mikkel & Maria",
+  "author": "miuuyy",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -42,7 +42,7 @@
   },
   "build": {
     "appId": "dev.codexwebgpt.launcher",
-    "productName": "Maria WebGPT",
+    "productName": "Codex Web GPT",
     "artifactName": "codex-web-gpt-${version}-${os}-${arch}.${ext}",
     "asar": true,
     "asarUnpack": [

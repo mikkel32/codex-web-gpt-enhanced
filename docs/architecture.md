@@ -109,10 +109,8 @@ the installed catalog, and requires a Codex restart. Zero Risk never reads or mu
 For a new ChatGPT chat the adapter provides the complete compiled prompt; for an exactly retained
 chat it also provides an incremental prompt containing only the Codex suffix after the last assistant
 reply. The Launcher chooses between those two prompts from its own retained-tab ownership and writes
-the selected text to the system clipboard. The user has five minutes to paste, select the visible
-ChatGPT model, effort, and Zero Risk connector, send, and confirm Sent. Confirmation starts a
-separate ninety-second connector deadline. The picker labels this interaction Manual/Manual Pro;
-the connector identity and model slugs remain compatible with existing tasks.
+the selected text to the system clipboard. The user has thirty seconds to paste, select the visible
+ChatGPT model, effort, and Zero Risk connector, send, and confirm Sent.
 The pasted task carries one opaque `request_id` for routing concurrent requests. Start/completion
 sequencing lives in the Zero Risk MCP server metadata, not in user-authored imperative text; the
 per-tab nonce used to validate the Launcher confirmation never leaves the local runtime.
@@ -223,21 +221,3 @@ launcher error.
 - Do not retry or switch modes to evade product usage limits.
 
 See the complete [security model](security-model.md).
-# Maria 5.1 lifecycle
-
-The native transport and the UI have separate lifetimes. The daemon starts with
-private file-backed output rather than pipes owned by Electron. On ordinary UI
-quit, an authenticated browser-detach operation blocks new Web turns while leaving
-native responses, compaction, and existing native SSE streams intact. Active Web
-turns keep the UI process hidden until the user quits again after they finish.
-
-A private ownership marker records the background daemon. A new UI validates its
-PID, boot epoch, version, mode, health, and control capability, then adopts the same
-process instead of draining or replacing it. Explicit integration removal and
-runtime upgrades retain the separate drain-and-stop path. Launch at login restores
-availability after an OS restart; this is not a promise of recovery from every OS
-or network failure.
-
-Regression coverage includes a real parent-process exit followed by daemon
-adoption, a native SSE stream crossing UI detachment, later native requests,
-authenticated detachment, and protection of active Web work.
