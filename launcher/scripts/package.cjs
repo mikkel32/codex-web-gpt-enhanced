@@ -28,14 +28,20 @@ if (target !== nativeTarget) {
 }
 
 const env = { ...process.env };
-if (!env.CSC_LINK && !env.CSC_NAME) env.CSC_IDENTITY_AUTO_DISCOVERY = "false";
+const usesAdHocMacSigning = target === "--mac" && !env.CSC_LINK && !env.CSC_NAME;
+if (usesAdHocMacSigning) {
+  env.CSC_IDENTITY_AUTO_DISCOVERY = "false";
+  // PR builds have no signing credentials. Force electron-builder to apply the requested ad-hoc
+  // identity so the package receives the same resource seal that strict verification expects.
+  env.CSC_FOR_PULL_REQUEST = "true";
+}
 const builderArgs = [
   electronBuilderCli,
   target,
   "--publish",
   "never",
 ];
-if (target === "--mac" && !env.CSC_LINK && !env.CSC_NAME) {
+if (usesAdHocMacSigning) {
   builderArgs.push("--config.mac.identity=-");
 }
 
