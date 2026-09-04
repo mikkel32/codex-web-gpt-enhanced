@@ -70,15 +70,15 @@ jobs:
           set -euo pipefail
           source_dir="$RUNNER_TEMP/upstream-source"
           fork_meta="$RUNNER_TEMP/fork-meta"
-          mkdir -p "$fork_meta/.github/workflows"
+          mkdir -p "$fork_meta"
           cp FORK.md "$fork_meta/FORK.md"
           cp UPSTREAM.lock "$fork_meta/UPSTREAM.lock"
-          cp .github/workflows/materialize-upstream.yml "$fork_meta/.github/workflows/materialize-upstream.yml"
 
-          rsync -a --delete --exclude='.git/' "$source_dir/" "$GITHUB_WORKSPACE/"
+          # GitHub's repository token cannot introduce workflow files. Keep the
+          # fork-owned workflows already present on main and import everything else.
+          rsync -a --delete --exclude='.git/' --exclude='.github/workflows/' "$source_dir/" "$GITHUB_WORKSPACE/"
           cp "$fork_meta/FORK.md" FORK.md
           cp "$fork_meta/UPSTREAM.lock" UPSTREAM.lock
-          cp "$fork_meta/.github/workflows/materialize-upstream.yml" .github/workflows/materialize-upstream.yml
 
           git checkout -B "$TARGET_BRANCH"
           git config user.name "github-actions[bot]"
@@ -112,5 +112,9 @@ jobs:
           TARGET_BRANCH: ${{ steps.lock.outputs.branch }}
         run: |
           set -euo pipefail
-          git fetch origin "$TARGET_BRANCH" || true
-          git push --force-with-lease origin "HEAD:refs/heads/${TARGET_BRANCH}"
+          remote_sha="$(git ls-remote --heads origin "refs/heads/${TARGET_BRANCH}" | awk '{print $1}')"
+          if [[ -n "$remote_sha" ]]; then
+            git push --force-with-lease="refs/heads/${TARGET_BRANCH}:${remote_sha}" origin "HEAD:refs/heads/${TARGET_BRANCH}"
+          else
+            git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
+          fi
