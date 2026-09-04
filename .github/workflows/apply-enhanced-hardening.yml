@@ -117,6 +117,13 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
+          def replace_exact(path: Path, before: str, after: str) -> None:
+              text = path.read_text()
+              count = text.count(before)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one contract block, found {count}")
+              path.write_text(text.replace(before, after, 1))
+
           integration = Path("src/codex-integration.ts")
           source = integration.read_text()
           import_line = 'import { preserveNativeCodexModelDefault } from "./native-model-default";\n'
@@ -134,6 +141,46 @@ jobs:
               "The former Zero Risk branding now appears as Manual mode.",
           )
           notes.write_text(text)
+
+          runtime_test = Path("tests/runtime-layout.test.ts")
+          replace_exact(
+              runtime_test,
+              '  expect(defaultConfig("full").subagentProtocol).toBe("compatibility-v1");',
+              '  expect(defaultConfig("full").subagentProtocol).toBe("native");',
+          )
+          replace_exact(
+              runtime_test,
+              '''  expect(loadConfigForSetup()).toMatchObject({
+              version: 3,
+              mode: "browser-only",
+              browserHost: "managed-chrome",
+              browserInteractionMode: "automatic",
+              subagentProtocol: "compatibility-v1",
+              solAvailable: true,
+            });''',
+              '''  expect(loadConfigForSetup()).toMatchObject({
+              version: 3,
+              mode: "browser-only",
+              browserHost: "managed-chrome",
+              browserInteractionMode: "automatic",
+              subagentProtocol: "native",
+              solAvailable: true,
+            });''',
+          )
+
+          server_models_test = Path("tests/server-models.test.ts")
+          replace_exact(
+              server_models_test,
+              '''    additional_speed_tiers: [],
+              service_tiers: [],
+              default_service_tier: null,
+              multi_agent_version: "v1",
+            }]);''',
+              '''    additional_speed_tiers: [],
+              service_tiers: [],
+              default_service_tier: null,
+            }]);''',
+          )
           PY
 
       - name: Install pinned dependencies
