@@ -76,3 +76,20 @@ test("active Web work stays in the background instead of being cancelled on quit
   assert.deepEqual(await RuntimeSupervisor.prototype.leaveNativeTransportRunning.call(fixture), { status: "browser-busy" });
   assert.equal(detached, false);
 });
+
+test("maintenance can adopt a 5.1 background daemon without cancelling native work", async () => {
+  const calls = [];
+  const fixture = {
+    daemon: null, launcherProfile: "production", coreHome: os.tmpdir(),
+    readState: () => ({ ownerPid: 99999999, daemonPid: process.pid, status: "background", updatedAt: new Date().toISOString() }),
+    proxyHealthPayload: async () => ({ background_capable: true }), proxyHealth: async () => true,
+    control: async (_config, action) => { calls.push(action); if (action === "owner-check") throw new Error("HTTP 404"); return { status: "ok" }; },
+    observeChild: (_name, child) => { fixture.daemon = child; }, restartableChildren: new WeakSet(),
+    logger: { info() {} },
+  };
+  try {
+    assert.equal(await RuntimeSupervisor.prototype.adoptBackgroundNative.call(fixture, {}, { resume: false }), true);
+    assert.deepEqual(calls, ["owner-check", "browser-detach"]);
+    assert.equal(fixture.daemon.pid, process.pid);
+  } finally { fixture.daemon?.release(); }
+});

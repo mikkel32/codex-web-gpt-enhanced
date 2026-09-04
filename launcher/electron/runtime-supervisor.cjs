@@ -1186,8 +1186,18 @@ class RuntimeSupervisor {
       || (processRunning(state.ownerPid) && !guardianOwned)) return false;
     const health = await this.proxyHealthPayload(config);
     if (health?.background_capable !== true || !await this.proxyHealth(config, 2_000, state.daemonPid)) return false;
-    if (!resume && !guardianOwned) return false;
-    const control = await this.control(config, resume ? "resume" : "owner-check");
+    let control;
+    try { control = await this.control(config, resume ? "resume" : "owner-check"); }
+    catch (error) {
+      if (resume || errorMessage(error) !== "HTTP 404") throw error;
+      // 5.1 already supports authenticated browser detachment. Use that older
+      // contract to claim its daemon without cancelling an active native stream.
+      try { control = await this.control(config, "browser-detach"); }
+      catch (legacyError) {
+        if (errorMessage(legacyError) !== "HTTP 409") throw legacyError;
+        control = { status: "ok" };
+      }
+    }
     if (control.status !== "ok") throw new Error("Background native transport ownership could not be verified");
     this.observeChild("daemon", monitorBackgroundProcess(state.daemonPid));
     this.restartableChildren.add(this.daemon);
