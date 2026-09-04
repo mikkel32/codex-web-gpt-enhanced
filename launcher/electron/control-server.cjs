@@ -213,7 +213,7 @@ class BrowserControlServer {
             return;
           }
           if (observed.status === "timeout") {
-            writeJson(response, 408, { error: "Manual prompt was not confirmed within 30 seconds", code: "manual_turn_timed_out" });
+            writeJson(response, 408, { error: "Manual prompt was not confirmed within 5 minutes", code: "manual_turn_timed_out" });
             return;
           }
           if (observed.status === "cancelled") {
@@ -239,7 +239,7 @@ class BrowserControlServer {
           }
           if (observed.status === "timeout") {
             writeJson(response, 408, {
-              error: "Codex Zero Risk did not start within 30 seconds after Sent confirmation",
+              error: "Codex Zero Risk did not start within 90 seconds after Sent confirmation",
               code: "manual_turn_timed_out",
             });
             return;
