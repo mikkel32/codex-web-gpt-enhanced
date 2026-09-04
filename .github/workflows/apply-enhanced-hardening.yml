@@ -28,52 +28,92 @@ jobs:
         with:
           bun-version: 1.4.0
 
-      - name: Inspect current protocol wiring
+      - name: Retarget transform to the pinned source and apply hardening
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
 
-          roots = [Path("launcher/electron"), Path("launcher/src"), Path("src")]
-          needles = ("subagentProtocol", "subagent-protocol", "compatibility-v1")
-          shown = 0
-          for root in roots:
-              for path in sorted(root.rglob("*")):
-                  if not path.is_file() or path.suffix not in {".cjs", ".js", ".mjs", ".ts", ".tsx"}:
-                      continue
-                  lines = path.read_text(errors="replace").splitlines()
-                  matches = [i for i, line in enumerate(lines) if any(needle in line for needle in needles)]
-                  for index in matches:
-                      start = max(0, index - 3)
-                      end = min(len(lines), index + 4)
-                      print(f"--- {path}:{index + 1}")
-                      for line_number in range(start, end):
-                          print(f"{line_number + 1}: {lines[line_number]}")
-                      shown += 1
-                      if shown >= 120:
-                          raise SystemExit(0)
-          if shown == 0:
-              raise SystemExit("No protocol wiring matches found")
-          PY
-
-      - name: Correct transform root and apply hardening
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
           path = Path("scripts/apply-enhanced-hardening.mjs")
           text = path.read_text()
-          old = 'const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)), "..");'
-          new = 'const repositoryRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");'
-          if old in text:
-              text = text.replace(old, new, 1)
-              path.write_text(text)
-          elif new not in text:
+
+          old_root = 'const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)), "..");'
+          new_root = 'const repositoryRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");'
+          if old_root in text:
+              text = text.replace(old_root, new_root, 1)
+          elif new_root not in text:
               raise SystemExit("transform root declaration did not match the pinned source")
+
+          stale_main_blocks = [
+          '''replaceRegex(
+            "launcher/electron/main.cjs",
+            /const subagentProtocol = runtimeConfig\\.subagentProtocol === "native"\\s*\\? "native"\\s*: "compatibility-v1";/g,
+            'const subagentProtocol = runtimeConfig.subagentProtocol === "compatibility-v1" ? "compatibility-v1" : "native";',
+          );
+          ''',
+          '''replaceRegex(
+            "launcher/electron/main.cjs",
+            /("--subagent-protocol",\\s*)"compatibility-v1",/g,
+            "$1subagentProtocol,",
+          );
+          ''',
+          ]
+          for block in stale_main_blocks:
+              if block not in text:
+                  raise SystemExit("stale launcher protocol block did not match the pinned transform")
+              text = text.replace(block, "", 1)
+
+          stale_launcher_scan = '''let launcherFallbacks = 0;
+          for (const absolute of walk(join(repositoryRoot, "launcher", "electron"))) {
+            const path = relative(repositoryRoot, absolute);
+            if (path.includes(`${join("launcher", "tests")}`)) continue;
+            const text = readFileSync(absolute, "utf8");
+            const before = 'options.subagentProtocol ?? "compatibility-v1"';
+            const count = occurrenceCount(text, before);
+            if (count === 0) continue;
+            launcherFallbacks += count;
+            writeFileSync(absolute, text.replaceAll(before, 'options.subagentProtocol ?? "native"'));
+          }
+          if (launcherFallbacks < 1) {
+            throw new Error("No launcher subagent-protocol fallback was found");
+          }
+
+          '''
+          if stale_launcher_scan not in text:
+              raise SystemExit("stale launcher fallback scan did not match the pinned transform")
+          text = text.replace(stale_launcher_scan, "", 1)
+
+          setup_anchor = '''replaceLiteral(
+            "src/codex-integration.ts",
+            '  fallback: AppConfig["subagentProtocol"] = "compatibility-v1",',
+            '  fallback: AppConfig["subagentProtocol"] = "native",',
+          );
+          '''
+          setup_patch = setup_anchor + '''replaceLiteral(
+            "src/setup.ts",
+            '      ?? readCodexSubagentProtocol(existing?.subagentProtocol ?? "compatibility-v1"),',
+            '      ?? readCodexSubagentProtocol(existing?.subagentProtocol ?? "native"),',
+          );
+          '''
+          if setup_anchor not in text:
+              raise SystemExit("Codex protocol fallback anchor did not match the pinned transform")
+          text = text.replace(setup_anchor, setup_patch, 1)
+          path.write_text(text)
           PY
+
           bun scripts/apply-enhanced-hardening.mjs
+
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("ENHANCED.md")
+          text = path.read_text()
+          text = text.replace(
+              "The former Manual mode branding now appears as Manual mode.",
+              "The former Zero Risk branding now appears as Manual mode.",
+          )
+          path.write_text(text)
+          PY
 
       - name: Install pinned dependencies
         shell: bash
