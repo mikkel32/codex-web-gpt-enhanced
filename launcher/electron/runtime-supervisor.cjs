@@ -495,7 +495,7 @@ class RuntimeSupervisor {
     let child;
     try { child = spawn(invocation.executable, invocation.args, {
       cwd: invocation.cwd,
-      detached: DETACH_OWNED_CHILD,
+      detached: name === "daemon" ? true : DETACH_OWNED_CHILD,
       env: {
         ...process.env,
         CODEX_CHATGPT_WEB_BROWSER_HOST_DESCRIPTOR: this.browserDescriptorPath,
