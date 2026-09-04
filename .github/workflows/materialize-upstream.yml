@@ -70,15 +70,20 @@ jobs:
           set -euo pipefail
           source_dir="$RUNNER_TEMP/upstream-source"
           fork_meta="$RUNNER_TEMP/fork-meta"
-          mkdir -p "$fork_meta"
+          fork_workflows="$RUNNER_TEMP/fork-workflows"
+          mkdir -p "$fork_meta" "$fork_workflows"
           cp FORK.md "$fork_meta/FORK.md"
           cp UPSTREAM.lock "$fork_meta/UPSTREAM.lock"
+          cp -R .github/workflows/. "$fork_workflows/"
 
-          # GitHub's repository token cannot introduce workflow files. Keep the
-          # fork-owned workflows already present on main and import everything else.
-          rsync -a --delete --exclude='.git/' --exclude='.github/workflows/' "$source_dir/" "$GITHUB_WORKSPACE/"
+          # Keep the upstream workflow files available while its runtime-layout
+          # tests run. The publish step restores the fork-owned workflow set so
+          # GitHub's restricted Actions token never introduces workflow files.
+          rsync -a --delete --exclude='.git/' "$source_dir/" "$GITHUB_WORKSPACE/"
           cp "$fork_meta/FORK.md" FORK.md
           cp "$fork_meta/UPSTREAM.lock" UPSTREAM.lock
+          mkdir -p .github/workflows
+          cp -R "$fork_workflows/." .github/workflows/
 
           git checkout -B "$TARGET_BRANCH"
           git config user.name "github-actions[bot]"
@@ -106,12 +111,18 @@ jobs:
           bun run launcher:test
           bun run launcher:build
 
-      - name: Publish review branch
+      - name: Restore fork workflows and publish review branch
         shell: bash
         env:
           TARGET_BRANCH: ${{ steps.lock.outputs.branch }}
         run: |
           set -euo pipefail
+          rm -rf .github/workflows
+          mkdir -p .github/workflows
+          cp -R "$RUNNER_TEMP/fork-workflows/." .github/workflows/
+          git add -A
+          git commit --amend --no-edit
+
           remote_sha="$(git ls-remote --heads origin "refs/heads/${TARGET_BRANCH}" | awk '{print $1}')"
           if [[ -n "$remote_sha" ]]; then
             git push --force-with-lease="refs/heads/${TARGET_BRANCH}:${remote_sha}" origin "HEAD:refs/heads/${TARGET_BRANCH}"
