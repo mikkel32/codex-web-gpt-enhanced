@@ -1,0 +1,82 @@
+name: Apply enhanced hardening
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-enhanced-hardening.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: enhanced-hardening
+  cancel-in-progress: false
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: codex/upstream-5.0.1
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Correct transform root and apply hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("scripts/apply-enhanced-hardening.mjs")
+          text = path.read_text()
+          old = 'const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)), "..");'
+          new = 'const repositoryRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");'
+          if old in text:
+              text = text.replace(old, new, 1)
+              path.write_text(text)
+          elif new not in text:
+              raise SystemExit("transform root declaration did not match the pinned source")
+          PY
+          bun scripts/apply-enhanced-hardening.mjs
+
+      - name: Install pinned dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun install --frozen-lockfile
+          (
+            cd launcher
+            bun install --frozen-lockfile
+          )
+
+      - name: Verify enhanced source
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun run typecheck
+          bun run test
+          bun run launcher:typecheck
+          bun run launcher:test
+          bun run launcher:build
+          git diff --check
+
+      - name: Commit verified hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No generated changes to commit"
+            exit 0
+          fi
+          git commit -m "feat: make Codex integration native-first"
+          git push origin HEAD:codex/upstream-5.0.1
