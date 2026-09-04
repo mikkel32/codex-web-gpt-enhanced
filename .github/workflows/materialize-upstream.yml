@@ -6,6 +6,8 @@ on:
     branches: [main]
     paths:
       - UPSTREAM.lock
+      - FORK.md
+      - patches/**
       - .github/workflows/materialize-upstream.yml
 
 permissions:
@@ -60,7 +62,7 @@ jobs:
           git -C "$source_dir" checkout --detach "$SOURCE_SHA"
           test "$(git -C "$source_dir" rev-parse HEAD)" = "$SOURCE_SHA"
 
-      - name: Materialize source on a review branch
+      - name: Materialize source and apply fork patches
         shell: bash
         env:
           SOURCE_SHA: ${{ steps.lock.outputs.sha }}
@@ -71,32 +73,43 @@ jobs:
           source_dir="$RUNNER_TEMP/upstream-source"
           fork_meta="$RUNNER_TEMP/fork-meta"
           fork_workflows="$RUNNER_TEMP/fork-workflows"
-          mkdir -p "$fork_meta" "$fork_workflows"
+          fork_patches="$RUNNER_TEMP/fork-patches"
+          mkdir -p "$fork_meta" "$fork_workflows" "$fork_patches"
           cp FORK.md "$fork_meta/FORK.md"
           cp UPSTREAM.lock "$fork_meta/UPSTREAM.lock"
           cp -R .github/workflows/. "$fork_workflows/"
+          cp -R patches/. "$fork_patches/"
 
-          # Keep the upstream workflow files available while its runtime-layout
-          # tests run. The publish step restores the fork-owned workflow set so
-          # GitHub's restricted Actions token never introduces workflow files.
+          # Keep upstream workflow files available while runtime-layout tests run.
+          # The publish step restores the fork-owned workflows after verification.
           rsync -a --delete --exclude='.git/' "$source_dir/" "$GITHUB_WORKSPACE/"
           cp "$fork_meta/FORK.md" FORK.md
           cp "$fork_meta/UPSTREAM.lock" UPSTREAM.lock
-          mkdir -p .github/workflows
+          mkdir -p .github/workflows patches
           cp -R "$fork_workflows/." .github/workflows/
+          cp -R "$fork_patches/." patches/
 
           git checkout -B "$TARGET_BRANCH"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          shopt -s nullglob
+          patch_files=(patches/*.patch)
+          for patch_file in "${patch_files[@]}"; do
+            echo "Applying ${patch_file}"
+            git apply --check --whitespace=error-all "$patch_file"
+            git apply --whitespace=error-all "$patch_file"
+          done
+
           git add -A
-          git commit -m "chore: materialize upstream ${SOURCE_VERSION} (${SOURCE_SHA})"
+          git commit -m "chore: materialize enhanced fork ${SOURCE_VERSION} (${SOURCE_SHA})"
 
       - name: Install pinned dependencies
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
 
-      - name: Verify imported source
+      - name: Verify materialized fork
         shell: bash
         run: |
           set -euo pipefail
