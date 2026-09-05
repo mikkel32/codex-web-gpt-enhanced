@@ -1,4 +1,8 @@
 paths:
+  .github/workflows/ci.yml:
+    # The same supported Intel target is now checked before release packaging.
+    ignore:
+      - 'label "macos-15-intel" is unknown'
   .github/workflows/release.yml:
     # GitHub added this standard public-repository Intel label after actionlint v1.7.7's label table.
     # https://docs.github.com/en/actions/reference/runners/github-hosted-runners
