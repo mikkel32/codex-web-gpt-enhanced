@@ -1300,46 +1300,6 @@ test("browser chrome state is read from the owned WebContents", () => {
   }, { readPageTitle: false }).title, "Zero Risk tab");
 });
 
-test("launcher delegates every ChatGPT model and turn operation to the shared browser worker", async () => {
-  const calls = [];
-  const fixture = Object.assign(Object.create(BrowserHost.prototype), {
-    helper: { executable: "/runtime/electron", script: "/runtime/browser-helper.cjs" },
-    descriptorPath: "/runtime/launcher-browser.json",
-    getConnectorName: () => "Codex Native2",
-    logger: { info: (...args) => calls.push(["log", ...args]) },
-    show: () => calls.push(["show"]),
-    waitForSurfaceReady: async () => calls.push(["ready"]),
-    setState: patch => calls.push(["state", patch]),
-    runBrowserHelperOperation: async options => {
-      calls.push(["helper", options]);
-      return { type: "result", value: { effort: "High", response: "CODEX WEB GPT READY" } };
-    },
-  });
-
-  assert.deepEqual(await BrowserHost.prototype.runSmokeTest.call(fixture), {
-    ok: true,
-    effort: "High",
-    response: "CODEX WEB GPT READY",
-  });
-  const helperCall = calls.find(call => call[0] === "helper")[1];
-  assert.equal(helperCall.operation, "smoke");
-  assert.equal(helperCall.appName, "Codex Native2");
-});
-
-test("browser helper operations fail closed when the configured connector name is invalid", async () => {
-  let helperCalls = 0;
-  const fixture = Object.assign(Object.create(BrowserHost.prototype), {
-    getConnectorName: () => "   ",
-    runBrowserHelperOperation: async () => { helperCalls += 1; },
-  });
-
-  await assert.rejects(
-    BrowserHost.prototype.runSmokeTest.call(fixture),
-    /Connector name is invalid/,
-  );
-  assert.equal(helperCalls, 0);
-});
-
 test("connector verification is effort-independent and works while the browser surface is hidden", async () => {
   const calls = [];
   const fixture = {

@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
 import { Icon } from "./icons";
+import chromeIcon from "../assets/browser-chrome.png";
+import edgeIcon from "../assets/browser-edge.png";
+import safariIcon from "../assets/browser-safari.png";
+const browserIcons = { chrome: chromeIcon, edge: edgeIcon, safari: safariIcon };
 
 type BrowserChoice = { id: "chrome" | "edge" | "safari"; name: string; available: boolean };
 
@@ -37,7 +41,7 @@ export function BrowserSignIn({ onBack, setError }: { onBack: () => void; setErr
     <h1>{phase === "verifying" ? "Checking your connection…" : phase === "connected" ? "You're connected." : selected ? `Connect ${selected.name}` : "Already signed in elsewhere?"}</h1>
     <p>Bring your ChatGPT session into Maria. Your saved passwords, other sites, and browser history stay where they are.</p>
     {!selected ? <div className="signin-browser-choices">{browsers.map(browser => <button key={browser.id} className="signin-browser-choice" disabled={!browser.available || busy} onClick={() => void choose(browser)}>
-      <span className={`signin-browser-letter is-${browser.id}`}>{browser.id === "chrome" ? "C" : browser.id === "edge" ? "e" : "S"}</span>
+      <img className="signin-browser-icon" src={browserIcons[browser.id]} alt="" aria-hidden="true" />
       <span><strong>{browser.name}</strong><small>{browser.available ? "Use the account in this browser" : "Not installed"}</small></span><Icon name="chevron" />
     </button>)}</div> : <>
       {phase === "waiting" ? <div className="signin-steps">

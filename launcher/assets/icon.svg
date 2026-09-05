@@ -1,8 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-<defs><linearGradient id="b" x2="1" y2="1"><stop stop-color="#272033"/><stop offset="1" stop-color="#10121d"/></linearGradient><linearGradient id="m" x2="1" y2="1"><stop stop-color="#eee0ff"/><stop offset="1" stop-color="#aa8bed"/></linearGradient><radialGradient id="g"><stop stop-color="#b78cff" stop-opacity=".2"/><stop offset="1" stop-color="#b78cff" stop-opacity="0"/></radialGradient></defs>
-<rect x="42" y="42" width="940" height="940" rx="220" fill="url(#b)" stroke="#c9a7ff" stroke-opacity=".2" stroke-width="3"/>
-<circle cx="510" cy="500" r="420" fill="url(#g)"/>
-<ellipse cx="512" cy="512" rx="326" ry="278" fill="none" stroke="#c9a7ff" stroke-opacity=".15" stroke-width="3" transform="rotate(-28 512 512)"/>
-<path d="M298 689V326l214 249 214-249v363" fill="none" stroke="url(#m)" stroke-width="74" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="m780 191 16 41 42 16-42 16-16 42-16-42-42-16 42-16Z" fill="#e4d0ff"/>
+  <defs>
+    <linearGradient id="surface" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#303633"/><stop offset=".48" stop-color="#171d1c"/><stop offset="1" stop-color="#0b1111"/></linearGradient>
+    <linearGradient id="copper" x1=".12" y1="0" x2=".8" y2="1"><stop stop-color="#ffedda"/><stop offset=".26" stop-color="#e3b795"/><stop offset=".54" stop-color="#c48860"/><stop offset=".8" stop-color="#dfa982"/><stop offset="1" stop-color="#a36c4c"/></linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#e8e5d2" stop-opacity=".52"/><stop offset=".42" stop-color="#c1c8b9" stop-opacity=".08"/><stop offset="1" stop-color="#dfac86" stop-opacity=".24"/></linearGradient>
+    <radialGradient id="light" cx=".26" cy="0" r=".92"><stop stop-color="#ead9c5" stop-opacity=".13"/><stop offset="1" stop-color="#ead9c5" stop-opacity="0"/></radialGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="180%"><feDropShadow dy="19" stdDeviation="16" flood-color="#000" flood-opacity=".52"/></filter>
+  </defs>
+  <rect x="54" y="54" width="916" height="916" rx="214" fill="url(#surface)" stroke="url(#edge)" stroke-width="3"/>
+  <rect x="57" y="57" width="910" height="910" rx="211" fill="url(#light)"/>
+  <path d="M278 686V416c0-73 43-122 115-122 74 0 119 49 119 122v270-270c0-73 45-122 119-122 72 0 115 49 115 122v270" fill="none" stroke="url(#copper)" stroke-width="84" stroke-linecap="round" stroke-linejoin="round" filter="url(#shadow)"/>
 </svg>

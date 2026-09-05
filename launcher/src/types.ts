@@ -15,8 +15,6 @@ export interface LauncherState {
   zeroRiskProEnabled: boolean;
   sidebarOpen: boolean;
   sidebarWidth: number;
-  browserSmokePassed?: boolean;
-  browserSmokeVersion?: string | null;
   coreSetupComplete?: boolean;
   codexCatalogVerified?: boolean;
   mcpSetupComplete?: boolean;
@@ -129,7 +127,6 @@ export interface LauncherSnapshot {
   platform: string;
   packaged: boolean;
   version: string;
-  smokePassed: boolean;
   operation: OperationState | null;
   update: UpdateState;
 }
@@ -166,7 +163,6 @@ export interface LauncherApi {
   continuePasskeyLogin(): Promise<boolean>;
   logoutChatGpt(): Promise<{ browser: BrowserState; state: LauncherState }>;
   dismissSessionReminder(): Promise<LauncherState>;
-  smokeTest(): Promise<{ ok: boolean; effort: string; response: string }>;
   verifyMcp(): Promise<DoctorReport>;
   doctor(): Promise<DoctorReport>;
   cancelTurns(): Promise<{ stdout: string }>;

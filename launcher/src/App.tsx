@@ -16,6 +16,9 @@ import { MariaUpdates } from "./MariaUpdates";
 import { BrowserSignIn } from "./BrowserSignIn";
 import { useActivityLogs } from "./useActivityLogs";
 import { WebAccessNotice } from "./WebAccessNotice";
+import { BrandMark } from "./BrandMark";
+import { CommandPalette } from "./CommandPalette";
+import { studioCopy } from "./studio-copy";
 import type {
   BrowserInteractionMode,
   BrowserState,
@@ -70,8 +73,6 @@ export function App() {
         ? {
             ...current,
             state,
-            smokePassed: current.smokePassed
-              || (state.browserSmokePassed === true && state.browserSmokeVersion === current.version),
           }
         : current);
     });
@@ -102,8 +103,6 @@ export function App() {
       ? {
           ...current,
           state,
-          smokePassed: current.smokePassed
-            || (state.browserSmokePassed === true && state.browserSmokeVersion === current.version),
         }
       : current);
   }, []);
@@ -151,163 +150,43 @@ export function App() {
   );
 }
 
-function Onboarding({
-  language,
-  setError,
-  snapshot,
-  updateState,
-}: {
-  language: Language;
-  setError: (error: string | null) => void;
-  snapshot: LauncherSnapshot;
+function Onboarding({ language, setError, snapshot, updateState }: {
+  language: Language; setError: (error: string | null) => void; snapshot: LauncherSnapshot;
   updateState: (state: LauncherState) => void;
 }) {
-  const [stage, setStage] = useState<"language" | "interaction" | "support">(
-    snapshot.state.language ? "interaction" : "language",
-  );
   const [selectedLanguage, setSelectedLanguage] = useState<Language>(language);
   const [selectedInteractionMode, setSelectedInteractionMode] = useState<BrowserInteractionMode>(
     snapshot.state.browserInteractionMode,
   );
   const [busy, setBusy] = useState(false);
   const localized = copyFor(selectedLanguage);
-  const isLanguage = stage === "language";
-  const isInteraction = stage === "interaction";
-  const stageIndex = isLanguage ? 0 : isInteraction ? 1 : 2;
-
-  const chooseLanguage = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      updateState(await api!.setLanguage(selectedLanguage));
-      setStage("interaction");
-    } catch (cause) {
-      setError(messageOf(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
-
+  const s = studioCopy(selectedLanguage);
   const finish = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      updateState(await api!.completeOnboarding(selectedLanguage, selectedInteractionMode));
-    } catch (cause) {
-      setError(messageOf(cause));
-    } finally {
-      setBusy(false);
-    }
+    setBusy(true); setError(null);
+    try { updateState(await api!.completeOnboarding(selectedLanguage, selectedInteractionMode)); }
+    catch (cause) { setError(messageOf(cause)); }
+    finally { setBusy(false); }
   };
-
-  return (
-    <motion.main
-      animate={{ opacity: 1 }}
-      className="welcome"
-      exit={{ opacity: 0 }}
-      initial={{ opacity: 0 }}
-      transition={{ duration: 0.22 }}
-    >
-      <header className="welcome-top draggable">
-        <div className="welcome-brand no-drag">
-          <BrandMark small />
-          <span>{localized.product}</span>
-          {snapshot.profile === "development" ? <em className="dev-profile-badge">{localized.devBadge}</em> : null}
-        </div>
-        <span className="welcome-version no-drag">v{snapshot.version}</span>
-      </header>
-
-      <AnimatePresence mode="wait">
-        <motion.section
-          animate={{ opacity: 1, y: 0 }}
-          className="welcome-stage"
-          exit={{ opacity: 0, y: -8 }}
-          initial={{ opacity: 0, y: 8 }}
-          key={stage}
-          transition={PANEL_TRANSITION}
-        >
-          <span className="welcome-kicker">0{stageIndex + 1}</span>
-          <h1>{isLanguage
-            ? localized.chooseLanguage
-            : isInteraction ? localized.interactionMode : localized.supportTitle}</h1>
-          <p>{isLanguage
-            ? localized.chooseLanguageHint
-            : isInteraction ? localized.interactionModeOnboardingBody : localized.supportBody}</p>
-
-          {isLanguage ? (
-            <div className="welcome-options" role="radiogroup" aria-label={localized.chooseLanguage}>
-              <WelcomeOption
-                active={selectedLanguage === "en"}
-                detail={localized.english}
-                label={localized.english}
-                marker="EN"
-                onClick={() => setSelectedLanguage("en")}
-              />
-              <WelcomeOption
-                active={selectedLanguage === "zh-CN"}
-                detail={localized.chinese}
-                label={localized.chinese}
-                marker="简"
-                onClick={() => setSelectedLanguage("zh-CN")}
-              />
-              <WelcomeOption
-                active={selectedLanguage === "ja"}
-                detail={localized.japanese}
-                label={localized.japanese}
-                marker="日"
-                onClick={() => setSelectedLanguage("ja")}
-              />
-            </div>
-          ) : isInteraction ? (
-            <InteractionModePicker
-              className="welcome-interaction-mode-picker"
-              copy={localized}
-              disabled={busy}
-              mode={selectedInteractionMode}
-              onChange={setSelectedInteractionMode}
-            />
-          ) : (
-            <div className="maria-welcome-summary">
-              <BrandMark />
-              <strong>{localized.nativeModelsTitle}</strong>
-              <p>{localized.nativeModelsBody}</p>
-              <small>{MADE_WITH_LOVE}</small>
-            </div>
-          )}
-        </motion.section>
-      </AnimatePresence>
-
-      <footer className="welcome-footer">
-        <div>
-          {!isLanguage ? (
-            <button
-              className="text-button"
-              onClick={() => setStage(isInteraction ? "language" : "interaction")}
-              type="button"
-            >
-              {localized.previous}
-            </button>
-          ) : null}
-        </div>
-        <div className="welcome-progress" aria-label={`${stageIndex + 1} / 3`}>
-          {[0, 1, 2].map(index => (
-            <span
-              className={index < stageIndex ? "is-complete" : index === stageIndex ? "is-active" : ""}
-              key={index}
-            />
-          ))}
-        </div>
-        <PrimaryButton
-          disabled={busy}
-          onClick={isLanguage
-            ? chooseLanguage
-            : isInteraction ? () => setStage("support") : finish}
-        >
-          {stage === "support" ? localized.finishWelcome : localized.continue}
-        </PrimaryButton>
-      </footer>
-    </motion.main>
-  );
+  return <motion.main className="welcome studio-welcome" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+    <header className="welcome-top draggable"><div className="welcome-brand no-drag"><BrandMark small /><span>Maria</span></div><span className="welcome-version">v{snapshot.version}</span></header>
+    <div className="studio-welcome-grid">
+      <section className="studio-welcome-story"><span className="maria-eyebrow">YOUR WORK. CONNECTED.</span><BrandMark />
+        <h1>{s.welcomeTitle}</h1><p>{s.welcomeBody}</p><div className="studio-welcome-capabilities"><span><Icon name="setup" />Codex</span><i /><span><Icon name="globe" />ChatGPT</span><i /><span><McpMark />{s.tools}</span></div>
+      </section>
+      <section className="studio-welcome-options"><span className="maria-eyebrow">WELCOME TO MARIA</span><h2>{s.preferences}</h2><p>{s.preferencesBody}</p>
+        <fieldset disabled={busy}><legend>{s.language}</legend><div className="studio-language-picker" role="radiogroup" aria-label={localized.chooseLanguage}>
+          {([["en", "English"], ["zh-CN", "简体中文"], ["ja", "日本語"]] as const).map(([id, label]) =>
+            <button key={id} type="button" role="radio" aria-checked={selectedLanguage === id} className={selectedLanguage === id ? "is-selected" : ""}
+              onClick={() => setSelectedLanguage(id)}>{label}{selectedLanguage === id ? <Icon name="check" /> : null}</button>)}
+        </div></fieldset>
+        <fieldset disabled={busy}><legend>{s.behavior}</legend><InteractionModePicker className="welcome-interaction-mode-picker" copy={localized} disabled={busy}
+          mode={selectedInteractionMode} onChange={setSelectedInteractionMode} /></fieldset>
+        <button className="button-primary studio-welcome-start" disabled={busy} onClick={() => void finish()}>{busy ? localized.running : s.getStarted}<Icon name="forward" /></button>
+        <p className="studio-welcome-note"><Icon name="check" />{s.nativeAvailable}</p>
+      </section>
+    </div>
+    <footer className="studio-welcome-footer"><span>{MADE_WITH_LOVE}</span><span>MARIA WEBGPT / {snapshot.profile === "development" ? "DEV" : "DESKTOP"}</span></footer>
+  </motion.main>;
 }
 
 function LauncherShell({
@@ -340,6 +219,17 @@ function LauncherShell({
   const [browserSlot, setBrowserSlot] = useState<HTMLDivElement | null>(null);
   const [sessionReminderBusy, setSessionReminderBusy] = useState(false);
   const [sessionReminderDue, setSessionReminderDue] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
+  const studio = studioCopy(language);
+  useEffect(() => {
+    const handleKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && !event.isComposing) {
+        event.preventDefault(); setCommandOpen(value => !value);
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, []);
   const [mcpTargetMode, setMcpTargetMode] = useState<BrowserInteractionMode | null>(null);
   const [biggerContextRecommendationOpen, setBiggerContextRecommendationOpen] = useState(false);
 
@@ -347,7 +237,8 @@ function LauncherShell({
   const browserSlotRef = useCallback((node: HTMLDivElement | null) => setBrowserSlot(node), []);
   const browserSurfaceActive = surface === "browser"
     && !(compactSidebar && sidebarOpen)
-    && !biggerContextRecommendationOpen;
+    && !biggerContextRecommendationOpen
+    && !commandOpen;
   const needsBrowser = snapshot.state.browserInteractionMode === "automatic"
     && browser?.authenticated !== true;
   const needsSetup = !needsBrowser && !interactionSetupComplete;
@@ -546,12 +437,13 @@ function LauncherShell({
             <div className="sidebar-brand-row">
               <div className="sidebar-brand-identity">
                 <BrandMark small />
-                <strong>{copy.product}</strong>
+                <span className="studio-brand-copy"><strong>Maria</strong><small>WEBGPT WORKSPACE</small></span>
                 {devProfile ? <em className="dev-profile-badge">{copy.devBadge}</em> : null}
               </div>
 
             </div>
 
+            <button className="studio-command-trigger" onClick={() => setCommandOpen(true)}><Icon name="globe" /><span>{studio.command}</span><kbd>{snapshot.platform === "darwin" ? "⌘ K" : "Ctrl K"}</kbd></button>
             <nav className="sidebar-nav" aria-label={copy.workspace}>
               <SidebarGroup label={copy.workspace}>
                 <SidebarItem active={surface === "home"} icon="globe" label={copy.overview} onClick={() => navigateSurface("home")} />
@@ -579,7 +471,7 @@ function LauncherShell({
                   active={surface === "mcp"}
                   badge={mcpOptional ? <ActionDot tone="optional" /> : null}
                   icon="mcp"
-                  label="MCP"
+                  label={studio.tools}
                   onClick={() => {
                     setMcpTargetMode(null);
                     navigateSurface("mcp");
@@ -593,7 +485,7 @@ function LauncherShell({
             </nav>
 
             <div className="sidebar-footer">
-              <div className="maria-sidebar-credit">{MADE_WITH_LOVE}</div>
+              <div className="studio-sidebar-status"><span className={`studio-indicator ${browser?.webAccess?.status === "paused" ? "needs-attention" : browser?.authenticated ? "is-ready" : ""}`} /><span>{browser?.webAccess?.status === "paused" ? studio.attention : browser?.authenticated ? studio.connected : studio.signIn}</span><small>v{snapshot.version}</small></div>
                 <SidebarItem
                   active={surface === "updates"}
                   icon="update"
@@ -612,6 +504,7 @@ function LauncherShell({
         </div>
       </motion.aside>
 
+      <CommandPalette open={commandOpen} close={() => setCommandOpen(false)} navigate={navigateSurface} language={language} />
       <section className="workspace">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
@@ -885,13 +778,29 @@ function BrowserSurface({
 
   return (
     <section className="browser-surface">
-      <div className="browser-tab-strip" title={copy.browserTabLimit}>
+      <div className="browser-tab-strip" role="tablist" aria-label={copy.browser} title={copy.browserTabLimit}>
         {(browser?.tabs ?? []).map((tab) => (
           <div
             className={`browser-tab${tab.active ? " is-active" : ""}`}
             key={tab.id}
             onClick={() => void selectTab(tab.id)}
             role="tab"
+            tabIndex={tab.active ? 0 : -1}
+            onKeyDown={event => {
+              if (event.target !== event.currentTarget) return;
+              const tabs = browser?.tabs ?? [];
+              if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void selectTab(tab.id); }
+              if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+                event.preventDefault();
+                const i = tabs.findIndex(item => item.id === tab.id);
+                const target = tabs[(i + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length];
+                if (target) {
+                  const elements = event.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="tab"]');
+                  elements?.[(i + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length]?.focus();
+                  void selectTab(target.id);
+                }
+              }
+            }}
             aria-selected={tab.active}
           >
             <BrandMark small />
@@ -1122,12 +1031,11 @@ function SetupSurface({
     await activateBrowser();
     await api!.openLogin();
   });
-  const smoke = () => run(async () => {
-    await activateBrowser();
-    await api!.smokeTest();
-    updateState((await api!.snapshot()).state);
-  });
   const install = () => run(async () => {
+    if (manualInteraction && !snapshot.state.coreSetupComplete) {
+      showMcp();
+      return;
+    }
     await api!.setupCore();
     updateState((await api!.snapshot()).state);
   });
@@ -1135,6 +1043,8 @@ function SetupSurface({
     updateState(await api!.setZeroRiskPro(enabled));
   });
 
+  const studio = studioCopy(snapshot.state.language);
+  const readySteps = Number(browser?.authenticated === true) + Number(snapshot.state.codexCatalogVerified === true);
   return (
     <ContentSurface
       eyebrow={copy.required}
@@ -1143,21 +1053,7 @@ function SetupSurface({
         : manualInteraction ? copy.manualInteractionBody : copy.setupSubtitle}
       title={devProfile ? copy.devSetupTitle : copy.setupTitle}
     >
-      <SectionHeading label={devProfile ? copy.devCoreSetup : copy.coreSetup} />
-      {!devProfile ? (
-        <div className="model-routes" aria-label={copy.modelRoutesTitle}>
-          <div className="model-route-card">
-            <span className="model-route-label">{copy.nativeModels}</span>
-            <strong>{copy.nativeModelsTitle}</strong>
-            <p>{copy.nativeModelsBody}</p>
-          </div>
-          <div className="model-route-card model-route-web">
-            <span className="model-route-label">ChatGPT Web</span>
-            <strong>{manualInteraction ? copy.manualInteraction : copy.automaticInteraction}</strong>
-            <p>{copy.webModelsBody}</p>
-          </div>
-        </div>
-      ) : null}
+      <div className="studio-setup-summary"><span className="studio-setup-summary-icon"><Icon name={snapshot.state.codexCatalogVerified ? "check" : "setup"} /></span><div><strong>{snapshot.state.codexCatalogVerified ? studio.modelReady : studio.modelPending}</strong><p>{studio.setupPrivacy}</p></div>{!manualInteraction ? <span>{readySteps}/2</span> : null}</div>
       <div className="setup-list">
         {!manualInteraction ? <>
           <SetupRow
@@ -1171,24 +1067,15 @@ function SetupSurface({
             onAction={openLogin}
             title={copy.stepAccount}
           />
-          <SetupRow
-            action={snapshot.smokePassed ? copy.smokePassed : copy.runSmoke}
-            complete={snapshot.smokePassed}
-            description={copy.stepSmokeBody}
-            disabled={busy || !browser?.authenticated}
-            index={2}
-            onAction={smoke}
-            title={copy.stepSmoke}
-          />
         </> : null}
         <SetupRow
           action={snapshot.state.coreSetupComplete
             ? devProfile ? copy.devReinstall : copy.reinstall
-            : devProfile ? copy.devInstall : copy.install}
+            : manualInteraction ? studio.tools : devProfile ? copy.devInstall : copy.install}
           complete={snapshot.state.codexCatalogVerified === true}
           description={devProfile ? copy.devStepInstallBody : copy.stepInstallBody}
-          disabled={busy || (!snapshot.smokePassed && snapshot.state.coreSetupComplete !== true)}
-          index={manualInteraction ? 1 : 3}
+          disabled={busy || (!manualInteraction && !browser?.authenticated)}
+          index={manualInteraction ? 1 : 2}
           onAction={install}
           repeatable
           title={devProfile ? copy.devStepInstall : copy.stepInstall}
@@ -1209,7 +1096,8 @@ function SetupSurface({
         </NoticeRow>
       ) : null}
 
-      <SectionHeading label="MCP" meta={manualInteraction ? copy.required : copy.optional} spaced />
+      <p className="studio-native-note"><Icon name="check" />{studio.nativeAvailable}</p>
+      <SectionHeading label={studio.tools} meta={manualInteraction ? copy.required : copy.optional} spaced />
       <button
         className="next-surface-row"
         disabled={!manualInteraction && !snapshot.state.codexCatalogVerified}
@@ -1532,6 +1420,13 @@ function ActivitySurface({
   setError: (error: string | null) => void;
 }) {
   const logs = useActivityLogs();
+  const s = studioCopy(language);
+  const [query, setQuery] = useState("");
+  const [level, setLevel] = useState("all");
+  const [paused, setPaused] = useState(false);
+  const [frozen, setFrozen] = useState<typeof logs>([]);
+  const shown = (paused ? frozen : logs).filter(record => (level === "all" || record.level === level)
+    && `${humanEvent(record.event)} ${logDetail(record.detail)}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   return (
     <ContentSurface subtitle={copy.activitySubtitle} title={copy.activityTitle}>
       <div className="section-heading activity-heading">
@@ -1543,14 +1438,23 @@ function ActivitySurface({
           {copy.exportSafeLog}
         </SecondaryButton>
       </div>
+      <div className="studio-activity-toolbar">
+        <div className="studio-filter-tabs" role="group" aria-label={copy.activity}>
+          {([["all", s.all], ["error", s.errors], ["warning", s.warnings]] as const).map(([value, label]) =>
+            <button key={value} aria-pressed={level === value} className={level === value ? "is-active" : ""} onClick={() => setLevel(value)}>{label}</button>)}
+        </div>
+        <input type="search" aria-label={s.searchActivity} placeholder={s.searchActivity} value={query} onChange={event => setQuery(event.target.value)} />
+        <button className="button-secondary" onClick={() => { if (!paused) setFrozen(logs); setPaused(!paused); }}>{paused ? s.resume : s.pause}</button>
+      </div>
+      <div className="studio-activity-count">{shown.length} {s.matching}</div>
       <div className="activity-table">
-        {logs.length === 0 ? (
+        {shown.length === 0 ? (
           <div className="surface-empty">
             <Icon name="logs" />
-            <span>{copy.noLogs}</span>
+            <span>{query || level !== "all" ? s.noMatches : copy.noLogs}</span>
           </div>
         ) : null}
-        {[...logs].reverse().map((record) => (
+        {[...shown].reverse().map((record) => (
           <div className="activity-row" key={record.uiId}>
             <StateDot state={record.level === "error" ? "error" : record.level === "warning" ? "busy" : "ready"} />
             <div>
@@ -1656,59 +1560,36 @@ function SettingsSurface({
     }
   };
 
+  const studio = studioCopy(language);
   return (
     <ContentSurface narrow title={devProfile ? copy.devSettingsTitle : copy.settingsTitle}>
-      <SectionHeading label={copy.general} />
-      <div className="settings-list">
-        {!devProfile ? <SettingRow body={copy.launchAtLoginBody} flushAfter label={copy.launchAtLogin}>
-          <Switch
-            checked={snapshot.state.autoStart}
-            onChange={(checked) => void api!.setAutostart(checked)
-              .then((result) => updateState(result.state))
-              .catch((cause) => setError(messageOf(cause)))}
-          />
+      <section className="studio-settings-section"><div><h2>{studio.workflow}</h2><p>{copy.interactionMode}</p></div><div>
+        <InteractionModePicker copy={copy} disabled={busy} mode={snapshot.state.browserInteractionMode} onChange={(mode) => void setInteractionMode(mode)} />
+        <div className="settings-list">
+          <SettingRow body={copy.showDuringTurnsBody} label={copy.showDuringTurns}>
+            <Switch label={copy.showDuringTurns} checked={snapshot.state.showBrowserDuringTurns} disabled={busy || snapshot.state.browserInteractionMode === "manual"}
+              onChange={(checked) => void api!.setPreference("showBrowserDuringTurns", checked).then(updateState).catch((cause) => setError(messageOf(cause)))} />
+          </SettingRow>
+          <SettingRow body={snapshot.state.browserInteractionMode === "manual" ? copy.manualBiggerContextUnavailable : copy.biggerContextBody} label={copy.biggerContext}>
+            <Switch label={copy.biggerContext} checked={snapshot.state.experimentalBiggerContext}
+              disabled={busy || snapshot.state.browserInteractionMode === "manual" || snapshot.state.coreSetupComplete !== true}
+              onChange={(checked) => void setBiggerContext(checked)} />
+          </SettingRow>
+        </div>
+      </div></section>
+      <section className="studio-settings-section"><div><h2>{studio.startup}</h2><p>{copy.general}</p></div><div className="settings-list">
+        {!devProfile ? <SettingRow body={copy.launchAtLoginBody} label={copy.launchAtLogin}>
+          <Switch label={copy.launchAtLogin} checked={snapshot.state.autoStart} disabled={busy}
+            onChange={(checked) => void api!.setAutostart(checked).then((result) => updateState(result.state)).catch((cause) => setError(messageOf(cause)))} />
         </SettingRow> : null}
-        <InteractionModePicker
-          copy={copy}
-          disabled={busy}
-          mode={snapshot.state.browserInteractionMode}
-          onChange={(mode) => void setInteractionMode(mode)}
-        />
         <SettingRow body={devProfile ? copy.devKeepRunningBody : copy.keepRunningOnCloseBody} label={copy.keepRunningOnClose}>
-          <Switch
-            checked={snapshot.state.keepRunningOnClose}
-            onChange={(checked) => void api!.setPreference("keepRunningOnClose", checked)
-              .then(updateState)
-              .catch((cause) => setError(messageOf(cause)))}
-          />
+          <Switch label={copy.keepRunningOnClose} checked={snapshot.state.keepRunningOnClose} disabled={busy}
+            onChange={(checked) => void api!.setPreference("keepRunningOnClose", checked).then(updateState).catch((cause) => setError(messageOf(cause)))} />
         </SettingRow>
-        <SettingRow body={copy.showDuringTurnsBody} label={copy.showDuringTurns}>
-          <Switch
-            checked={snapshot.state.showBrowserDuringTurns}
-            disabled={snapshot.state.browserInteractionMode === "manual"}
-            onChange={(checked) => void api!.setPreference("showBrowserDuringTurns", checked)
-              .then(updateState)
-              .catch((cause) => setError(messageOf(cause)))}
-          />
-        </SettingRow>
-        <SettingRow
-          body={snapshot.state.browserInteractionMode === "manual"
-            ? copy.manualBiggerContextUnavailable
-            : copy.biggerContextBody}
-          label={copy.biggerContext}
-        >
-          <Switch
-            checked={snapshot.state.experimentalBiggerContext}
-            disabled={busy
-              || snapshot.state.browserInteractionMode === "manual"
-              || snapshot.state.coreSetupComplete !== true}
-            onChange={(checked) => void setBiggerContext(checked)}
-          />
-        </SettingRow>
-        <SettingRow body={copy.chooseLanguageHint} label={copy.language}>
-          <LanguageMenu copy={copy} language={language} onChange={(next) => void updateLanguage(next)} />
-        </SettingRow>
-      </div>
+      </div></section>
+      <section className="studio-settings-section"><div><h2>{studio.experience}</h2></div><div className="settings-list">
+        <SettingRow body={copy.chooseLanguageHint} label={copy.language}><LanguageMenu copy={copy} language={language} onChange={(next) => void updateLanguage(next)} /></SettingRow>
+      </div></section>
 
       {!devProfile && snapshot.state.codexRestartRequired ? (
         <NoticeRow icon="alert" tone="warning">
@@ -2160,16 +2041,19 @@ function IconButton({
 
 function Switch({
   checked,
+  label,
   disabled = false,
   onChange,
 }: {
   checked: boolean;
+  label: string;
   disabled?: boolean;
   onChange: (checked: boolean) => void;
 }) {
   return (
     <button
       aria-checked={checked}
+      aria-label={label}
       className={`switch${checked ? " is-on" : ""}`}
       disabled={disabled}
       onClick={() => onChange(!checked)}
@@ -2247,11 +2131,6 @@ function ActionDot({ pulse = false, tone }: { pulse?: boolean; tone: "required" 
   return <i aria-hidden="true" className={`action-dot is-${tone}${pulse ? " is-pulse" : ""}`} />;
 }
 
-function BrandMark({ small = false }: { small?: boolean }) {
-  return <span className={`brand-mark maria-brand-mark${small ? " is-small" : ""}`} aria-hidden="true">
-    <svg viewBox="0 0 32 32"><path d="M6 24V8l10 11L26 8v16" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /></svg>
-  </span>;
-}
 
 function ErrorToast({ copy, message, onDismiss }: { copy: Copy; message: string; onDismiss: () => void }) {
   return (
@@ -2351,7 +2230,7 @@ function BiggerContextRecommendation({
             <strong>{copy.biggerContext}</strong>
             <p>{copy.biggerContextRecommendationToggleBody}</p>
           </div>
-          <Switch checked={checked} disabled={busy} onChange={onChange} />
+          <Switch label={copy.biggerContext} checked={checked} disabled={busy} onChange={onChange} />
         </div>
         {checked ? <p className="bigger-context-recommendation-restart">{copy.restartCodex}</p> : null}
         <footer>
@@ -2379,7 +2258,7 @@ function FatalMessage({ message }: { message: string }) {
   return (
     <main className="fatal-message">
       <BrandMark />
-      <h1>Codex Web GPT</h1>
+      <h1>Maria WebGPT</h1>
       <p>{message}</p>
     </main>
   );

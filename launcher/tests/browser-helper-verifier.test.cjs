@@ -3,7 +3,16 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { verifyConnectorWithBrowserHelper } = require("../electron/browser-helper-verifier.cjs");
+const { runBrowserHelperOperation, verifyConnectorWithBrowserHelper } = require("../electron/browser-helper-verifier.cjs");
+
+test("retired browser smoke requests are rejected before a helper can start", async () => {
+  await assert.rejects(runBrowserHelperOperation({
+    helper: { executable: "/must-not-start", script: "/must-not-start" },
+    descriptorPath: "/unused/descriptor.json",
+    appName: "Codex Native2",
+    operation: "smoke",
+  }), /Unsupported browser helper operation: smoke/);
+});
 
 test("launcher verification delegates exact connector selection to the browser helper protocol", async (context) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-browser-helper-verify-"));

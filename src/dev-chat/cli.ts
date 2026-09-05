@@ -387,7 +387,7 @@ export async function runDevCommand(args: string[]): Promise<void> {
   const message = args.join(" ").trim();
   if (!existsSync(paths.configPath)) {
     throw new Error(
-      "DEV profile is not configured. In the window labelled DEV: sign in, run the browser smoke test,"
+      "DEV profile is not configured. In the window labelled DEV: sign in,"
       + " and initialize the DEV profile. Complete optional MCP setup only for simulated tool rounds.",
     );
   }

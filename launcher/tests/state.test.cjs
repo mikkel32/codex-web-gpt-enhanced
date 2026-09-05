@@ -10,6 +10,21 @@ const {
   validateSidebarState,
 } = require("../electron/state.cjs");
 
+test("upgrades discard obsolete smoke gates while preserving completed setup", (context) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "maria-state-upgrade-"));
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, "state.json");
+  fs.writeFileSync(file, JSON.stringify({
+    version: 1, language: "en", onboardingComplete: true, coreSetupComplete: true,
+    codexCatalogVerified: true, browserSmokePassed: false, browserSmokeVersion: "5.5.0",
+  }));
+  const state = createStateStore(file).read();
+  assert.equal(state.coreSetupComplete, true);
+  assert.equal(state.codexCatalogVerified, true);
+  assert.equal("browserSmokePassed" in state, false);
+  assert.equal("browserSmokeVersion" in state, false);
+});
+
 test("launcher state persists onboarding, language, and autostart atomically", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-launcher-state-"));
   const file = path.join(root, "state.json");
@@ -25,8 +40,6 @@ test("launcher state persists onboarding, language, and autostart atomically", (
       browserInteractionMode: "automatic",
       experimentalBiggerContext: false,
       zeroRiskProEnabled: false,
-      browserSmokePassed: false,
-      browserSmokeVersion: null,
       sidebarOpen: true,
       sidebarWidth: 252,
       mcpGuideStep: 0,
@@ -36,8 +49,6 @@ test("launcher state persists onboarding, language, and autostart atomically", (
       language: "zh-CN",
       onboardingComplete: true,
       keepRunningOnClose: false,
-      browserSmokePassed: true,
-      browserSmokeVersion: "0.2.0",
     });
     assert.deepEqual(createStateStore(file).read(), {
       version: 1,
@@ -49,8 +60,6 @@ test("launcher state persists onboarding, language, and autostart atomically", (
       browserInteractionMode: "automatic",
       experimentalBiggerContext: false,
       zeroRiskProEnabled: false,
-      browserSmokePassed: true,
-      browserSmokeVersion: "0.2.0",
       sidebarOpen: true,
       sidebarWidth: 252,
       mcpGuideStep: 0,
@@ -94,8 +103,6 @@ test("persisted sidebar corruption is repaired without changing the rest of laun
       onboardingComplete: "yes",
       autoStart: "yes",
       bridgeEnabled: false,
-      browserSmokePassed: "yes",
-      browserSmokeVersion: { invalid: true },
       sidebarOpen: "yes",
       sidebarWidth: 900,
       mcpGuideStep: 99,
@@ -112,8 +119,6 @@ test("persisted sidebar corruption is repaired without changing the rest of laun
       browserInteractionMode: "automatic",
       experimentalBiggerContext: false,
       zeroRiskProEnabled: false,
-      browserSmokePassed: false,
-      browserSmokeVersion: null,
       sidebarOpen: true,
       sidebarWidth: 252,
       mcpGuideStep: 0,

@@ -5,20 +5,26 @@
 
 **你的模型，你的工作空间，更多可能。**
 
-Made with love -- Maria GPT 6 Astra 👀
+Built by Mikkel & Maria
 
 Maria brings ChatGPT Web into your Codex workflow while keeping regular Codex
 models available. Choose a native model for your Codex account, or choose a
 **Maria Web** model to use your ChatGPT session. Your task, files, tools, and results
 stay together in Codex.
 
+## Maria 5.6
+
+A redesigned desktop workspace with a unified copper identity, one-page onboarding,
+account-based model setup, keyboard page search (Cmd/Ctrl+K), conversation shortcuts,
+and searchable activity. Setup checks available models without sending a test message.
+
 ## Start here
 
 - Open **Maria WebGPT**. The Overview shows your connection and the next setup steps.
 - Sign in to ChatGPT in the Browser page, or choose Manual mode in Settings.
-- Open Setup to add Web models. Restart Codex once after installation so its picker refreshes.
+- Open **Models & setup** to add Web models. Restart Codex once after installation so its picker refreshes.
 - Choose a regular Codex model or a **Maria Web** model directly in Codex.
-- Use **Guide & README** inside Maria whenever you need these instructions.
+- Use **Help & guide** inside Maria whenever you need these instructions.
 
 ## Two ways to work
 

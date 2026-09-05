@@ -2792,42 +2792,11 @@ class BrowserHost {
     throw new Error("ChatGPT login was not completed before the timeout");
   }
 
-  async smokeTest() {
-    requireAutomaticBrowserInspection(this, "ChatGPT browser smoke test");
-    return await this.withManualOperation("browser smoke test", () => this.runSmokeTest());
-  }
-
   connectorName() {
     if (typeof this.getConnectorName !== "function") {
       throw new Error("Browser host connector-name resolver is unavailable");
     }
     return validateConnectorName(this.getConnectorName());
-  }
-
-  async runSmokeTest() {
-    requireAutomaticBrowserInspection(this, "ChatGPT browser smoke test");
-    const connectorName = this.connectorName();
-    this.show();
-    await this.waitForSurfaceReady();
-    this.setState({ status: "testing", message: "Running browser smoke test" });
-    this.logger.info("smoke.started");
-    const result = await this.runBrowserHelperOperation({
-      helper: this.helper,
-      descriptorPath: this.descriptorPath,
-      appName: connectorName,
-      operation: "smoke",
-      logger: this.logger,
-    });
-    const evidence = result?.value;
-    if (!evidence
-      || typeof evidence.effort !== "string"
-      || !evidence.effort
-      || evidence.response !== "CODEX WEB GPT READY") {
-      throw new Error("Browser helper returned invalid smoke-test evidence");
-    }
-    this.logger.info("smoke.completed", { effort: evidence.effort, responseChars: evidence.response.length });
-    this.setState({ status: "ready", message: "Smoke test passed", authenticated: true });
-    return { ok: true, ...evidence };
   }
 
   async verifyConnector(appName) {

@@ -4,73 +4,99 @@ import type { LauncherSnapshot, Surface } from "./types";
 import { useConnectionStatus } from "./useConnectionStatus";
 import { WebAccessNotice } from "./WebAccessNotice";
 import readme from "../../README.md?raw";
+import { BrandMark } from "./BrandMark";
+import { studioCopy } from "./studio-copy";
 
-export const MADE_WITH_LOVE = "Made with love -- Maria GPT 6 Astra 👀";
+export const MADE_WITH_LOVE = "Mikkel & Maria";
 
 export function MariaHome({ snapshot, navigate }: {
   snapshot: LauncherSnapshot;
   navigate: (surface: Surface) => void;
 }) {
+  const s = studioCopy(snapshot.state.language);
   const { status, checking, error, refresh } = useConnectionStatus();
-  const [nativeCommandCopied, setNativeCommandCopied] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [actionError, setActionError] = useState("");
   const nativeReady = !error && status?.nativeAvailable === true;
   const development = snapshot.profile === "development";
   const manual = snapshot.state.browserInteractionMode === "manual";
   const tabs = snapshot.browser?.tabs ?? [];
-  const activeTurns = status?.activeBrowserTurns ?? tabs.filter(tab => tab.status === "running").length;
+  const paused = snapshot.browser?.webAccess?.status === "paused";
+  const webReady = !paused && (manual ? snapshot.state.mcpSetupComplete : snapshot.browser?.authenticated && snapshot.state.codexCatalogVerified);
   const steps = [
-    { id: "signin", title: manual ? "Connect your manual harness" : "Sign in to ChatGPT", done: manual ? snapshot.state.mcpSetupComplete : snapshot.browser?.authenticated, surface: manual ? "mcp" : "browser", body: manual ? "Link the connector for manual turns." : "Use a session from your existing browser." },
-    { id: "models", title: "Add your Web models", done: snapshot.state.codexCatalogVerified, surface: "setup", body: "Native and Web models, in the same Codex picker." },
-    { id: "tools", title: "Connect your workspace tools", done: snapshot.state.mcpSetupComplete, surface: "mcp", body: "Files, commands, and results in the same task." },
+    { id: "account", title: s.web, done: manual ? snapshot.state.mcpSetupComplete : snapshot.browser?.authenticated, surface: manual ? "mcp" : "browser" },
+    { id: "models", title: s.manageModels, done: snapshot.state.codexCatalogVerified, surface: "setup" },
+    { id: "tools", title: s.tools, done: snapshot.state.mcpSetupComplete, surface: "mcp" },
   ] as const;
-  const readyCount = steps.filter(step => step.done).length;
-  return <div className="maria-page moon-home">
-    <div className="moon-topline"><span className="maria-eyebrow">MARIA / MOONLIGHT</span><span className="moon-edition">{development ? "ISOLATED DEV" : "CODEX + CHATGPT"}</span></div>
-    <WebAccessNotice access={snapshot.browser?.webAccess} openBrowser={() => navigate("browser")} />
-    <header className="maria-hero moon-hero">
-      <div className="moon-hero-copy"><h1>Your workspace,<br /><span>in a different light.</span></h1>
-        <p>A focused home for your models and conversations.<br />Keep building. Maria keeps the connection.</p>
-        <div className="maria-hero-actions">
-          <button className="button-primary" onClick={() => navigate("browser")}>Open ChatGPT <Icon name="forward" /></button>
-          <button className="button-secondary" onClick={() => navigate("guide")}>Explore the guide <Icon name="logs" /></button>
-        </div>
-      </div>
-      <div className="moon-art" aria-hidden="true"><div className="moon-halo" /><div className="moon-disc" /><span className="moon-orbit-label">A SPACE FOR YOUR NEXT IDEA</span></div>
+  const complete = steps.filter(step => step.done).length;
+  const selectTab = async (id: string) => {
+    setActionError("");
+    try { await window.codexWebLauncher!.selectBrowserTab(id); navigate("browser"); }
+    catch (cause) { setActionError(cause instanceof Error ? cause.message : String(cause)); }
+  };
+  const copyCommand = async () => {
+    setActionError("");
+    try { await window.codexWebLauncher!.copyNativeCodexCommand(); setCopied(true); }
+    catch (cause) { setActionError(cause instanceof Error ? cause.message : String(cause)); }
+  };
+  return <div className="studio-home maria-page">
+    <header className="studio-page-heading">
+      <div><span className="maria-eyebrow">MARIA / {s.workspace}</span><h1>{s.greeting}</h1><p>{s.intro}</p></div>
+      <button className="button-primary" onClick={() => navigate("browser")}>{s.emptyAction}<Icon name="forward" /></button>
     </header>
-    <section className="moon-pulse" aria-label="Workspace status">
-      <div><span className="moon-metric-label">NATIVE CODEX</span><strong><i className={nativeReady ? "moon-status is-ready" : "moon-status"} />{development ? "Separate" : nativeReady ? "Connected" : checking && !status ? "Checking" : error ? "Unavailable" : "Needs setup"}</strong></div>
-      <div><span className="moon-metric-label">WEB ACTIVITY</span><strong>{activeTurns ? `${activeTurns} running` : "Ready when you are"}</strong></div>
-      <div><span className="moon-metric-label">BROWSER WORKSPACE</span><strong>{tabs.length} / {snapshot.browser?.maxTabs ?? 5} tabs</strong></div>
-      <button className="icon-button" aria-label="Refresh connection status" disabled={checking} onClick={refresh}><Icon name="reload" /></button>
-    </section>
-    <div className="moon-section-heading"><h2>Choose your route</h2><span>ONE WORKSPACE. YOUR CHOICE.</span></div>
-    <section className="maria-connections" aria-label="Connections">
-      <article className={`maria-connection ${nativeReady ? "is-ready" : ""}`}>
-        <div className="maria-card-top"><span className="moon-route-number">01 / NATIVE</span><span className="maria-pill">{development ? "Production stays separate" : status?.recoveryAvailable ? "Recovery enabled" : "Codex account"}</span></div>
-        <h2>Native Codex <Icon name="activity" /></h2>
-        <p>{development ? "This checkout has its own state, browser, and port. Your installed connection stays independent." : "Your regular models, reasoning controls, and tools. Keep working even when Maria's window closes."}</p>
-        <button className="text-button" onClick={() => nativeReady ? navigate("guide") : navigate("setup")}>{nativeReady ? "How it works" : "Set up connection"} <Icon name="forward" /></button>
-      </article>
-      <article className="maria-connection maria-web-connection">
-        <div className="maria-card-top"><span className="moon-route-number">02 / WEB</span><span className="maria-pill">{manual ? "Manual mode" : "Automatic mode"}</span></div>
-        <h2>ChatGPT Web <Icon name="browser" /></h2>
-        <p>{manual ? "Choose your model and send in ChatGPT. Maria connects the tools and brings the results back to your Codex task." : "Your ChatGPT session, with your Codex workspace. Continue the same task with less repeated context."}</p>
-        <button className="text-button" onClick={() => navigate("settings")}>Choose how you work <Icon name="forward" /></button>
-      </article>
-    </section>
-    {tabs.length ? <section className="moon-sessions" aria-label="Current browser sessions">
-      <div className="moon-section-heading"><h2>Your conversations</h2><button className="text-button" onClick={() => navigate("browser")}>Open workspace <Icon name="forward" /></button></div>
-      {tabs.map(tab => <button key={tab.id} className="moon-session-row" onClick={() => navigate("browser")}><Icon name="browser" /><span>{tab.title || "ChatGPT conversation"}</span><small>{tab.status === "running" ? "Working" : tab.status === "ready" ? "Retained" : "Needs attention"}</small><Icon name="chevron" /></button>)}
-    </section> : null}
-    <details className="moon-setup" open={readyCount < 3}>
-      <summary><span>Connection setup</span><span>{readyCount} / 3 ready</span></summary>
-      {steps.map((step, index) => <button key={step.id} className="maria-checklist-row" onClick={() => navigate(step.surface)}>
-        <span className={`maria-step-number ${step.done ? "is-done" : ""}`}>{step.done ? <Icon name="check" /> : index + 1}</span><span><strong>{step.title}</strong><small>{step.body}</small></span><Icon name="chevron" />
-      </button>)}
-    </details>
-    {error ? <p className="moon-inline-error" role="status">Connection status is unavailable. Check Activity for details.</p> : null}
-    <aside className="moon-native-access"><span className="maria-card-icon"><Icon name="setup" /></span><div><strong>Keep Codex independent.</strong><p>Open a native session from your terminal, even when Maria is stopped.</p></div><button className="text-button" onClick={() => void window.codexWebLauncher!.copyNativeCodexCommand().then(() => setNativeCommandCopied(true)).catch(() => setNativeCommandCopied(false))}>{nativeCommandCopied ? "Copied" : "Copy native command"} <Icon name={nativeCommandCopied ? "check" : "external"} /></button></aside>
-    <footer className="maria-signature"><span>{MADE_WITH_LOVE}</span><span>MOONLIGHT EDITION · {snapshot.version}</span></footer>
+    <WebAccessNotice access={snapshot.browser?.webAccess} openBrowser={() => navigate("browser")} />
+    <div className="studio-dashboard">
+      <div className="studio-main-column">
+        <section className="studio-conversations" aria-label={s.conversations}>
+          <div className="studio-section-heading"><h2>{s.conversations}<span className="studio-count">{tabs.length}</span></h2>
+            {tabs.length ? <button className="text-button" onClick={() => navigate("browser")}>{s.openWorkspace}<Icon name="forward" /></button> : null}
+          </div>
+          {tabs.length ? <div className="studio-session-list">{tabs.map(tab =>
+            <button className="studio-session" key={tab.id} onClick={() => void selectTab(tab.id)}>
+              <span className={`studio-session-icon ${tab.status === "running" ? "is-working" : ""}`}><Icon name="browser" /></span>
+              <span className="studio-session-copy"><strong>{tab.title || "ChatGPT"}</strong><small>{tab.interactionMode === "manual" ? s.manual : s.automatic}</small></span>
+              <span className={`studio-status ${tab.status === "running" ? "is-running" : tab.status === "error" ? "is-error" : ""}`}><i />{tab.status === "running" ? s.working : tab.status === "error" ? s.attention : s.retained}</span><Icon name="forward" />
+            </button>)}</div> : <div className="studio-empty-conversations">
+            <BrandMark />
+            <h3>{s.emptyTitle}</h3><p>{s.emptyBody}</p>
+            <button className="button-secondary" onClick={() => navigate("setup")}>{s.manageModels}<Icon name="forward" /></button>
+          </div>}
+        </section>
+        <section className="studio-models" aria-label={s.modelTitle}>
+          <div className="studio-section-heading"><h2>{s.modelTitle}</h2></div>
+          <div className="studio-model-grid">
+            <article className="studio-model-card"><span className="studio-model-icon"><Icon name="setup" /></span><span className="studio-model-kind">NATIVE</span>
+              <h3>Codex</h3><p>{s.nativeBody}</p>
+              <button className="text-button" onClick={() => void copyCommand()}>{copied ? s.copied : s.copyNative}<Icon name={copied ? "check" : "external"} /></button>
+            </article>
+            <article className="studio-model-card is-web"><span className="studio-model-icon"><Icon name="globe" /></span><span className="studio-model-kind">WEB</span>
+              <h3>ChatGPT</h3><p>{s.webBody}</p>
+              <button className="text-button" onClick={() => navigate("setup")}>{webReady ? s.manageModels : s.finishSetup}<Icon name="forward" /></button>
+            </article>
+          </div>
+        </section>
+        <button className="studio-guide-card" onClick={() => navigate("guide")}><span className="studio-guide-icon"><Icon name="logs" /></span><span><strong>{s.guide}</strong><small>{s.guideBody}</small></span><Icon name="forward" /></button>
+      </div>
+      <aside className="studio-context-column">
+        <section className="studio-connection-panel" aria-label={s.connections}>
+          <div className="studio-section-heading"><h2>{s.connections}</h2><button className="icon-button" aria-label="Refresh connection status" disabled={checking} onClick={refresh}><Icon name="reload" /></button></div>
+          <button className="studio-connection-row" onClick={() => navigate("setup")}><Icon name="setup" /><span><strong>{s.native}</strong><small>{development ? "DEV" : nativeReady ? s.connected : checking ? s.checking : s.attention}</small></span><span className={`studio-indicator ${nativeReady ? "is-ready" : "needs-attention"}`} title={nativeReady ? s.ready : s.attention} /><span className="sr-only">{nativeReady ? s.ready : checking ? s.checking : s.attention}</span></button>
+          <button className="studio-connection-row" onClick={() => navigate("browser")}><Icon name="browser" /><span><strong>{s.web}</strong><small>{paused ? s.attention : snapshot.browser?.authenticated ? s.connected : manual ? s.manual : s.signIn}</small></span><span className={`studio-indicator ${webReady ? "is-ready" : "needs-attention"}`} /></button>
+          <button className="studio-connection-row" onClick={() => navigate("mcp")}><Icon name="mcp" /><span><strong>{s.tools}</strong><small>{snapshot.state.mcpSetupComplete ? s.connected : s.connect}</small></span><span className={`studio-indicator ${snapshot.state.mcpSetupComplete ? "is-ready" : "needs-attention"}`} /></button>
+          <div className="studio-mode"><span>{s.mode}</span><button onClick={() => navigate("settings")}>{manual ? s.manual : s.automatic}<Icon name="chevron" /></button></div>
+          {error ? <p role="status" className="studio-inline-error">{s.attention}: {error}</p> : null}
+        </section>
+        {complete < steps.length ? <section className="studio-setup-panel">
+          <div className="studio-section-heading"><h2>{s.setup}</h2><span>{complete}/{steps.length}</span></div>
+          <p>{s.setupHint}</p><progress max={steps.length} value={complete} aria-label={s.setup} />
+          {steps.map((step, index) => <button className={`studio-setup-step ${step.done ? "is-done" : ""}`} key={step.id} onClick={() => navigate(step.surface)}>
+            <span>{step.done ? <Icon name="check" /> : index + 1}</span><strong>{step.title}</strong><Icon name="chevron" />
+          </button>)}
+        </section> : <section className="studio-ready-panel"><Icon name="check" /><h3>{s.modelReady}</h3><p>{s.nativeAvailable}</p><button className="text-button" onClick={() => navigate("settings")}>{s.edit}<Icon name="forward" /></button></section>}
+        <div className="studio-build-note"><span>MARIA</span><span>{development ? "DEV / " : ""}{snapshot.version}</span></div>
+      </aside>
+    </div>
+    {actionError ? <p role="alert" className="studio-inline-error">{actionError}</p> : null}
   </div>;
 }
 

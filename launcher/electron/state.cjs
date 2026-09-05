@@ -14,8 +14,6 @@ const DEFAULT_STATE = Object.freeze({
   browserInteractionMode: "automatic",
   experimentalBiggerContext: false,
   zeroRiskProEnabled: false,
-  browserSmokePassed: false,
-  browserSmokeVersion: null,
   sidebarOpen: true,
   sidebarWidth: 252,
   mcpGuideStep: 0,
@@ -35,6 +33,8 @@ function readState(filePath) {
     delete state.bridgeEnabled;
     delete state.githubOpened;
     delete state.xOpened;
+    delete state.browserSmokePassed;
+    delete state.browserSmokeVersion;
     if (state.language !== null && state.language !== "en" && state.language !== "zh-CN" && state.language !== "ja") {
       state.language = DEFAULT_STATE.language;
     }
@@ -45,7 +45,6 @@ function readState(filePath) {
       "showBrowserDuringTurns",
       "experimentalBiggerContext",
       "zeroRiskProEnabled",
-      "browserSmokePassed",
       "sidebarOpen",
     ]) {
       if (typeof state[key] !== "boolean") state[key] = DEFAULT_STATE[key];
@@ -56,10 +55,6 @@ function readState(filePath) {
     if (state.coreSetupComplete !== true) {
       if (state.onboardingComplete !== true) state.browserInteractionMode = "automatic";
       state.zeroRiskProEnabled = false;
-    }
-    if (state.browserSmokeVersion !== null
-      && (typeof state.browserSmokeVersion !== "string" || state.browserSmokeVersion.length > 128)) {
-      state.browserSmokeVersion = DEFAULT_STATE.browserSmokeVersion;
     }
     if (!Number.isFinite(state.sidebarWidth)
       || state.sidebarWidth < SIDEBAR_MIN_WIDTH

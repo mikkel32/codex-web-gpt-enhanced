@@ -52,13 +52,7 @@ interface InspectMessage {
   detectCapabilities: boolean;
 }
 
-interface SmokeMessage {
-  type: "smoke";
-  id: string;
-  config: VerifyMessage["config"];
-}
-
-type MaintenanceMessage = VerifyMessage | InspectMessage | SmokeMessage;
+type MaintenanceMessage = VerifyMessage | InspectMessage;
 type InputMessage = RunMessage
   | MaintenanceMessage
   | { type: "prepared_selected_ack"; id: string; prepared: CompiledChatGptWebPrompt }
@@ -356,15 +350,13 @@ function maintenanceWorker(message: MaintenanceMessage): ChatGptBrowserWorker {
   return ChatGptBrowserWorker.forProvider(provider);
 }
 
-async function maintain(message: InspectMessage | SmokeMessage): Promise<void> {
+async function maintain(message: InspectMessage): Promise<void> {
   if (abortControllers.has(message.id)) throw new Error(`Browser helper maintenance operation already exists: ${message.id}`);
   const abortController = new AbortController();
   abortControllers.set(message.id, abortController);
   try {
     const worker = maintenanceWorker(message);
-    const value = message.type === "inspect"
-      ? await worker.inspectSession(message.detectCapabilities)
-      : await worker.smokeTest(abortController.signal);
+    const value = await worker.inspectSession(message.detectCapabilities);
     writeProtocol({ type: "result", id: message.id, value });
   } catch (error) {
     writeProtocol({
@@ -479,7 +471,7 @@ input.on("line", line => {
       id: message.id,
       message: error instanceof Error ? error.message : String(error),
     }));
-  } else if (message.type === "inspect" || message.type === "smoke") {
+  } else if (message.type === "inspect") {
     void maintain(message).catch(error => writeProtocol({
       type: "error",
       id: message.id,

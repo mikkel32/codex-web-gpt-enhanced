@@ -42,7 +42,6 @@ contextBridge.exposeInMainWorld("codexWebLauncher", {
   continuePasskeyLogin: () => ipcRenderer.invoke("launcher:browser-passkey-login-continue"),
   logoutChatGpt: () => ipcRenderer.invoke("launcher:browser-logout"),
   dismissSessionReminder: () => ipcRenderer.invoke("launcher:session-reminder-dismiss"),
-  smokeTest: () => ipcRenderer.invoke("launcher:browser-smoke"),
   verifyMcp: () => ipcRenderer.invoke("launcher:mcp-verify"),
   doctor: () => ipcRenderer.invoke("launcher:doctor"),
   cancelTurns: () => ipcRenderer.invoke("launcher:cancel-turns"),

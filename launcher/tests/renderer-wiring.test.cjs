@@ -135,13 +135,13 @@ test("Bigger Context stays optional without interrupting startup and retains its
     appSource,
     /const \[biggerContextRecommendationOpen, setBiggerContextRecommendationOpen\] = useState\(false\)/,
   );
-  assert.match(appSource, /&& !biggerContextRecommendationOpen;/);
+  assert.match(appSource, /&& !biggerContextRecommendationOpen[\s\S]*?&& !commandOpen;/);
   assert.match(appSource, /updateState\(await api!\.setBiggerContext\(enabled\)\)/);
   assert.match(
     appSource,
     /<BiggerContextRecommendation[\s\S]*?checked=\{snapshot\.state\.experimentalBiggerContext\}[\s\S]*?onClose=\{\(\) => setBiggerContextRecommendationOpen\(false\)\}/,
   );
-  assert.match(appSource, /<Switch checked=\{checked\} disabled=\{busy\} onChange=\{onChange\} \/>/);
+  assert.match(appSource, /<Switch label=\{copy\.biggerContext\} checked=\{checked\} disabled=\{busy\} onChange=\{onChange\} \/>/);
   assert.match(stylesSource, /\.bigger-context-recommendation-backdrop\s*\{[^}]*position:\s*fixed;/s);
   assert.doesNotMatch(stylesSource, /\.bigger-context-recommendation-backdrop\s*\{[^}]*backdrop-filter:/s);
 });
@@ -173,7 +173,6 @@ test("Zero Risk is selectable during onboarding and later switches transactional
   assert.match(preloadSource, /launcher:manual-prompt-copy/);
   assert.match(preloadSource, /launcher:manual-prompt-sent/);
   assert.match(electronMain, /browserInteractionMode === "automatic"[\s\S]*?browserHost\.probeAuthentication/);
-  assert.match(electronMain, /browserInteractionMode === "automatic"[\s\S]*?smokePassedForCurrentVersion/);
   const modeSwitchHandler = electronMain.slice(
     electronMain.indexOf('handle("launcher:browser-interaction-mode"'),
     electronMain.indexOf('handle("launcher:set-preference"'),
@@ -307,10 +306,8 @@ test("saved ChatGPT authentication is refreshed before setup is presented", () =
 test("completed model setup remains a repeatable capability probe", () => {
   assert.match(appSource, /<SetupRow[\s\S]*?onAction=\{install\}[\s\S]*?repeatable/);
   assert.match(appSource, /complete && !repeatable/);
-  assert.match(
-    electronMain,
-    /!setupState\.coreSetupComplete[\s\S]*?smokePassedThisSession[\s\S]*?smokePassedForCurrentVersion\(setupState\)/,
-  );
+  assert.doesNotMatch(electronMain, /launcher:browser-smoke|smokePassedThisSession/);
+  assert.match(appSource, /disabled=\{busy \|\| \(!manualInteraction && !browser\?\.authenticated\)\}/);
 });
 
 test("session reminders expose dismissal and a real storage-clearing logout", () => {

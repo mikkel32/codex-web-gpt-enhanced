@@ -12,7 +12,7 @@ usable.
 - Start the isolated launcher with `bun run dev:launcher`.
 - It skips the normal marketing onboarding and opens the setup surface directly. Sign in inside the
   window labelled **DEV**. This may be a different ChatGPT account.
-- Run its browser smoke test and initialize the DEV profile. Complete MCP setup only when testing
+- Initialize the DEV profile after signing in. Complete MCP setup only when testing
   simulated tool rounds; browser, effort, context-limit, and compaction work in browser-only mode.
   The launcher stores any MCP credentials only in the DEV home and supervises only that isolated
   tunnel. Create the ChatGPT connector as `Codex Native2 DEV`; keep `Codex Native2` unchanged.

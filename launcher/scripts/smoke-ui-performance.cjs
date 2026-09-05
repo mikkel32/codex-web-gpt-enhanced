@@ -6,7 +6,7 @@ function fixture(options){
  const listeners={};window.testListeners=listeners;window.testCalls=0;
  const state={version:1,language:'en',onboardingComplete:true,autoStart:true,keepRunningOnClose:true,showBrowserDuringTurns:true,browserInteractionMode:'automatic',experimentalBiggerContext:options?.biggerContext!==false,zeroRiskProEnabled:false,sidebarOpen:true,sidebarWidth:252,coreSetupComplete:true,codexCatalogVerified:true,mcpSetupComplete:true,mcpGuideStep:0,sessionRefreshReminderAt:null};
  const b={status:'ready',message:'Ready',url:'',title:'ChatGPT',authenticated:true,visible:false,surfaceActive:false,loading:false,canGoBack:false,canGoForward:false,zoomFactor:1,activeTabId:'main',maxTabs:5,tabs:[]};
- const snapshot={profile:'production',profilePaths:{coreHome:'test',codexHome:'test',userData:'test'},state,browser:b,connectorName:'Codex Native2',connectorNames:{automatic:'Codex Native2',manual:'Codex Zero Risk'},mcpCredentialsConfigured:true,logs:[],urls:{github:'https://github.com/mikkel32/codex-web-gpt-enhanced',connectors:'',tunnels:'',keys:''},platform:'darwin',packaged:true,version:'5.5.0',smokePassed:true,operation:null,update:{status:'up-to-date',latestVersion:'5.5.0'}};
+ const snapshot={profile:'production',profilePaths:{coreHome:'test',codexHome:'test',userData:'test'},state,browser:b,connectorName:'Codex Native2',connectorNames:{automatic:'Codex Native2',manual:'Codex Zero Risk'},mcpCredentialsConfigured:true,logs:[],urls:{github:'https://github.com/mikkel32/codex-web-gpt-enhanced',connectors:'',tunnels:'',keys:''},platform:'darwin',packaged:true,version:'5.6.0',operation:null,update:{status:'up-to-date',latestVersion:'5.6.0'}};
  window.testBrowser=b;
  window.codexWebLauncher=new Proxy({snapshot:async()=>snapshot,logs:async()=>[],connectionStatus:async()=>{window.testCalls++;return {nativeAvailable:true,browserConnected:true,activeBrowserTurns:0,recoveryAvailable:true};},setBrowserSurfaceActive:async()=>b,setBrowserBounds:async()=>true,copyNativeCodexCommand:async()=>true}, {get(t,k){if(k in t)return t[k];if(String(k).startsWith('on'))return listener=>{(listeners[k]??=new Set()).add(listener);return()=>listeners[k].delete(listener);};return async()=>state;}});
 }
@@ -26,10 +26,10 @@ try{for(const [name,root] of [...(process.env.MARIA_BASELINE_RENDERER ? [['befor
   const rows=await page.locator('.activity-row').count();
   if(name==='after'&&(idle.logSubscribers!==0||idle.animations!==0||rows!==300||idle.overflow||errors.length))throw Error(JSON.stringify({idle,rows,errors}));
   results.push({name,width,idle,rows,scriptMs:Math.round((end.ScriptDuration-start.ScriptDuration)*1000),taskMs:Math.round((end.TaskDuration-start.TaskDuration)*1000),errors});
-  if(width<820)await page.getByRole('button',{name:'Show sidebar',exact:true}).click();await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('heading',{name:'Launcher settings',exact:true}).waitFor();await page.waitForFunction(()=>[...document.querySelectorAll('.surface-transition')].every(e=>Number(getComputedStyle(e).opacity)>.999));if(name==='after')await page.screenshot({path:`${require('node:os').tmpdir()}/maria-settings-${width}.png`});
+  if(width<820)await page.getByRole('button',{name:'Show sidebar',exact:true}).click();await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('heading',{name:'Make Maria yours',exact:true}).waitFor();await page.waitForFunction(()=>[...document.querySelectorAll('.surface-transition')].every(e=>Number(getComputedStyle(e).opacity)>.999));if(name==='after')await page.screenshot({path:`${require('node:os').tmpdir()}/maria-settings-${width}.png`});
   if(name==='after') {
    if(width<820)await page.getByRole('button',{name:'Show sidebar',exact:true}).click();
-   await page.getByRole('button',{name:'Overview',exact:true}).click();await page.locator('.moon-home').waitFor({state:'visible'});
+   await page.getByRole('button',{name:'Overview',exact:true}).click();await page.locator('.studio-home').waitFor({state:'visible'});
    await page.clock.install();await page.waitForTimeout(50);
    const calls=await page.evaluate(()=>window.testCalls);
    await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,value:true});document.dispatchEvent(new Event('visibilitychange'));});

@@ -23,9 +23,10 @@ export function MariaUpdates({ snapshot, install }: { snapshot: LauncherSnapshot
     finally { setWorking(false); }
   };
   return <div className="maria-page maria-updates">
-    <header className="maria-update-heading"><span className="maria-eyebrow">MARIA / RELEASES</span><h1>{title}</h1><p>Improvements from our GitHub repository, delivered at your pace.</p></header>
+    <header className="maria-update-heading"><span className="maria-eyebrow">MARIA / RELEASES</span><h1>Updates</h1><p>Improvements from our GitHub repository, delivered at your pace.</p></header>
     <section className={`maria-update-card ${version ? "has-update" : ""}`} aria-label="Release status">
-      <div className="maria-update-version"><span className="maria-card-icon"><Icon name="update" /></span><div><span>Installed on this computer</span><strong>Maria {snapshot.version}</strong></div><span className="maria-pill">{snapshot.profile === "development" ? "DEV" : "Stable channel"}</span></div>
+      <div className="studio-release-status" role="status"><span className={`studio-indicator ${update.status === "up-to-date" ? "is-ready" : ""}`} />{title}</div>
+      <div className="maria-update-version"><span className="maria-card-icon"><Icon name="update" /></span><div><span>Installed on this computer</span><strong>Maria {snapshot.version}</strong></div><span className="maria-pill">{snapshot.profile === "development" ? "DEV" : update.status === "ahead" ? "Local build" : "Release channel"}</span></div>
       <div role="status" aria-live="polite">
         {version ? <p className="maria-update-new">Update available <strong>v{version}</strong></p> : null}
         {"latestVersion" in update && update.latestVersion ? <p>Latest published release: v{update.latestVersion}</p> : null}

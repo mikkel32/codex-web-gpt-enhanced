@@ -98,7 +98,6 @@ let tray = null;
 let quitting = false;
 let shutdownInProgress = false;
 let exitCommitted = false;
-let smokePassedThisSession = false;
 let cdpPort = 0;
 let lastOperation = null;
 let catalogVerificationTimer = null;
@@ -434,10 +433,6 @@ function validateBounds(value) {
   return value;
 }
 
-function smokePassedForCurrentVersion(state) {
-  return state.browserSmokePassed === true && state.browserSmokeVersion === app.getVersion();
-}
-
 function registerIpc({ logger, stateStore }) {
   const handle = (channel, handler) => registerLoggedIpc(ipcMain, logger, channel, handler);
   handle("launcher:snapshot", async () => ({
@@ -460,7 +455,6 @@ function registerIpc({ logger, stateStore }) {
     platform: process.platform,
     packaged: app.isPackaged,
     version: app.getVersion(),
-    smokePassed: smokePassedThisSession || smokePassedForCurrentVersion(stateStore.read()),
     operation: lastOperation,
     update: updateController?.getState() ?? { status: "disabled" },
   }));
@@ -584,15 +578,6 @@ function registerIpc({ logger, stateStore }) {
     const state = stateStore.update({ sessionRefreshReminderAt: nextSessionRefreshReminderAt() });
     send("launcher:state-changed", state);
     return state;
-  });
-  handle("launcher:browser-smoke", async () => {
-    if (stateStore.read().browserInteractionMode === "manual") {
-      throw new Error("Browser smoke testing is disabled in Zero Risk mode");
-    }
-    const result = await browserHost.smokeTest();
-    stateStore.update({ browserSmokePassed: true, browserSmokeVersion: app.getVersion() });
-    smokePassedThisSession = true;
-    return result;
   });
   handle("launcher:mcp-verify", async (event) => {
     const operationName = "mcp-verification";
@@ -732,15 +717,6 @@ function registerIpc({ logger, stateStore }) {
             : "Sign in to ChatGPT before installing the Codex integration",
         );
       }
-    }
-    if (setupState.browserInteractionMode === "automatic"
-      && !setupState.coreSetupComplete
-      && !(smokePassedThisSession || smokePassedForCurrentVersion(setupState))) {
-      throw new Error(
-        IS_DEV_PROFILE
-          ? "Run the browser smoke test before configuring the DEV harness"
-          : "Run the browser smoke test before installing the Codex integration",
-      );
     }
     const result = IS_DEV_PROFILE ? await runtimeHost.setupDevCore() : await runtimeHost.setupCore();
     stateStore.update({

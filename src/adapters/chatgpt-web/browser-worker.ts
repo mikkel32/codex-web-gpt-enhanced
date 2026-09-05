@@ -122,8 +122,6 @@ export const CHATGPT_TOOL_CONFIRMATION_TIMEOUT_MS = 60_000;
 export const MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS = 3;
 const CHATGPT_CONNECTOR_MENTION_QUERY = "@codex";
 const CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS = 10_000;
-const CHATGPT_SMOKE_TEXT = "Reply with exactly: CODEX WEB GPT READY";
-const CHATGPT_SMOKE_EXPECTED = "CODEX WEB GPT READY";
 /**
  * ChatGPT applies composer state asynchronously, and a fast host can reach the next step before the
  * editor has taken the previous one. This is headroom for that, not a readiness check.
@@ -2047,10 +2045,6 @@ export class ChatGptBrowserWorker {
     return this.enqueueMaintenance("session inspection", () => this.inspectSessionExclusive(detectCapabilities));
   }
 
-  smokeTest(abortSignal?: AbortSignal): Promise<{ effort: string; response: string }> {
-    return this.enqueueMaintenance("smoke test", () => this.smokeTestExclusive(abortSignal));
-  }
-
   private enqueueMaintenance<T>(name: string, action: () => Promise<T>): Promise<T> {
     const operation = this.maintenanceTail.then(() => {
       if (this.activeRuns.size > 0) {
@@ -3434,34 +3428,6 @@ export class ChatGptBrowserWorker {
     if (!detectCapabilities) return { authenticated: true, temporary: true, url };
     const capabilities = await detectChatGptAccountCapabilities(page);
     return { authenticated: true, temporary: true, url, ...capabilities };
-  }
-
-  private async smokeTestExclusive(abortSignal?: AbortSignal): Promise<{ effort: string; response: string }> {
-    const page = await this.ensurePage();
-    await this.prepareTemporaryChatSurface(page);
-    const account = await detectChatGptAccountCapabilities(page);
-    // Core smoke runs before the optional MCP connector is configured, so it must remain a
-    // browser-only transport check. Connector setup has its own explicit verification operation.
-    const capabilities: ChatGptWebCapabilities = { ...account, localToolsEnabled: false };
-    const modelId = account.solAvailable ? CHATGPT_WEB_MODEL_ID : CHATGPT_WEB_LUNA_MODEL_ID;
-    const reasoning = account.solAvailable ? "high" : "low";
-    const mode = resolveChatGptWebModelMode(modelId, reasoning, capabilities);
-    const traceId = `smoke_${randomUUID().replaceAll("-", "")}`;
-    const response = await this.runBrowserTurn({
-      traceId,
-      modelId,
-      reasoning,
-      capabilities,
-      prepare: async () => ({ text: CHATGPT_SMOKE_TEXT, images: [], release: () => {} }),
-      abortSignal,
-      onTextDelta: () => {},
-    }, undefined, page);
-    if (response.trim() !== CHATGPT_SMOKE_EXPECTED) {
-      throw new Error(
-        `ChatGPT smoke test returned an unexpected answer (${JSON.stringify(response.trim().slice(0, 200))})`,
-      );
-    }
-    return { effort: mode.displayLabel, response: CHATGPT_SMOKE_EXPECTED };
   }
 
   private async attachFiles(page: Page, prompt: CompiledChatGptWebPrompt): Promise<void> {

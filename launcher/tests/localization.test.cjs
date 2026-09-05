@@ -33,8 +33,8 @@ test("Japanese is a complete launcher language across state, IPC, onboarding, an
   assert.match(electronMain, /value !== "ja"/);
   assert.match(i18nSource, /const ja: Record<keyof typeof en, string> = \{/);
   assert.match(i18nSource, /if \(language === "ja"\) return ja as Copy;/);
-  assert.match(appSource, /active=\{selectedLanguage === "ja"\}/);
-  assert.match(appSource, /onClick=\{\(\) => setSelectedLanguage\("ja"\)\}/);
+  assert.match(appSource, /\["ja", "日本語"\]/);
+  assert.match(appSource, /onClick=\{\(\) => setSelectedLanguage\(id\)\}/);
   assert.match(appSource, /\{ label: copy\.japanese, value: "ja" \}/);
   assert.match(appSource, /<LanguageMenu copy=\{copy\} language=\{language\}/);
   assert.match(appSource, /document\.documentElement\.lang = documentLanguage/);
@@ -65,5 +65,5 @@ test("localized READMEs preserve every command block and link target from Englis
     assert.deepEqual(linkTargets(source), linkTargets(englishReadme));
   }
   assert.match(japaneseReadme, /Maria WebGPT/);
-  assert.match(japaneseReadme, /Made with love -- Maria GPT 6 Astra/);
+  assert.match(japaneseReadme, /Mikkel & Maria/);
 });
