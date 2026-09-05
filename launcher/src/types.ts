@@ -26,7 +26,17 @@ export interface LauncherState {
   sessionRefreshReminderAt: string | null;
 }
 
+export type WebAccessState = { status: "ready" } | {
+  status: "paused";
+  reason: "verification" | "rate-limit" | "sign-in" | "service" | "local-state";
+  detectedAt: string;
+  retryAt: string | null;
+  incidents: number;
+  canResume: boolean;
+};
+
 export interface BrowserState {
+  webAccess?: WebAccessState;
   status: "idle" | "loading" | "signed-out" | "ready" | "testing" | "running" | "error";
   message: string;
   url: string;
@@ -137,6 +147,8 @@ export interface LauncherApi {
   snapshot(): Promise<LauncherSnapshot>;
   setLanguage(language: Language): Promise<LauncherState>;
   connectionStatus(): Promise<ConnectionStatus>;
+  reviewWebAccess(): Promise<BrowserState>;
+  resumeWebAccess(): Promise<BrowserState>;
   completeOnboarding(language: Language, browserInteractionMode: BrowserInteractionMode): Promise<LauncherState>;
   openExternal(url: string): Promise<boolean>;
   setBrowserBounds(bounds: { x: number; y: number; width: number; height: number }): Promise<boolean>;

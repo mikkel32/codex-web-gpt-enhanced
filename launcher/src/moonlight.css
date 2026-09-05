@@ -86,6 +86,16 @@
 .maria-signature { color: #858585; font-size: 9px; margin-top: 21px; }
 .maria-signature > span:last-child { font-family: var(--font-mono); font-size: 8px; letter-spacing: .07em; }
 .moon-inline-error { font-size: 12px; color: var(--color-text-error); }
+.web-access-notice { display: flex; align-items: flex-start; gap: 13px; background: #24221d; border: 1px solid #c8b58a35; border-radius: 12px; padding: 18px; margin: 20px 0 0; color: #e3dbc8; flex-shrink: 0; }
+.browser-surface > .web-access-notice { margin: 12px 16px; }
+.web-access-notice > svg { width: 18px; height: 18px; flex-shrink: 0; }
+.web-access-copy { flex: 1; min-width: 0; }
+.web-access-copy strong { font-size: 13px; font-weight: 550; }
+.web-access-copy p { font-size: 12px; line-height: 1.7; color: #c6beae; margin: 6px 0; }
+.web-access-copy small { font-size: 10px; color: #b0a999; line-height: 1.6; }
+.web-access-actions { display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
+.web-access-copy .web-access-error { color: #e0a7a7; }
+@media (max-width: 760px) { .web-access-notice { flex-wrap: wrap; } .web-access-actions { flex-direction: row; flex-wrap: wrap; margin-left: 31px; } }
 .maria-update-card, .maria-update-card.has-update { background: linear-gradient(140deg, #202020, #151515); border-color: #ffffff25; }
 .maria-update-access, .browser-signin-card { background: #141414; border-color: #ffffff12; }
 .activity-row { content-visibility: auto; contain-intrinsic-size: auto 62px; }

@@ -1143,7 +1143,7 @@ describe("ChatGPT outer-native harness v4", () => {
     }
   });
 
-  test("caps automatic rate-limit browser sends at three retries for one native turn", async () => {
+  test("a rate-limit response after Send never starts another browser attempt", async () => {
     const socketPath = brokerTestEndpoint(`cgw-h4-retry-budget-${process.pid}-${Date.now()}`);
     const provider: CodexProviderConfig = {
       adapter: "chatgpt-web",
@@ -1174,17 +1174,38 @@ describe("ChatGPT outer-native harness v4", () => {
         const error = events.at(-1);
         expect(error).toMatchObject({ type: "error", code: "rate_limit_exceeded" });
         expect((error as Extract<AdapterEvent, { type: "error" }>).retryable)
-          .toBe(attempt < MAX_CHATGPT_WEB_TURN_RETRIES);
+          .toBe(false);
         if (attempt === MAX_CHATGPT_WEB_TURN_RETRIES) {
           expect((error as Extract<AdapterEvent, { type: "error" }>).message)
             .toContain("Try again in a few minutes.");
         }
       }
-      expect(browserStarts).toBe(MAX_CHATGPT_WEB_TURN_RETRIES + 1);
+      expect(browserStarts).toBe(1);
     } finally {
       (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = originalRun;
       await TurnBroker.forSocket(socketPath).close();
     }
+  });
+
+  test.each(["activated", "accepted"] as const)("a typed service error after Send %s cannot replay browser work", async phase => {
+    const socketPath = brokerTestEndpoint(`cgw-h4-submitted-${phase}-${process.pid}-${Date.now()}`);
+    const provider: CodexProviderConfig = { adapter: "chatgpt-web", baseUrl: `browser://submitted-${phase}-${Date.now()}`,
+      chatgptWeb: { brokerSocketPath: socketPath, localToolsEnabled: false, solAvailable: true, proAvailable: true } };
+    const worker = ChatGptBrowserWorker.forProvider(provider);
+    const originalRun = worker.run.bind(worker);
+    let starts = 0;
+    (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = async turn => {
+      starts++; await turn.onSendActivated?.(); if (phase === "accepted") turn.onSubmitted?.();
+      throw new ChatGptWebAdapterError("ChatGPT service temporarily unavailable", { status: 503, errorType: "server_error", code: "upstream_server_error", retryable: true });
+    };
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const events: AdapterEvent[] = [];
+        await createChatGptWebAdapter(provider).runTurn!(rawWireRequest(environmentXml), { headers: new Headers() }, event => events.push(event));
+        expect(events.at(-1)).toMatchObject({ type: "error", status: 503, retryable: false });
+      }
+      expect(starts).toBe(1);
+    } finally { (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = originalRun; await TurnBroker.forSocket(socketPath).close(); }
   });
 
   test("a non-retryable browser failure remains replayable without starting another browser turn", async () => {

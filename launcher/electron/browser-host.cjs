@@ -4,6 +4,7 @@ const { createHash, randomBytes } = require("node:crypto");
 const { clipboard, WebContentsView, powerMonitor, powerSaveBlocker, shell } = require("electron");
 const { writePrivateFileAtomic } = require("./atomic-file.cjs");
 const { SavedConversations, savedConversationUrl } = require("./saved-conversations.cjs");
+const { BrowserAccessGate } = require("./browser-access.cjs");
 const {
   runBrowserHelperOperation,
   verifyConnectorWithBrowserHelper,
@@ -48,7 +49,7 @@ const RETAINED_TURN_TAB_TTL_MS = 30 * 60 * 1000;
 const BROWSER_NAVIGATION_TIMEOUT_MS = 60_000;
 const CHATGPT_AUTH_SESSION_TIMEOUT_MS = 5_000;
 const WINDOW_VISIBILITY_EVENTS = ["show", "hide", "minimize", "restore"];
-const CHATGPT_BACKEND_REQUEST_FILTER = { urls: [`${CHATGPT_ORIGIN}/backend-api/*`] };
+const CHATGPT_BACKEND_REQUEST_FILTER = { urls: [`${CHATGPT_ORIGIN}/*`] };
 const ZOOM_FACTORS = [0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
 const SHELL_ZOOM_LEVEL_STEP = 0.5;
 const SHELL_ZOOM_LEVEL_LIMIT = 5;
@@ -62,8 +63,6 @@ const AUTH_PROVIDER_HOSTS = new Set([
   "appleid.apple.com",
   "idmsa.apple.com",
 ]);
-const CLOUDFLARE_CHALLENGE_RECOVERY_DELAY_MS = 500;
-const CLOUDFLARE_CHALLENGE_RECOVERY_SETTLE_MS = 1_000;
 const COMPOSER_SELECTOR = [
   '[data-testid="prompt-textarea"]',
   "#prompt-textarea",
@@ -204,7 +203,7 @@ function responseHeaderIncludes(responseHeaders, name, expectedValue) {
 
 function isChatGptCloudflareChallengeResponse(details) {
   return details?.statusCode === 403
-    && isChatGptBackendUrl(details.url)
+    && (() => { try { return new URL(details.url).origin === CHATGPT_ORIGIN; } catch { return false; } })()
     && responseHeaderIncludes(details.responseHeaders, "cf-mitigated", "challenge");
 }
 
@@ -328,6 +327,7 @@ class BrowserHost {
     this.window = window;
     this.descriptorPath = descriptorPath;
     this.savedConversations = new SavedConversations(path.join(path.dirname(descriptorPath), "saved-conversations.json"));
+    this.accessGate = new BrowserAccessGate({ filePath: path.join(path.dirname(descriptorPath), "browser-access.json") });
     this.cdpPort = cdpPort;
     this.control = control;
     this.cancelTurn = cancelTurn;
@@ -363,10 +363,6 @@ class BrowserHost {
     this.manualOperation = null;
     this.loginOperation = null;
     this.sessionRefreshOperation = null;
-    this.cloudflareChallengeRecovery = null;
-    this.cloudflareChallengeRecoveryArmed = true;
-    this.cloudflareChallengeRecoveryDelayMs = CLOUDFLARE_CHALLENGE_RECOVERY_DELAY_MS;
-    this.cloudflareChallengeRecoverySettleMs = CLOUDFLARE_CHALLENGE_RECOVERY_SETTLE_MS;
     this.viewportCssKey = null;
     this.shellZoomShortcutBindings = new Map();
     this.authView = null;
@@ -1153,69 +1149,62 @@ class BrowserHost {
   }
 
   handleChatGptBackendResponse(details) {
-    const contents = this.view?.webContents;
-    if (!contents || contents.isDestroyed() || details?.webContentsId !== contents.id) return false;
-    if (!isChatGptBackendUrl(details.url)) return false;
-
-    if (details.statusCode >= 200 && details.statusCode < 400) {
-      this.cloudflareChallengeRecoveryArmed = true;
-      return false;
-    }
-    if (!isChatGptCloudflareChallengeResponse(details)) return false;
-    if (this.cloudflareChallengeRecovery) {
-      this.cloudflareChallengeRecoveryArmed = false;
-      return true;
-    }
-    if (this.activeTraceId || this.manualOperation) {
-      this.logger.warn("browser.cloudflare_challenge_not_reloaded", {
-        reason: this.activeTraceId ? "turn-active" : "manual-operation-active",
-        url: details.url,
-      });
-      return true;
-    }
-    if (!this.cloudflareChallengeRecoveryArmed) {
-      this.logger.warn("browser.cloudflare_challenge_persisted", { url: details.url });
-      return true;
-    }
-    this.cloudflareChallengeRecoveryArmed = false;
-    this.logger.warn("browser.cloudflare_challenge_detected", { url: details.url });
-    const recovery = this.reloadHomeAfterCloudflareChallenge();
-    const tracked = recovery
-      .catch((error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        this.logger.error("browser.cloudflare_challenge_recovery_failed", { message });
-        this.setState({ status: "error", message, loading: false });
-      })
-      .finally(() => {
-        if (this.cloudflareChallengeRecovery === tracked) this.cloudflareChallengeRecovery = null;
-      });
-    this.cloudflareChallengeRecovery = tracked;
+    const challenge = isChatGptCloudflareChallengeResponse(details);
+    if (!challenge && !isChatGptBackendUrl(details?.url)) return false;
+    const tab = [...(this.turnTabs?.values() ?? [])].find(tab => tab.view.webContents.id === details.webContentsId);
+    const contents = tab?.view.webContents ?? this.view?.webContents;
+    if (!contents || contents.isDestroyed() || contents.id !== details.webContentsId) return false;
+    let reason;
+    if (challenge) reason = "verification";
+    else if (details.statusCode === 429) reason = "rate-limit";
+    else if (details.statusCode === 401) reason = "sign-in";
+    else if (details.statusCode === 503 && /\/backend-api\/(?:f\/)?conversation(?:\/|$)/.test(new URL(details.url).pathname)) reason = "service";
+    if (!reason) return false;
+    const retryHeader = Object.entries(details.responseHeaders ?? {}).find(([name]) => name.toLowerCase() === "retry-after")?.[1];
+    const requestReference = name => {
+      const value = Object.entries(details.responseHeaders ?? {}).find(([key]) => key.toLowerCase() === name)?.[1];
+      const first = Array.isArray(value) ? value[0] : value;
+      return typeof first === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(first) ? first : undefined;
+    };
+    this.pauseWebAccess(reason, Array.isArray(retryHeader) ? retryHeader[0] : retryHeader, tab?.id ?? "home", {
+      source: "browser-response", httpStatus: details.statusCode,
+      requestId: requestReference("x-request-id"), cfRay: requestReference("cf-ray"),
+    });
     return true;
   }
 
-  async reloadHomeAfterCloudflareChallenge() {
-    const contents = this.view.webContents;
-    this.setState({
-      status: "loading",
-      message: "Refreshing ChatGPT security check",
-      loading: true,
-    });
-    await sleep(this.cloudflareChallengeRecoveryDelayMs);
-    if (contents.isDestroyed()) throw new Error("ChatGPT browser closed during security-check recovery");
-    const url = contents.getURL();
-    if (!url.startsWith(CHATGPT_ORIGIN)) {
-      throw new Error("ChatGPT security-check recovery lost its owned browser page");
-    }
+  pauseWebAccess(reason, retryAfter, tabId, evidence = { source: "page-dialog" }) {
+    this.accessGate ??= new BrowserAccessGate();
+    this.accessReviewTabId = tabId ?? this.selectedTabId;
+    const previous = JSON.stringify(this.accessGate.snapshot());
+    try { this.accessGate.pause(reason, retryAfter); }
+    catch (error) { this.logger.warn("browser.access_pause_persistence_failed", { message: error.message }); }
+    if (JSON.stringify(this.accessGate.snapshot()) === previous) return;
+    this.logger.warn("browser.access_paused", { reason, retryAt: this.accessGate.snapshot().retryAt, ...evidence });
+    this.publishState?.(this.snapshot());
+  }
 
-    // Only responses from this new document may prove that the challenge cleared.
-    this.cloudflareChallengeRecoveryArmed = false;
-    await contents.loadURL(url);
-    await sleep(this.cloudflareChallengeRecoverySettleMs);
-    if (!this.cloudflareChallengeRecoveryArmed) {
-      throw new Error("ChatGPT security check is still blocking backend requests. Reload ChatGPT and retry.");
+  async reviewWebAccess() {
+    const tab = this.turnTabs.get(this.accessReviewTabId);
+    if (tab) this.selectedTabId = tab.id;
+    else {
+      this.selectedTabId = "home";
+      const contents = this.view.webContents;
+      let onChatGpt = false;
+      try { onChatGpt = new URL(contents.getURL()).origin === CHATGPT_ORIGIN; } catch {}
+      if (!onChatGpt) await contents.loadURL("https://chatgpt.com/");
     }
-    await this.probeAuthentication();
-    this.logger.info("browser.cloudflare_challenge_recovered", { url });
+    this.show();
+    this.publishState?.(this.snapshot());
+    return this.snapshot();
+  }
+
+  resumeWebAccess() {
+    const previous = this.accessGate.snapshot();
+    this.accessGate.resume();
+    this.logger.info("browser.access_resumed_by_user", { previousReason: previous.reason });
+    this.publishState?.(this.snapshot());
+    return this.snapshot();
   }
 
   snapshot() {
@@ -1259,6 +1248,7 @@ class BrowserHost {
           ]
         : [homeTab],
       maxTabs: MAX_BROWSER_TABS,
+      webAccess: this.accessGate?.snapshot() ?? { status: "ready" },
     };
   }
 
@@ -1894,6 +1884,7 @@ class BrowserHost {
   }
 
   beginManualTurn(traceId, helperPid, prompt, conversationKey, resumePrompt) {
+    this.accessGate?.assertAvailable();
     if (this.manualOperation) {
       throw new Error(`ChatGPT browser is busy with ${this.manualOperation}`);
     }
@@ -2196,6 +2187,7 @@ class BrowserHost {
     connectorIdentity,
     requireRetainedConversation = false,
   ) {
+    this.accessGate?.assertAvailable();
     if (this.manualOperation) {
       throw new Error(`ChatGPT browser is busy with ${this.manualOperation}`);
     }
@@ -2325,12 +2317,23 @@ class BrowserHost {
     } catch { this.logger.warn("browser.conversation_url_save_failed", { traceId: tab.traceId }); }
   }
 
-  rememberConversationSubmission(traceId, helperPid) {
+  async rememberConversationSubmission(traceId, helperPid) {
     const tab = [...this.turnTabs.values()].find(tab => tab.traceId === traceId);
     if (!tab || tab.helperPid !== helperPid || tab.status !== "running" || tab.interactionMode !== "automatic") {
       throw new Error("ChatGPT submission does not own an active browser tab");
     }
     if (tab.submissionActivated) return;
+    if (tab.sendAdmission) return tab.sendAdmission;
+    const admission = BrowserHost.prototype.admitConversationSubmission.call(this, tab, helperPid);
+    tab.sendAdmission = admission;
+    try { return await admission; }
+    finally { if (tab.sendAdmission === admission) tab.sendAdmission = null; }
+  }
+
+  async admitConversationSubmission(tab, helperPid) {
+    if (this.accessGate) await this.accessGate.beforeSend(() => this.turnTabs.get(tab.id) === tab && tab.status === "running" && tab.helperPid === helperPid);
+    if (tab.submissionActivated) return;
+    if (this.turnTabs.get(tab.id) !== tab || tab.status !== "running") throw new Error("The Web turn ended before Send");
     if (tab.conversationKey) {
       const url = savedConversationUrl(tab.view.webContents.getURL());
       const previous = this.savedConversations?.get(tab.conversationKey);
@@ -2350,6 +2353,7 @@ class BrowserHost {
     message,
     retain = false,
     connectorBound = false,
+    accessIssue,
   ) {
     const tab = [...this.turnTabs.values()].find((candidate) => candidate.traceId === traceId);
     if (!tab) {
@@ -2367,6 +2371,7 @@ class BrowserHost {
       );
     }
     const cancelledByUser = this.userCancelledTurnOwners.get(traceId) === helperPid;
+    if (accessIssue) this.pauseWebAccess(accessIssue, undefined, tab.id);
     tab.status = status === "completed" ? "ready" : status === "aborted" ? "aborted" : "error";
     this.syncPowerSaveBlocker();
     tab.message = status === "completed" ? "Task completed" : message || `ChatGPT turn ${status}`;
@@ -2390,6 +2395,12 @@ class BrowserHost {
       tab.lastHeartbeatAt = Date.now();
       if (hideAfterTurn && !this.activeTraceId) this.hide();
       this.logger.info("browser.tab_retained", { tabId: tab.id, traceId });
+      this.publishState?.(this.snapshot());
+      this.writeDescriptor();
+      return { cancelledByUser };
+    }
+    if (this.accessGate?.snapshot().status === "paused") {
+      tab.message = this.accessGate.message();
       this.publishState?.(this.snapshot());
       this.writeDescriptor();
       return { cancelledByUser };

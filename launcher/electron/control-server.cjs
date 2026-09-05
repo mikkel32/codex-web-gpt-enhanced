@@ -170,6 +170,9 @@ class BrowserControlServer {
       if (body.connectorBound !== undefined && typeof body.connectorBound !== "boolean") {
         throw new Error("connectorBound is invalid");
       }
+      if (body.accessIssue !== undefined && (request.url !== "/v1/turn/end" || !["rate-limit", "sign-in"].includes(body.accessIssue))) {
+        throw new Error("accessIssue is only valid for an automatic turn end");
+      }
       if (body.refreshViewport !== undefined && typeof body.refreshViewport !== "boolean") {
         throw new Error("refreshViewport is invalid");
       }
@@ -291,7 +294,7 @@ class BrowserControlServer {
         writeJson(response, 200, { ok: true, ...lease });
         return;
       } else if (request.url === "/v1/turn/heartbeat") {
-        if (body.sendActivated === true) host.rememberConversationSubmission(body.traceId, body.helperPid);
+        if (body.sendActivated === true) await host.rememberConversationSubmission(body.traceId, body.helperPid);
         host.heartbeatTurn(body.traceId, body.helperPid, body.refreshViewport === true);
         this.logger.debug?.("browser.turn_heartbeat", { traceId: body.traceId });
         writeJson(response, 200, { ok: true });
@@ -306,6 +309,7 @@ class BrowserControlServer {
           body.message,
           body.retain === true,
           body.connectorBound === true,
+          ...(body.accessIssue ? [body.accessIssue] : []),
         );
         this.logger.info("browser.turn_ended", { traceId: body.traceId, status: body.status });
         writeJson(response, 200, { ok: true, ...release });
@@ -319,13 +323,15 @@ class BrowserControlServer {
       const manualInspectionDisabled = error?.code === "manual_browser_inspection_disabled";
       const manualOwnerLost = error?.code === "manual_turn_owner_lost";
       const manualTimedOut = error?.code === "manual_turn_timed_out";
+      const accessPaused = error?.code === "browser_access_paused";
       writeJson(
         response,
-        cancelled || retainedUnavailable || manualInspectionDisabled || manualOwnerLost
+        cancelled || retainedUnavailable || manualInspectionDisabled || manualOwnerLost || accessPaused
           ? 409
           : manualTimedOut ? 408 : 400,
         {
         error: message,
+        ...(accessPaused ? { code: "browser_access_paused" } : {}),
         ...(cancelled ? { code: "turn_cancelled" } : {}),
         ...(retainedUnavailable ? { code: "retained_conversation_unavailable" } : {}),
         ...(manualInspectionDisabled ? { code: "manual_browser_inspection_disabled" } : {}),

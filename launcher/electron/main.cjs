@@ -485,6 +485,8 @@ function registerIpc({ logger, stateStore }) {
     require("electron").clipboard.writeText('codex -c model_provider=openai -c openai_base_url=https://chatgpt.com/backend-api/codex');
     return true;
   });
+  handle("launcher:browser-access-review", () => browserHost.reviewWebAccess());
+  handle("launcher:browser-access-resume", () => browserHost.resumeWebAccess());
   handle("launcher:signin-browsers", () => signInBrowsers().map(({ id, name, executable }) => ({ id, name, available: Boolean(executable) })));
   handle("launcher:signin-begin", async (_event, browser) => {
     const selected = signInBrowsers().find(candidate => candidate.id === browser && candidate.executable);
@@ -1116,7 +1118,7 @@ async function start() {
   if (startHidden && !trayAvailable) mainWindow.once("ready-to-show", () => showMainWindow());
   const launcherSmokeTest = process.argv.includes("--launcher-smoke-test");
   let startupAuthenticationRefresh = Promise.resolve();
-  if (!launcherSmokeTest && stateStore.read().browserInteractionMode === "automatic") {
+  if (!launcherSmokeTest && stateStore.read().browserInteractionMode === "automatic" && browserHost.accessGate.snapshot().status === "ready") {
     startupAuthenticationRefresh = browserHost.refreshAuthentication().catch((error) => {
       logger.warn("browser.session_refresh_failed", {
         ...navigationErrorForLog(error),

@@ -60,6 +60,7 @@ import { loginVerificationMarkerPath } from "../../browser-login";
 import {
   connectLauncherBrowserHost,
   LauncherBrowserTurnCancelledError,
+  LauncherBrowserAccessPausedError,
   LauncherRetainedConversationUnavailableError,
   LAUNCHER_TURN_HEARTBEAT_INTERVAL_MS,
   LAUNCHER_TURN_HEARTBEAT_TIMEOUT_MS,
@@ -690,21 +691,10 @@ const chatGptRateLimitDialog = (page: Page): Locator => page.locator('[role="dia
 export async function throwIfChatGptRateLimitDialog(page: Page): Promise<void> {
   const dialog = chatGptRateLimitDialog(page);
   if (!await dialog.isVisible().catch(() => false)) return;
-
-  const acknowledge = dialog.getByRole("button", { name: /^(Got it|知道了|了解)$/ }).last();
-  if (await acknowledge.isVisible().catch(() => false)) {
-    try {
-      await acknowledge.press("Enter");
-    } catch (error) {
-      throw new ChatGptWebAdapterError(
-        `ChatGPT rate limit: too many requests, and the dialog could not be dismissed (${error instanceof Error ? error.message : String(error)}). Try again in a few minutes.`,
-        { status: 429, errorType: "rate_limit_error", code: "rate_limit_exceeded", retryable: true },
-      );
-    }
-  }
+  // Keep the service's explanation visible for the user. An automatic retry adds more traffic.
   throw new ChatGptWebAdapterError(
-    "ChatGPT rate limit: too many requests. Try again in a few minutes.",
-    { status: 429, errorType: "rate_limit_error", code: "rate_limit_exceeded", retryable: true },
+    "ChatGPT asked Maria to slow down. Web sending is paused; wait and resume in Maria. Native Codex remains available.",
+    { status: 429, errorType: "rate_limit_error", code: "rate_limit_exceeded", retryable: false },
   );
 }
 
@@ -3941,6 +3931,7 @@ export class ChatGptBrowserWorker {
         : {}),
       ...(turn.requireRetainedConversation ? { requireRetainedConversation: true } : {}),
     }).catch(error => {
+      if (error instanceof LauncherBrowserAccessPausedError) throw new ChatGptWebAdapterError(error.message, { status: 409, errorType: "invalid_request_error", code: "chatgpt_web_paused", retryable: false });
       if (error instanceof LauncherBrowserTurnCancelledError) throw chatGptBrowserTabClosedError();
       if (error instanceof LauncherRetainedConversationUnavailableError) {
         throw chatGptRetainedConversationUnavailableError();
@@ -3987,6 +3978,9 @@ export class ChatGptBrowserWorker {
       return await this.runBrowserTurn({ ...turn, onSendActivated: async () => {
         await notifyLauncherTurn(this.config.browserHostDescriptorPath!, {
           phase: "heartbeat", traceId: turn.traceId, helperPid: process.pid, sendActivated: true,
+        }, 15_000).catch(error => {
+          if (error instanceof LauncherBrowserAccessPausedError) throw new ChatGptWebAdapterError(error.message, { status: 409, errorType: "invalid_request_error", code: "chatgpt_web_paused", retryable: false });
+          throw error;
         });
         await turn.onSendActivated?.();
       } }, surfaceId, undefined, reused);
@@ -4008,6 +4002,8 @@ export class ChatGptBrowserWorker {
           traceId: turn.traceId,
           helperPid: process.pid,
           status: checkpointAccepted ? "completed" : terminal,
+          ...(originalError instanceof ChatGptWebAdapterError && originalError.status === 429 ? { accessIssue: "rate-limit" as const } : {}),
+          ...(originalError instanceof ChatGptWebAdapterError && originalError.code === "chatgpt_session_expired" ? { accessIssue: "sign-in" as const } : {}),
           ...(terminalMessage ? { message: terminalMessage } : {}),
           ...((terminal === "completed" || checkpointAccepted) && turn.retainConversation ? { retain: true } : {}),
           ...((terminal === "completed" || checkpointAccepted) && (turn.nativeConnector || turn.capabilities.localToolsEnabled)

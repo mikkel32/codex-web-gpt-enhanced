@@ -290,8 +290,15 @@ function replayEvents(events: AdapterEvent[], emit: (event: AdapterEvent) => voi
 
 function submittedTurnFailure(session: ChatGptTurnSession, error: unknown): Error {
   const normalized = error instanceof Error ? error : new Error(String(error));
-  if (normalized instanceof ChatGptWebAdapterError) return normalized;
   const phase = session.runtime.submission?.phase;
+  if (normalized instanceof ChatGptWebAdapterError) {
+    if (phase && phase !== "prepared" && normalized.retryable) {
+      return new ChatGptWebAdapterError(`${normalized.message} The prompt will not be resent automatically.`, {
+        status: normalized.status, errorType: normalized.errorType, code: normalized.code, retryable: false, cause: normalized,
+      });
+    }
+    return normalized;
+  }
   if (!phase || phase === "prepared") return normalized;
   const ambiguous = phase === "send_activated";
   return new ChatGptWebAdapterError(

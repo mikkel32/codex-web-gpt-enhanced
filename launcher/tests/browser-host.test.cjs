@@ -241,7 +241,7 @@ test("only an explicit Cloudflare challenge on a ChatGPT backend response trigge
   }), false);
 });
 
-test("the idle home browser performs one bounded reload for a Cloudflare challenge burst", async () => {
+test("a challenge pauses Web access without reloads and successful assets cannot clear it", async () => {
   const calls = [];
   const fixture = Object.assign(Object.create(BrowserHost.prototype), {
     turnTabs: new Map(),
@@ -275,12 +275,9 @@ test("the idle home browser performs one bounded reload for a Cloudflare challen
 
   assert.equal(BrowserHost.prototype.handleChatGptBackendResponse.call(fixture, challenge), true);
   assert.equal(BrowserHost.prototype.handleChatGptBackendResponse.call(fixture, challenge), true);
-  await fixture.cloudflareChallengeRecovery;
 
-  assert.deepEqual(calls.filter(([name]) => name === "loadURL"), [
-    ["loadURL", "https://chatgpt.com/?temporary-chat=true"],
-  ]);
-  assert.equal(fixture.cloudflareChallengeRecoveryArmed, false);
+  assert.deepEqual(calls.filter(([name]) => name === "loadURL"), []);
+  assert.equal(fixture.accessGate.snapshot().status, "paused");
 
   BrowserHost.prototype.handleChatGptBackendResponse.call(fixture, {
     statusCode: 200,
@@ -288,7 +285,7 @@ test("the idle home browser performs one bounded reload for a Cloudflare challen
     webContentsId: 42,
     responseHeaders: { "content-type": ["application/json"] },
   });
-  assert.equal(fixture.cloudflareChallengeRecoveryArmed, true);
+  assert.equal(fixture.accessGate.snapshot().status, "paused");
 });
 
 function createContents() {

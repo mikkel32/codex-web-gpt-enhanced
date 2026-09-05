@@ -6,7 +6,7 @@ function fixture(options){
  const listeners={};window.testListeners=listeners;window.testCalls=0;
  const state={version:1,language:'en',onboardingComplete:true,autoStart:true,keepRunningOnClose:true,showBrowserDuringTurns:true,browserInteractionMode:'automatic',experimentalBiggerContext:options?.biggerContext!==false,zeroRiskProEnabled:false,sidebarOpen:true,sidebarWidth:252,coreSetupComplete:true,codexCatalogVerified:true,mcpSetupComplete:true,mcpGuideStep:0,sessionRefreshReminderAt:null};
  const b={status:'ready',message:'Ready',url:'',title:'ChatGPT',authenticated:true,visible:false,surfaceActive:false,loading:false,canGoBack:false,canGoForward:false,zoomFactor:1,activeTabId:'main',maxTabs:5,tabs:[]};
- const snapshot={profile:'production',profilePaths:{coreHome:'test',codexHome:'test',userData:'test'},state,browser:b,connectorName:'Codex Native2',connectorNames:{automatic:'Codex Native2',manual:'Codex Zero Risk'},mcpCredentialsConfigured:true,logs:[],urls:{github:'https://github.com/mikkel32/codex-web-gpt-enhanced',connectors:'',tunnels:'',keys:''},platform:'darwin',packaged:true,version:'5.4.0',smokePassed:true,operation:null,update:{status:'up-to-date',latestVersion:'5.4.0'}};
+ const snapshot={profile:'production',profilePaths:{coreHome:'test',codexHome:'test',userData:'test'},state,browser:b,connectorName:'Codex Native2',connectorNames:{automatic:'Codex Native2',manual:'Codex Zero Risk'},mcpCredentialsConfigured:true,logs:[],urls:{github:'https://github.com/mikkel32/codex-web-gpt-enhanced',connectors:'',tunnels:'',keys:''},platform:'darwin',packaged:true,version:'5.5.0',smokePassed:true,operation:null,update:{status:'up-to-date',latestVersion:'5.5.0'}};
  window.testBrowser=b;
  window.codexWebLauncher=new Proxy({snapshot:async()=>snapshot,logs:async()=>[],connectionStatus:async()=>{window.testCalls++;return {nativeAvailable:true,browserConnected:true,activeBrowserTurns:0,recoveryAvailable:true};},setBrowserSurfaceActive:async()=>b,setBrowserBounds:async()=>true,copyNativeCodexCommand:async()=>true}, {get(t,k){if(k in t)return t[k];if(String(k).startsWith('on'))return listener=>{(listeners[k]??=new Set()).add(listener);return()=>listeners[k].delete(listener);};return async()=>state;}});
 }
@@ -37,6 +37,21 @@ try{for(const [name,root] of [...(process.env.MARIA_BASELINE_RENDERER ? [['befor
    if(await page.evaluate(()=>window.testCalls)!==calls)throw Error('Hidden overview continued polling');
    await page.evaluate(()=>{delete document.hidden;document.dispatchEvent(new Event('visibilitychange'));});await page.clock.fastForward(20);
    if(await page.evaluate(()=>window.testCalls)!==calls+1)throw Error('Visible overview did not reconnect once');
+  }
+  if(name==='after') {
+   await page.evaluate(()=>{
+    window.testResumeCalls=0;
+    window.codexWebLauncher.resumeWebAccess=async()=>{window.testResumeCalls++;const b={...window.testBrowser,webAccess:{status:'ready'}};for(const cb of window.testListeners.onBrowserState??[])cb(b);return b;};
+    const webAccess={status:'paused',reason:'rate-limit',detectedAt:new Date().toISOString(),retryAt:new Date(Date.now()+60000).toISOString(),incidents:1,canResume:false};
+    for(const cb of window.testListeners.onBrowserState??[])cb({...window.testBrowser,webAccess});
+   });
+   await page.clock.fastForward(50);
+   await page.getByText('Giving ChatGPT a moment',{exact:true}).waitFor();
+   if(await page.getByRole('button',{name:'Waiting for cooldown',exact:true}).isEnabled())throw Error('Resume was enabled before cooldown');
+   await page.screenshot({path:`${require('node:os').tmpdir()}/maria-paused-${width}.png`});
+   await page.clock.fastForward(61000);
+   await page.getByRole('button',{name:'Resume WebGPT',exact:true}).click();await page.clock.fastForward(30);
+   if(await page.locator('.web-access-notice').count()!==0||await page.evaluate(()=>window.testResumeCalls)!==1)throw Error('Explicit resume did not clear the notice exactly once');
   }
   await context.close();
  }}finally{await new Promise(r=>server.close(r));}

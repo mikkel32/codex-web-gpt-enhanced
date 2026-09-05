@@ -15,6 +15,10 @@ export class LauncherBrowserTurnCancelledError extends Error {
   }
 }
 
+export class LauncherBrowserAccessPausedError extends Error {
+  constructor(message: string) { super(message); this.name = "LauncherBrowserAccessPausedError"; }
+}
+
 export class LauncherRetainedConversationUnavailableError extends Error {
   constructor(message: string) {
     super(message);
@@ -359,6 +363,7 @@ export type LauncherTurnActivity =
       message?: string;
       retain?: boolean;
       connectorBound?: boolean;
+      accessIssue?: "rate-limit" | "sign-in";
     };
 
 // Restoring a saved conversation can include one bounded ChatGPT document load.
@@ -626,6 +631,9 @@ export async function notifyLauncherTurn(
           typeof body.error === "string" ? body.error : "The retained ChatGPT conversation is no longer available",
         );
       }
+      if (response.status === 409 && body.code === "browser_access_paused") {
+        throw new LauncherBrowserAccessPausedError(typeof body.error === "string" ? body.error : "Web sending is paused in Maria.");
+      }
       const detail = typeof body.error === "string" ? body.error : "";
       throw new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
     }
@@ -655,6 +663,7 @@ export async function notifyLauncherTurn(
     return {};
   } catch (error) {
     if (error instanceof LauncherBrowserTurnCancelledError
+      || error instanceof LauncherBrowserAccessPausedError
       || error instanceof LauncherRetainedConversationUnavailableError) throw error;
     throw new Error(`Launcher browser control channel failed: ${error instanceof Error ? error.message : String(error)}`);
   } finally {

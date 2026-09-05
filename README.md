@@ -40,6 +40,23 @@ send it, and choose **Sent** in Maria. You have five minutes to prepare the prom
 and a separate 90 seconds for the connector to start. Attach images manually.
 Existing connector names and model IDs stay compatible with your saved setup.
 
+## Cooperative Web access
+
+Maria spaces automatic sends across the browser profile, pauses on verification,
+sign-in, rate-limit, and conversation-service failures, and respects Retry-After.
+The pause survives restart. Complete any check yourself in ChatGPT, then choose
+**Resume WebGPT** in Maria after the cooldown. Resume enables your next request;
+it does not replay a stopped or uncertain turn. Native Codex remains independent.
+
+Security-check pages are kept for inspection. Maria does not automatically reload
+challenges or dismiss rate-limit dialogs. Local Activity records the reason,
+server-provided request references when available, and explicit resume events.
+No diagnostic report is sent automatically.
+
+User-initiated browser automation is still automation. These controls reduce
+avoidable traffic and duplicate actions; they cannot guarantee account access or
+establish that a service decision was a false positive.
+
 ## Updates from our GitHub
 
 Open **Updates** in Maria. When a newer complete release is available, the sidebar
@@ -185,6 +202,9 @@ Packaging produces an installer for the current operating system. macOS builds
 include a signature check and a launch test. Windows and Linux builds run in CI.
 
 ## Release notes
+
+5.5.0 adds persistent cooperative-access pauses, Retry-After handling, shared send
+pacing, user-controlled recovery, and terminal handling of typed errors after Send.
 
 5.4.0 introduces the monochrome Moonlight interface, reduced-motion-aware interactions,
 visibility-aware connection checks, batched Activity updates, exclusive guardian

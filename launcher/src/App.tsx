@@ -15,6 +15,7 @@ import { MariaHome, MariaGuide, MADE_WITH_LOVE } from "./MariaHome";
 import { MariaUpdates } from "./MariaUpdates";
 import { BrowserSignIn } from "./BrowserSignIn";
 import { useActivityLogs } from "./useActivityLogs";
+import { WebAccessNotice } from "./WebAccessNotice";
 import type {
   BrowserInteractionMode,
   BrowserState,
@@ -980,6 +981,7 @@ function BrowserSurface({
           tab={selectedManualTab}
         />
       ) : null}
+      <WebAccessNotice access={browser?.webAccess} />
       <div className="browser-viewport" ref={browserSlotRef}>
         {!visible ? (
           <div className="browser-empty">

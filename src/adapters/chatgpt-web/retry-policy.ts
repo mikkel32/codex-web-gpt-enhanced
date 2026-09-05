@@ -1,6 +1,6 @@
 import { ChatGptWebAdapterError } from "./adapter-error";
 
-/** Maximum number of automatic browser-turn retries after the initial send. */
+/** Maximum retries for transient preparation failures; accepted sends are never replayed. */
 export const MAX_CHATGPT_WEB_TURN_RETRIES = 3;
 const RETRY_BUDGET_TTL_MS = 30 * 60_000;
 
@@ -17,7 +17,7 @@ interface RetryBudgetEntry {
 
 function exhaustedError(entry: RetryBudgetEntry): ChatGptWebAdapterError {
   return new ChatGptWebAdapterError(
-    `${entry.lastError.message} ChatGPT remained unavailable after several attempts.`,
+    entry.lastError.status === 429 ? entry.lastError.message : `${entry.lastError.message} ChatGPT remained unavailable after several attempts.`,
     {
       status: entry.lastError.status,
       errorType: entry.lastError.errorType,
@@ -40,7 +40,7 @@ export class ChatGptWebTurnRetryPolicy {
     this.prune(now);
     const previous = this.entries.get(key);
     const entry: RetryBudgetEntry = {
-      retries: (previous?.retries ?? 0) + 1,
+      retries: error.status === 429 ? MAX_CHATGPT_WEB_TURN_RETRIES + 1 : (previous?.retries ?? 0) + 1,
       updatedAt: now,
       lastError: {
         message: error.message,

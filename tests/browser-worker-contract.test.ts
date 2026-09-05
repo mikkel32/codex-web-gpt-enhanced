@@ -2255,7 +2255,7 @@ function dialogPage(text: string, buttonText = "Got it"): { page: Page; pressed:
   };
 }
 
-test("the known ChatGPT rate-limit dialog is acknowledged and returns a structured 429", async () => {
+test("the known ChatGPT rate-limit dialog stays visible and returns a structured 429", async () => {
   const fixture = dialogPage("Too many requests. You're making requests too quickly.");
 
   await expect(throwIfChatGptRateLimitDialog(fixture.page)).rejects.toMatchObject({
@@ -2263,10 +2263,10 @@ test("the known ChatGPT rate-limit dialog is acknowledged and returns a structur
     status: 429,
     errorType: "rate_limit_error",
     code: "rate_limit_exceeded",
-    retryable: true,
-    message: "ChatGPT rate limit: too many requests. Try again in a few minutes.",
+    retryable: false,
+    message: "ChatGPT asked Maria to slow down. Web sending is paused; wait and resume in Maria. Native Codex remains available.",
   });
-  expect(fixture.pressed).toEqual(["Enter"]);
+  expect(fixture.pressed).toEqual([]);
 });
 
 test("submission acceptance reports a rate-limit dialog that appears after Enter", async () => {
@@ -2284,12 +2284,12 @@ test("submission acceptance reports a rate-limit dialog that appears after Enter
     status: 429,
     errorType: "rate_limit_error",
     code: "rate_limit_exceeded",
-    retryable: true,
+    retryable: false,
   });
-  expect(fixture.pressed).toEqual(["Enter"]);
+  expect(fixture.pressed).toEqual([]);
 });
 
-test("the Traditional Chinese ChatGPT rate-limit dialog is acknowledged and returns a structured 429", async () => {
+test("the Traditional Chinese ChatGPT rate-limit dialog stays visible and returns a structured 429", async () => {
   const fixture = dialogPage("太多要求。你提出要求的頻率過於頻繁。", "知道了");
 
   await expect(throwIfChatGptRateLimitDialog(fixture.page)).rejects.toMatchObject({
@@ -2297,12 +2297,12 @@ test("the Traditional Chinese ChatGPT rate-limit dialog is acknowledged and retu
     status: 429,
     errorType: "rate_limit_error",
     code: "rate_limit_exceeded",
-    retryable: true,
+    retryable: false,
   });
-  expect(fixture.pressed).toEqual(["Enter"]);
+  expect(fixture.pressed).toEqual([]);
 });
 
-test("the Simplified Chinese ChatGPT rate-limit dialog is acknowledged and returns a structured 429", async () => {
+test("the Simplified Chinese ChatGPT rate-limit dialog stays visible and returns a structured 429", async () => {
   const fixture = dialogPage("太多请求。你提出请求的频率过于频繁。", "知道了");
 
   await expect(throwIfChatGptRateLimitDialog(fixture.page)).rejects.toMatchObject({
@@ -2310,12 +2310,12 @@ test("the Simplified Chinese ChatGPT rate-limit dialog is acknowledged and retur
     status: 429,
     errorType: "rate_limit_error",
     code: "rate_limit_exceeded",
-    retryable: true,
+    retryable: false,
   });
-  expect(fixture.pressed).toEqual(["Enter"]);
+  expect(fixture.pressed).toEqual([]);
 });
 
-test("the Japanese ChatGPT rate-limit dialog is acknowledged and returns a structured 429", async () => {
+test("the Japanese ChatGPT rate-limit dialog stays visible and returns a structured 429", async () => {
   const fixture = dialogPage(
     "リクエストが多すぎます リクエストの頻度が高すぎます。お客様のデータを保護するため、会話へのアクセスを一時的に制限しています。 数分待ってから、もう一度お試しください。",
     "了解",
@@ -2326,9 +2326,9 @@ test("the Japanese ChatGPT rate-limit dialog is acknowledged and returns a struc
     status: 429,
     errorType: "rate_limit_error",
     code: "rate_limit_exceeded",
-    retryable: true,
+    retryable: false,
   });
-  expect(fixture.pressed).toEqual(["Enter"]);
+  expect(fixture.pressed).toEqual([]);
 });
 
 test("unrelated ChatGPT dialogs are left untouched", async () => {

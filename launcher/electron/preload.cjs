@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld("codexWebLauncher", {
   snapshot: () => ipcRenderer.invoke("launcher:snapshot"),
   setLanguage: (language) => ipcRenderer.invoke("launcher:set-language", language),
   connectionStatus: () => ipcRenderer.invoke("launcher:connection-status"),
+  reviewWebAccess: () => ipcRenderer.invoke("launcher:browser-access-review"),
+  resumeWebAccess: () => ipcRenderer.invoke("launcher:browser-access-resume"),
   copyNativeCodexCommand: () => ipcRenderer.invoke("launcher:copy-native-command"),
   signInBrowsers: () => ipcRenderer.invoke("launcher:signin-browsers"),
   beginBrowserSignIn: browser => ipcRenderer.invoke("launcher:signin-begin", browser),

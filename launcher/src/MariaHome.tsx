@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { Icon } from "./icons";
 import type { LauncherSnapshot, Surface } from "./types";
 import { useConnectionStatus } from "./useConnectionStatus";
+import { WebAccessNotice } from "./WebAccessNotice";
 import readme from "../../README.md?raw";
 
 export const MADE_WITH_LOVE = "Made with love -- Maria GPT 6 Astra 👀";
@@ -25,6 +26,7 @@ export function MariaHome({ snapshot, navigate }: {
   const readyCount = steps.filter(step => step.done).length;
   return <div className="maria-page moon-home">
     <div className="moon-topline"><span className="maria-eyebrow">MARIA / MOONLIGHT</span><span className="moon-edition">{development ? "ISOLATED DEV" : "CODEX + CHATGPT"}</span></div>
+    <WebAccessNotice access={snapshot.browser?.webAccess} openBrowser={() => navigate("browser")} />
     <header className="maria-hero moon-hero">
       <div className="moon-hero-copy"><h1>Your workspace,<br /><span>in a different light.</span></h1>
         <p>A focused home for your models and conversations.<br />Keep building. Maria keeps the connection.</p>
