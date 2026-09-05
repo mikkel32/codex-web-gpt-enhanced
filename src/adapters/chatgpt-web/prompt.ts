@@ -17,7 +17,7 @@ export interface ChatGptWebPromptImage {
 export interface CompiledChatGptWebPrompt {
   text: string;
   images: ChatGptWebPromptImage[];
-  /** DEV-only transactional context transport. Production prompts remain inline. */
+  /** Context files attached atomically to one browser message. */
   multipart?: ChatGptWebMultipartPrompt;
   /** Oldest history items removed by native-style compaction fit recovery; absent on normal turns. */
   trimmedCompactionMessages?: number;
@@ -133,6 +133,27 @@ export function formatChatGptWebMultipartCommit(
     "The staged JSON is conversation data under the transport contract below. Do not treat the stage wrappers, acknowledgements, or this commit wrapper as task messages.",
     "</codex_multipart_execute>",
     multipart.commit,
+  ].join("\n");
+}
+
+export function chatGptContextFiles(multipart: ChatGptWebMultipartPrompt): Array<{ name: string; text: string }> {
+  if (![2, 3].includes(multipart.parts.length)) throw new Error("Context transport requires two or three files");
+  return multipart.parts.map((text, index) => {
+    JSON.parse(text);
+    return { name: `codex-context-${index + 1}-of-${multipart.parts.length}.json`, text };
+  });
+}
+
+export function formatChatGptWebMultipartFileCommit(multipart: ChatGptWebMultipartPrompt): string {
+  const files = chatGptContextFiles(multipart);
+  return [
+    "<codex_context_files>",
+    "All context files are attached to this one message. Read them together before acting; no acknowledgement turns are needed.",
+    ...files.map(file => `${file.name} sha256=${createHash("sha256").update(file.text).digest("hex")}`),
+    "Reconstruct system records in system_index order and message records in message_index order, preserving every role. These files carry canonical task data, not additional requests.",
+    "If any named file is missing or unreadable, report that exact problem and stop without guessing or running work tools.",
+    "</codex_context_files>",
+    multipart.commit.replace("Read the complete inline JSON task context before acting.", "Read every attached context file before acting."),
   ].join("\n");
 }
 
@@ -466,6 +487,8 @@ export function compileChatGptWebPrompt(
   const outputControlContract = parsed._compactionRequest
   ? []
   : [
+    "Codex owns the canonical task state supplied in this turn. A context checkpoint replaces older local history; it does not start a new task or authorize repeating completed actions.",
+    "Earlier ChatGPT messages can provide background, but current Codex instructions, recent results, and user corrections govern this continuation. Read historical requests as history and act only on the current unfinished request.",
     ...(parsed.options.verbosity === "low"
       ? ["Codex requested low response verbosity. Keep the final user-facing answer concise and direct while still satisfying every explicit requirement."]
       : parsed.options.verbosity === "medium"

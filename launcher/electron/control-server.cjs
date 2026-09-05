@@ -176,6 +176,9 @@ class BrowserControlServer {
       if (body.refreshViewport !== undefined && request.url !== "/v1/turn/heartbeat") {
         throw new Error("refreshViewport is only valid for a turn heartbeat");
       }
+      if (body.sendActivated !== undefined && (typeof body.sendActivated !== "boolean" || request.url !== "/v1/turn/heartbeat")) {
+        throw new Error("sendActivated is only valid for a turn heartbeat");
+      }
       if (manualAction) {
         if (manualAction === "start") {
           if (host.browserInteractionMode() !== "manual") {
@@ -288,6 +291,7 @@ class BrowserControlServer {
         writeJson(response, 200, { ok: true, ...lease });
         return;
       } else if (request.url === "/v1/turn/heartbeat") {
+        if (body.sendActivated === true) host.rememberConversationSubmission(body.traceId, body.helperPid);
         host.heartbeatTurn(body.traceId, body.helperPid, body.refreshViewport === true);
         this.logger.debug?.("browser.turn_heartbeat", { traceId: body.traceId });
         writeJson(response, 200, { ok: true });

@@ -106,8 +106,11 @@ test("startup check runs once and exposes only a newer complete release", async 
       },
     },
   });
-  assert.deepEqual(await controller.checkOnce(), { status: "available", version: "1.2.0" });
-  assert.deepEqual(await controller.checkOnce(), { status: "available", version: "1.2.0" });
+  const first = await controller.checkOnce();
+  assert.equal(first.status, "available");
+  assert.equal(first.version, "1.2.0");
+  assert.ok(Date.parse(first.checkedAt));
+  assert.deepEqual(await controller.checkOnce(), first);
   assert.equal(calls, 1);
   assert.deepEqual(published.map((state) => state.status), ["checking", "available"]);
 });
@@ -170,7 +173,8 @@ test("verified update is handed to one detached worker", async () => {
     assert.equal(controller.getState().status, "installing");
     controller.cancelInstall(launch);
     assert.equal(fs.existsSync(launch.tempRoot), false);
-    assert.deepEqual(controller.getState(), { status: "available", version: "1.2.0" });
+    assert.equal(controller.getState().status, "available");
+    assert.equal(controller.getState().version, "1.2.0");
   } finally {
     if (previousAppImage === undefined) delete process.env.CODEX_WEB_GPT_APPIMAGE;
     else process.env.CODEX_WEB_GPT_APPIMAGE = previousAppImage;
@@ -232,4 +236,66 @@ test("detached worker replaces an installed Linux AppImage and removes the old v
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+function updateFixture(fetchRelease, extra = {}) {
+  return createUpdateController({ currentVersion: "1.1.4", platform: "linux", arch: "x64", packaged: true,
+    executablePath: "/tmp/launcher", runtimeExecutable: "/tmp/bun", logsDirectory: "/tmp/logs",
+    dependencies: { fetchRelease }, ...extra });
+}
+const completeRelease = () => ({ tag_name: "v1.2.0", assets: [
+  { id: 1, name: "codex-web-gpt-1.2.0-linux-x64.AppImage", browser_download_url: "https://github.com/mikkel32/codex-web-gpt-enhanced/releases/download/v1.2.0/codex-web-gpt-1.2.0-linux-x64.AppImage" },
+  { id: 2, name: "checksums.txt", browser_download_url: "https://github.com/mikkel32/codex-web-gpt-enhanced/releases/download/v1.2.0/checksums.txt" },
+] });
+
+test("manual recheck recovers from offline and simultaneous checks share one request", async () => {
+  let calls = 0;
+  let resolve;
+  const controller = updateFixture(async () => { calls++; if (calls === 1) throw new Error("offline"); return new Promise(done => { resolve = done; }); });
+  assert.equal((await controller.check()).status, "error");
+  const retry = controller.check({ force: true });
+  const same = controller.check({ force: true });
+  resolve(completeRelease());
+  assert.equal((await retry).status, "available");
+  assert.deepEqual(await same, await retry);
+  assert.equal(calls, 2);
+});
+
+test("private, draft, missing, and older releases are never presented as up to date", async () => {
+  const unavailable = updateFixture(async () => { throw Object.assign(new Error("404"), { statusCode: 404 }); });
+  assert.equal((await unavailable.check()).status, "access-required");
+  assert.equal(unavailable.getState().checkedAt, undefined);
+  assert.equal((await updateFixture(async () => ({ ...completeRelease(), draft: true })).check()).status, "error");
+  assert.equal((await updateFixture(async () => ({ tag_name: "v1.2.0", assets: [] })).check()).status, "error");
+  assert.equal((await updateFixture(async () => ({ tag_name: "v1.0.0" })).check()).status, "ahead");
+  assert.equal((await updateFixture(async () => ({ tag_name: "v1.1.4" })).check()).status, "up-to-date");
+});
+
+test("a later failed check keeps the known update visible", async () => {
+  let calls = 0;
+  const controller = updateFixture(async () => { if (calls++) throw new Error("offline"); return completeRelease(); });
+  const first = await controller.check();
+  const failed = await controller.check({ force: true });
+  assert.equal(failed.status, "error");
+  assert.equal(failed.version, "1.2.0");
+  assert.equal(failed.checkedAt, first.checkedAt);
+});
+
+test("GitHub authorization is restricted to our release API and never asset redirects", () => {
+  const { updateRequestHeaders } = require("../electron/update.cjs");
+  const options = { token: "test-token" };
+  assert.equal(updateRequestHeaders("https://api.github.com/repos/mikkel32/codex-web-gpt-enhanced/releases/latest", options).Authorization, "Bearer test-token");
+  for (const url of ["https://release-assets.githubusercontent.com/example", "https://github.com/mikkel32/codex-web-gpt-enhanced/releases/download/v1.2.0/checksums.txt", "https://api.github.com/repos/another/private/releases/latest"]) assert.equal(updateRequestHeaders(url, options).Authorization, undefined);
+});
+
+test("private-release credentials reach the API but never renderer state", async () => {
+  let received;
+  const controller = updateFixture(async token => { received = token; return completeRelease(); }, {
+    credentials: { read: () => "private-test-token", configured: () => true },
+  });
+  const state = await controller.check();
+  assert.equal(state.status, "available");
+  assert.equal(received, "private-test-token");
+  assert.equal(state.authenticated, true);
+  assert.ok(!JSON.stringify(state).includes(received));
 });

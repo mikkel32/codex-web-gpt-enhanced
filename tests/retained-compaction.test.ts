@@ -94,7 +94,7 @@ function controlBinding(instruction: string): { token: string; handoffId: string
   return { token, handoffId };
 }
 
-test("one browser conversation spans native turns and rotates only at compaction", () => {
+test("one browser conversation spans native turns and compaction", () => {
   const before = request(false);
   const sameTurn = structuredClone(before);
   (sameTurn._rawBody as { input: unknown[] }).input.push({
@@ -117,7 +117,7 @@ test("one browser conversation spans native turns and rotates only at compaction
 
   expect(chatGptConversationKey(sameTurn, "provider")).toBe(chatGptConversationKey(before, "provider"));
   expect(chatGptConversationKey(nextTurn, "provider")).toBe(chatGptConversationKey(before, "provider"));
-  expect(chatGptConversationKey(afterCompact, "provider")).not.toBe(chatGptConversationKey(before, "provider"));
+  expect(chatGptConversationKey(afterCompact, "provider")).toBe(chatGptConversationKey(before, "provider"));
   const otherModel = structuredClone(before);
   otherModel.modelId = "chatgpt-web/pro";
   expect(chatGptConversationKey(otherModel, "provider")).not.toBe(chatGptConversationKey(before, "provider"));
@@ -132,16 +132,14 @@ test("one browser conversation spans native turns and rotates only at compaction
     }),
   };
   expect(chatGptConversationKey(otherThread, "provider")).not.toBe(chatGptConversationKey(before, "provider"));
-  expect(retainedConversationResumeRequest(before)?.context.messages).toEqual([
-    { role: "user", content: "Continue with the next step", timestamp: 3 },
-  ]);
+  expect(retainedConversationResumeRequest(before)).toBeUndefined();
 
   const v1Compact = structuredClone(before);
   (v1Compact._rawBody as { input: unknown[] }).input.unshift({
     role: "user",
     content: [{ type: "input_text", text: `${SUMMARY_PREFIX}\ncheckpoint` }],
   });
-  expect(chatGptConversationKey(v1Compact, "provider")).not.toBe(chatGptConversationKey(before, "provider"));
+  expect(chatGptConversationKey(v1Compact, "provider")).toBe(chatGptConversationKey(before, "provider"));
 });
 
 test("compaction capability is one-shot and structurally bound to its handoff id", async () => {
@@ -1098,7 +1096,7 @@ test("adapter compact returns one same-agent handoff and preserves a pre-existin
     expect(chatGptTurnSessions.find(compactedSourceKey)).toBeDefined();
     expect(chatGptTurnSessions.find(compactedSourceKey)!.conversationKey()).toBeUndefined();
     expect(chatGptTurnSessions.findConversationHead(conversationKey)).toBeUndefined();
-    expect(releases).toBe(1);
+    expect(releases).toBe(0);
   } finally {
     (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = originalRun;
     chatGptTurnSessions.clear();
@@ -1192,7 +1190,7 @@ test("a compact HTTP observer can reconnect without sending a second retained-ch
     finishMessage();
     await reconnect;
     expect(browserMessages).toBe(1);
-    expect(releases).toBe(1);
+    expect(releases).toBe(0);
     expect(events.some(event => event.type === "text_delta"
       && event.text.includes("Reconnect-safe checkpoint"))).toBeTrue();
     expect(events.at(-1)).toMatchObject({ type: "done", stopReason: "stop", endTurn: true });

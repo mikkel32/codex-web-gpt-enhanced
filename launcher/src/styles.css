@@ -2844,3 +2844,34 @@ code {
 .signin-footer { display: flex; flex-wrap: wrap; justify-content: space-between; margin-top: 24px; gap: 10px; }
 .signin-progress { display: flex; align-items: center; gap: 12px; padding: 22px 0; font-size: 13px; line-height: 1.8; color: #cfc1e8; }
 .signin-progress svg { width: 20px; height: 20px; flex-shrink: 0; }
+
+.maria-updates { max-width: 1000px; }
+.maria-update-heading { margin: 12px 0 30px; }
+.maria-update-heading h1 { font-size: clamp(28px, 4vw, 42px); letter-spacing: -1.4px; margin: 16px 0 10px; font-weight: 550; }
+.maria-update-heading p, .maria-update-card p, .maria-update-access p { color: #a9a2b4; font-size: 13px; line-height: 1.8; }
+.maria-update-card { border: 1px solid #c5aaff25; border-radius: 20px; padding: 28px; background: linear-gradient(120deg, #bca5f30c, #1a1820); }
+.maria-update-card.has-update { border-color: #c5aaff65; background: radial-gradient(ellipse at top right, #b999ff23, transparent 70%), #1c1922; }
+.maria-update-version { display: flex; gap: 16px; align-items: center; margin-bottom: 24px; }
+.maria-update-version > div { flex: 1; }
+.maria-update-version > div > span { display: block; color: #9e95ad; font-size: 11px; margin-bottom: 6px; }
+.maria-update-version strong { font-size: 22px; font-weight: 550; }
+.maria-update-card .maria-update-new { color: #dac6ff; font-size: 19px; }
+.maria-update-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 25px; }
+.maria-update-actions svg, .maria-update-source svg { width: 15px; height: 15px; }
+.maria-update-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 36px; }
+.maria-update-card .maria-update-checked { font-size: 11px; color: #93899f; border-top: 1px solid #c5aaff18; padding-top: 20px; margin-top: 25px; }
+.maria-update-access { margin-top: 18px; padding: 22px 26px; border: 1px solid #c5aaff20; border-radius: 16px; }
+.maria-update-access summary { cursor: pointer; font-size: 13px; color: #d3c5e6; }
+.maria-update-access label { display: block; font-size: 12px; color: #c8bed6; margin: 22px 0 8px; }
+.maria-update-token { display: flex; gap: 10px; margin-bottom: 12px; }
+.maria-update-token input { flex: 1; min-width: 0; background: #15131b; color: #e4dced; border: 1px solid #c5aaff40; border-radius: 10px; padding: 12px; }
+.maria-update-token input:focus-visible { outline: 2px solid #bba0ec; outline-offset: 3px; }
+.maria-update-error { color: #f5b4bc; font-size: 13px; }
+.maria-update-source { display: flex; gap: 10px; align-items: center; color: #93899f; font-size: 11px; margin-top: 26px; }
+@media (max-width: 750px) {
+  .maria-update-card { padding: 20px; }
+  .maria-update-version { flex-wrap: wrap; }
+  .maria-update-version strong { font-size: 19px; }
+  .maria-update-token { flex-direction: column; }
+}
+.maria-guide .maria-guide-link { display: inline; color: #ccb4f6; font: inherit; padding: 0; text-decoration: underline; text-underline-offset: 3px; }

@@ -10,6 +10,9 @@ const REPOSITORY = "mikkel32/codex-web-gpt-enhanced";
 const RELEASE_API_URL = `https://api.github.com/repos/${REPOSITORY}/releases/latest`;
 const USER_AGENT = "codex-web-gpt-launcher-updater";
 const MAX_REDIRECTS = 5;
+const CHECK_INTERVAL_MS = 4 * 60 * 60_000;
+const FOCUS_CHECK_INTERVAL_MS = 15 * 60_000;
+const RELEASES_URL = `https://github.com/${REPOSITORY}/releases`;
 
 function parseVersion(value) {
   const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(String(value || "").trim());
@@ -65,38 +68,48 @@ function expectedChecksum(contents, assetName) {
 function validateReleaseAssetUrl(raw, version, assetName) {
   const url = new URL(raw);
   const expectedPath = `/${REPOSITORY}/releases/download/v${version}/${assetName}`;
-  if (url.protocol !== "https:" || url.hostname !== "github.com" || url.pathname !== expectedPath) {
+  if (url.origin !== "https://github.com" || url.username || url.password || url.search || url.hash || url.pathname !== expectedPath) {
     throw new Error(`GitHub returned an unexpected release asset URL for ${assetName}`);
   }
   return url.toString();
 }
 
-function request(url, redirects = 0) {
+function updateRequestHeaders(url, { token, accept } = {}) {
+  const parsed = new URL(url);
+  const headers = { Accept: accept || "application/vnd.github+json", "User-Agent": USER_AGENT };
+  if (token && parsed.origin === "https://api.github.com"
+    && parsed.pathname.startsWith(`/repos/${REPOSITORY}/releases/`)) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+function request(url, options = {}, redirects = 0) {
   return new Promise((resolve, reject) => {
     if (redirects > MAX_REDIRECTS) {
       reject(new Error(`Too many redirects while downloading ${url}`));
       return;
     }
     const parsed = new URL(url);
-    if (parsed.protocol !== "https:") {
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
       reject(new Error(`Refusing non-HTTPS update URL: ${parsed.protocol}`));
       return;
     }
     const req = https.get(parsed, {
-      headers: {
-        Accept: "application/vnd.github+json",
-        "User-Agent": USER_AGENT,
-      },
+      headers: updateRequestHeaders(url, options),
     }, (response) => {
       if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location) {
         response.resume();
         const next = new URL(response.headers.location, parsed).toString();
-        request(next, redirects + 1).then(resolve, reject);
+        // Signed asset redirects never receive the repository credential.
+        request(next, { accept: options.accept }, redirects + 1).then(resolve, reject);
         return;
       }
       if (response.statusCode !== 200) {
         response.resume();
-        reject(new Error(`Update download failed with HTTP ${response.statusCode}`));
+        const error = new Error(`GitHub update request returned HTTP ${response.statusCode}`);
+        error.statusCode = response.statusCode;
+        reject(error);
         return;
       }
       resolve(response);
@@ -106,8 +119,8 @@ function request(url, redirects = 0) {
   });
 }
 
-async function downloadText(url, maxBytes = 2 * 1024 * 1024) {
-  const response = await request(url);
+async function downloadText(url, options = {}, maxBytes = 2 * 1024 * 1024) {
+  const response = await request(url, options);
   const chunks = [];
   let bytes = 0;
   for await (const chunk of response) {
@@ -118,8 +131,8 @@ async function downloadText(url, maxBytes = 2 * 1024 * 1024) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-async function downloadFile(url, destination) {
-  const response = await request(url);
+async function downloadFile(url, destination, options = {}) {
+  const response = await request(url, options);
   await pipeline(response, fs.createWriteStream(destination, { flags: "wx", mode: 0o600 }));
 }
 
@@ -207,7 +220,7 @@ function buildJob({ version, platform, executablePath, assetPath, stagingRoot, t
 
 function defaultDependencies() {
   return {
-    fetchRelease: async () => JSON.parse(await downloadText(RELEASE_API_URL)),
+    fetchRelease: async (token) => JSON.parse(await downloadText(RELEASE_API_URL, { token })),
     downloadText,
     downloadFile,
     sha256,
@@ -254,31 +267,37 @@ function createUpdateController({
   logsDirectory,
   publish,
   logger,
+  credentials,
   dependencies = {},
 }) {
   const deps = { ...defaultDependencies(), ...dependencies };
   const supportedAsset = releaseAssetName(currentVersion, platform, arch);
   let state = packaged && supportedAsset ? { status: "idle" } : { status: "disabled" };
-  let checked = false;
+  let lastAttemptAt = 0;
+  let checkedAt;
+  let checking = null;
+  let timer;
   let pending = null;
   let candidate = null;
 
   const transition = (next) => {
-    state = next;
+    state = { ...next, ...(checkedAt ? { checkedAt } : {}), authenticated: credentials?.configured() === true };
     publish?.(state);
     return state;
   };
 
-  async function checkOnce() {
-    if (state.status === "disabled" || checked) return state;
-    checked = true;
-    transition({ status: "checking" });
+  async function performCheck() {
+    lastAttemptAt = Date.now();
+    transition({ status: "checking", ...(candidate ? { version: candidate.version } : {}) });
     try {
-      const release = await deps.fetchRelease();
+      const token = credentials?.read();
+      const release = await deps.fetchRelease(token);
+      if (release?.draft || release?.prerelease) throw new Error("GitHub has not published a stable release yet.");
       const version = releaseVersion(release?.tag_name);
       if (compareVersions(version, currentVersion) <= 0) {
         candidate = null;
-        return transition({ status: "up-to-date" });
+        checkedAt = new Date().toISOString();
+        return transition({ status: compareVersions(version, currentVersion) === 0 ? "up-to-date" : "ahead", latestVersion: version });
       }
       const assetName = releaseAssetName(version, platform, arch);
       if (!assetName) return transition({ status: "disabled" });
@@ -288,33 +307,60 @@ function createUpdateController({
       if (!asset?.browser_download_url || !checksums?.browser_download_url) {
         throw new Error(`Release v${version} is missing ${assetName} or checksums.txt`);
       }
-      candidate = {
+      const nextCandidate = {
         version,
         assetName,
         assetUrl: validateReleaseAssetUrl(asset.browser_download_url, version, assetName),
         checksumsUrl: validateReleaseAssetUrl(checksums.browser_download_url, version, "checksums.txt"),
       };
+      if (token) {
+        for (const [key, item] of [["assetUrl", asset], ["checksumsUrl", checksums]]) {
+          if (!Number.isSafeInteger(item.id) || item.id <= 0) throw new Error("GitHub release asset identity is missing.");
+          nextCandidate[key] = `https://api.github.com/repos/${REPOSITORY}/releases/assets/${item.id}`;
+        }
+      }
+      candidate = nextCandidate;
+      checkedAt = new Date().toISOString();
       logger?.info("launcher.update_available", { currentVersion, version, platform, arch });
       return transition({ status: "available", version });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const accessRequired = [401, 403, 404].includes(error?.statusCode);
+      const message = accessRequired
+        ? "GitHub could not grant access to this release. Connect a token with read access to our repository, or open releases in your browser. A 404 can also mean no release has been published."
+        : error instanceof Error ? error.message : String(error);
       logger?.warn("launcher.update_check_failed", { message });
-      return transition({ status: "error", message });
+      return transition({ status: accessRequired ? "access-required" : "error", message, ...(candidate ? { version: candidate.version } : {}) });
     }
+  }
+
+  function check({ force = false, minAge = FOCUS_CHECK_INTERVAL_MS } = {}) {
+    if (checking) return checking;
+    if (state.status === "disabled" || pending || state.status === "installing"
+      || (!force && lastAttemptAt && Date.now() - lastAttemptAt < minAge)) return Promise.resolve(state);
+    checking = performCheck().finally(() => { checking = null; });
+    return checking;
+  }
+
+  function start() {
+    if (timer || state.status === "disabled") return;
+    void check();
+    timer = setInterval(() => void check({ minAge: CHECK_INTERVAL_MS }), CHECK_INTERVAL_MS);
+    timer.unref?.();
   }
 
   async function beginInstall() {
     if (pending) throw new Error("An update is already being prepared");
-    if (state.status !== "available" || !candidate) throw new Error("No launcher update is available");
+    if (checking || !["available", "error"].includes(state.status) || !candidate) throw new Error("Check for updates before installing.");
     const available = candidate;
     pending = (async () => {
       transition({ status: "downloading", version: available.version });
       const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-update-"));
       try {
-        const checksums = await deps.downloadText(available.checksumsUrl);
+        const options = { token: credentials?.read(), accept: "application/octet-stream" };
+        const checksums = await deps.downloadText(available.checksumsUrl, options);
         const expected = expectedChecksum(checksums, available.assetName);
         const assetPath = path.join(tempRoot, available.assetName);
-        await deps.downloadFile(available.assetUrl, assetPath);
+        await deps.downloadFile(available.assetUrl, assetPath, options);
         const actual = deps.sha256(assetPath);
         if (actual !== expected) throw new Error(`SHA-256 verification failed for ${available.assetName}`);
 
@@ -367,13 +413,26 @@ function createUpdateController({
 
   return {
     getState: () => state,
-    checkOnce,
+    checkOnce: () => check(),
+    check,
+    start,
+    stop: () => { clearInterval(timer); timer = null; },
+    async setToken(token) {
+      if (pending || checking || state.status === "installing") throw new Error("Wait for the update operation to finish.");
+      if (!credentials) throw new Error("Secure credential storage is unavailable.");
+      if (token === null) credentials.clear();
+      else credentials.save(token);
+      candidate = null;
+      return check({ force: true });
+    },
     beginInstall,
     cancelInstall,
   };
 }
 
 module.exports = {
+  RELEASES_URL,
+  updateRequestHeaders,
   buildJob,
   compareVersions,
   createUpdateController,

@@ -17,6 +17,7 @@ const {
   nativeImage,
   nativeTheme,
   screen,
+  safeStorage,
   shell,
   Tray,
 } = require("electron");
@@ -35,7 +36,8 @@ const { RuntimeSupervisor } = require("./runtime-supervisor.cjs");
 const { DEVELOPMENT_PROFILE, resolveLauncherProfile } = require("./profile.cjs");
 const { isolatedDevEnvironment } = require("./dev-environment.cjs");
 const { runtimeBundlePaths } = require("./runtime-command.cjs");
-const { createUpdateController } = require("./update.cjs");
+const { createUpdateController, RELEASES_URL } = require("./update.cjs");
+const { createUpdateCredentials } = require("./update-credentials.cjs");
 const {
   createStateStore,
   nextSessionRefreshReminderAt,
@@ -533,7 +535,9 @@ function registerIpc({ logger, stateStore }) {
   });
 
   handle("launcher:open-external", async (_event, url) => {
-    if (!ALLOWED_EXTERNAL_URLS.has(url)) throw new Error("External URL is not allowlisted");
+    const guideUrls = new Set([`${GITHUB_URL}/releases`, `${GITHUB_URL}/releases/latest`,
+      `${GITHUB_URL}/actions/workflows/ci.yml`, `${GITHUB_URL}/blob/main/docs/CONVERSATION_CONTINUITY.md`]);
+    if (!ALLOWED_EXTERNAL_URLS.has(url) && !guideUrls.has(url)) throw new Error("External URL is not allowlisted");
     await openWebUrl(url);
     return true;
   });
@@ -898,6 +902,9 @@ function registerIpc({ logger, stateStore }) {
     logger.info("launcher.logs_exported", { recordCount });
     return result.filePath;
   });
+  handle("launcher:update-check", () => updateController?.check({ force: true }));
+  handle("launcher:update-token", (_event, token) => updateController?.setToken(token));
+  handle("launcher:update-releases", async () => { await openWebUrl(RELEASES_URL); });
   handle("launcher:update-install", async () => {
     if (!updateController) throw new Error("Launcher updates are unavailable");
     const launch = await updateController.beginInstall();
@@ -1102,6 +1109,7 @@ async function start() {
       ? runtimeBundlePaths(updaterRuntimeRoot, process.platform).executable
       : null,
     logsDirectory: app.getPath("logs"),
+    credentials: createUpdateCredentials(path.join(app.getPath("userData"), "github-updates.enc"), safeStorage),
     publish: (state) => send("launcher:update-state", state),
     logger,
   });
@@ -1118,7 +1126,11 @@ async function start() {
     });
   }
   await loadRenderer(mainWindow);
-  if (!launcherSmokeTest) void updateController.checkOnce();
+  if (!launcherSmokeTest) {
+    updateController.start();
+    mainWindow.on("focus", () => void updateController.check());
+    app.once("will-quit", () => updateController.stop());
+  }
   if (launcherSmokeTest) {
     const smokeRuntimeRoot = runtimeRootProvider();
     if (app.isPackaged && !smokeRuntimeRoot) {

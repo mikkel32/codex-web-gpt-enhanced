@@ -323,6 +323,7 @@ export async function requestRetainedCompactionHandoff(
       prepareResume: prepare,
       conversationKey,
       requireRetainedConversation: true,
+      retainConversation: true,
       abortSignal: browserAbort.signal,
       onTextDelta: () => {},
     });

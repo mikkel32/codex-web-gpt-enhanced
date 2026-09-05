@@ -1,7 +1,7 @@
 export type Language = "en" | "zh-CN" | "ja";
 export type LauncherProfile = "production" | "development";
 export type BrowserInteractionMode = "automatic" | "manual";
-export type Surface = "home" | "guide" | "browser" | "setup" | "mcp" | "activity" | "settings";
+export type Surface = "home" | "guide" | "updates" | "browser" | "setup" | "mcp" | "activity" | "settings";
 
 export interface LauncherState {
   version: 1;
@@ -84,10 +84,11 @@ export interface OperationState {
   message: string;
 }
 
-export type UpdateState =
-  | { status: "disabled" | "idle" | "checking" | "up-to-date" }
+export type UpdateState = ({ checkedAt?: string; authenticated?: boolean } & (
+  | { status: "disabled" | "idle" | "checking"; version?: string }
+  | { status: "up-to-date" | "ahead"; latestVersion?: string }
   | { status: "available" | "downloading" | "installing"; version: string }
-  | { status: "error"; message: string };
+  | { status: "error" | "access-required"; message: string; version?: string }));
 
 export interface LauncherSnapshot {
   profile: LauncherProfile;
@@ -175,6 +176,9 @@ export interface LauncherApi {
   logs(limit?: number): Promise<LogRecord[]>;
   exportLogs(): Promise<string | null>;
   installUpdate(): Promise<boolean>;
+  checkUpdates(): Promise<UpdateState>;
+  setUpdateToken(token: string | null): Promise<UpdateState>;
+  openReleases(): Promise<void>;
   windowState(): Promise<{ fullScreen: boolean; maximized: boolean }>;
   windowControl(action: "close" | "minimize" | "zoom"): void;
   onWindowStateChanged(listener: (state: { fullScreen: boolean; maximized: boolean }) => void): () => void;

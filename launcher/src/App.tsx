@@ -12,6 +12,7 @@ import { createPortal } from "react-dom";
 import { copyFor, type Copy } from "./i18n";
 import { Icon, type IconName } from "./icons";
 import { MariaHome, MariaGuide, MADE_WITH_LOVE } from "./MariaHome";
+import { MariaUpdates } from "./MariaUpdates";
 import { BrowserSignIn } from "./BrowserSignIn";
 import type {
   BrowserInteractionMode,
@@ -347,7 +348,7 @@ function LauncherShell({
   const mcpOptional = snapshot.state.browserInteractionMode === "automatic"
     && snapshot.state.codexCatalogVerified === true
     && snapshot.state.mcpSetupComplete !== true;
-  const updateVisible = ["available", "downloading", "installing"].includes(snapshot.update.status);
+  const updateVisible = "version" in snapshot.update && Boolean(snapshot.update.version);
   const updateBusy = snapshot.update.status === "downloading" || snapshot.update.status === "installing";
   const updateVersion = "version" in snapshot.update ? snapshot.update.version : null;
   const selectedManualTab = browser?.tabs.find(tab => tab.active && tab.interactionMode === "manual");
@@ -584,16 +585,13 @@ function LauncherShell({
 
             <div className="sidebar-footer">
               <div className="maria-sidebar-credit">{MADE_WITH_LOVE}</div>
-              {updateVisible ? (
                 <SidebarItem
-                  active={false}
-                  disabled={updateBusy || operation?.status === "running" || browser?.status === "running"}
+                  active={surface === "updates"}
                   icon="update"
-                  label={updateBusy ? copy.updating : `${copy.updateAvailable} v${updateVersion}`}
-                  onClick={() => void installUpdate()}
-                  tone="update"
+                  label={updateBusy ? copy.updating : updateVisible ? `Update · v${updateVersion}` : "Updates"}
+                  onClick={() => navigateSurface("updates")}
+                  tone={updateVisible ? "update" : undefined}
                 />
-              ) : null}
               <SidebarItem
                 active={surface === "settings"}
                 icon="settings"
@@ -616,6 +614,7 @@ function LauncherShell({
             transition={{ duration: 0.16 }}
           >
             {surface === "home" ? <MariaHome snapshot={{ ...snapshot, browser }} navigate={navigateSurface} /> : null}
+            {surface === "updates" ? <MariaUpdates snapshot={{ ...snapshot, browser, operation }} install={installUpdate} /> : null}
             {surface === "guide" ? <MariaGuide openRepository={() => void api!.openExternal(snapshot.urls.github).catch(cause => setError(messageOf(cause)))} /> : null}
             {surface === "browser" ? (
               <BrowserSurface

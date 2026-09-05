@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { resolve } from "node:path";
+import { resolve, dirname, join } from "node:path";
 import { isChatGptWebZeroRiskBackendModel } from "../../chatgpt-web-models";
 import { defaultBrokerEndpoint, expandUserPath, resolveBrokerEndpoint } from "../../config";
 import {
@@ -47,7 +47,7 @@ import {
 } from "./compaction-handoff";
 import {
   chatGptConversationKey,
-  retainedConversationResumeRequest,
+  ChatGptConversationCursors,
 } from "./conversation-key";
 
 function brokerSocketPath(provider: CodexProviderConfig): string {
@@ -381,6 +381,10 @@ export function createChatGptWebAdapter(
       : parsed
   );
 
+  const conversationCursors = new ChatGptConversationCursors(retainedLauncherDescriptor
+    ? join(dirname(retainedLauncherDescriptor), `conversation-cursors-${createHash("sha256").update(executionNamespace).digest("hex").slice(0, 16)}.json`)
+    : undefined);
+
   const startRuntime = (
     parsed: CodexParsedRequest,
     environment: ReturnType<typeof extractChatGptTurnEnvironment> | undefined,
@@ -411,9 +415,11 @@ export function createChatGptWebAdapter(
       && retainedLauncherDescriptor
       ? chatGptConversationKey(checkpointInput.parsed, executionNamespace)
       : undefined;
-    const resumeInput = conversationKey
-      ? retainedConversationResumeRequest(checkpointInput.parsed)
+    const resumePlan = conversationKey
+      ? conversationCursors.resume(conversationKey, checkpointInput.parsed)
       : undefined;
+    const resumeInput = resumePlan?.parsed;
+    if (resumePlan) console.info(`[chatgpt-web] context sync mode=${resumePlan.mode} omittedMessages=${resumePlan.omitted} suppliedMessages=${resumeInput!.context.messages.length}`);
     const retainConversation = conversationKey !== undefined;
     const releaseRetainedConversation = conversationKey && retainedLauncherDescriptor
       ? async () => {
@@ -447,6 +453,10 @@ export function createChatGptWebAdapter(
       capturedCheckpoint = captured;
     };
     const finalizeCheckpoint = (browser: Promise<string>): Promise<string> => browser.then(answer => {
+      if (conversationKey) {
+        try { conversationCursors.commit(conversationKey, checkpointInput.parsed, answer); }
+        catch { console.warn("[chatgpt-web] Context cursor could not be saved; the next turn will use canonical history."); }
+      }
       if (!captureLunaCheckpoint) return answer;
       if (checkpointCaptureError) throw checkpointCaptureError;
       if (capturedCheckpoint) lunaCheckpointStore.commit(parsed, capturedCheckpoint, answer);
@@ -620,7 +630,7 @@ export function createChatGptWebAdapter(
           throw normalized;
         }
       };
-      const browserTurn = cancellableBrowserTurn(trackBrowserOwner(runManual()), browserAbort);
+      const browserTurn = cancellableBrowserTurn(trackBrowserOwner(finalizeCheckpoint(runManual())), browserAbort);
       void browserTurn.browser.catch(error => {
         if (tokenSettled) return;
         tokenSettled = true;
@@ -1008,8 +1018,9 @@ export function createChatGptWebAdapter(
                           retainedKey,
                           source,
                           compactedSourceExecutionKey,
+                          true,
                         )
-                        : chatGptTurnSessions.retireConversationAndWait(retainedKey),
+                        : chatGptTurnSessions.checkpointConversationAndWait(retainedKey),
                       operationSignal,
                     );
                     return summary;

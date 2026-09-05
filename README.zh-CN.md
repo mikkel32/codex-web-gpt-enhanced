@@ -1,5 +1,8 @@
 # Maria WebGPT
 
+[![CI](https://github.com/mikkel32/codex-web-gpt-enhanced/actions/workflows/ci.yml/badge.svg)](https://github.com/mikkel32/codex-web-gpt-enhanced/actions/workflows/ci.yml)
+[Download the latest release](https://github.com/mikkel32/codex-web-gpt-enhanced/releases/latest) · [Release history](https://github.com/mikkel32/codex-web-gpt-enhanced/releases)
+
 **你的模型，你的工作空间，更多可能。**
 
 Made with love -- Maria GPT 6 Astra 👀
@@ -9,7 +12,7 @@ models available. Choose a native model for your Codex account, or choose a
 **Maria Web** model to use your ChatGPT session. Your task, files, tools, and results
 stay together in Codex.
 
-## 快速开始
+## Start here
 
 - Open **Maria WebGPT**. The Overview shows your connection and the next setup steps.
 - Sign in to ChatGPT in the Browser page, or choose Manual mode in Settings.
@@ -17,7 +20,7 @@ stay together in Codex.
 - Choose a regular Codex model or a **Maria Web** model directly in Codex.
 - Use **Guide & README** inside Maria whenever you need these instructions.
 
-## 两种工作方式
+## Two ways to work
 
 ### Native Codex
 
@@ -36,6 +39,41 @@ prompt, paste it into ChatGPT, select your model and the **Codex Zero Risk** con
 send it, and choose **Sent** in Maria. You have five minutes to prepare the prompt
 and a separate 90 seconds for the connector to start. Attach images manually.
 Existing connector names and model IDs stay compatible with your saved setup.
+
+## Updates from our GitHub
+
+Open **Updates** in Maria. When a newer complete release is available, the sidebar
+shows **Update · v…** and the release page offers **Update to …**. Downloads are
+verified against the release's SHA-256 checksums before installation.
+
+- Maria checks at startup, every four hours, and when you return after at least 15 minutes. **Check for updates** retries immediately.
+- The page shows the installed version, latest published version, and last successful check. A local build newer than the published release is labeled **ahead of the release**.
+- Our repository is private. **Release notes & downloads** opens GitHub using your normal browser sign-in. For automatic checks and in-app updates, connect a fine-grained GitHub token restricted to this repository with **Contents: Read-only**. It is stored using operating-system encryption and can be removed in Updates.
+- GitHub access failures and offline checks stay visible; Maria never reports them as "up to date."
+- Finish active work before installing. DEV/source installations stay separate and do not replace the installed application.
+
+## One task, less repeated context
+
+Codex remains the source of truth for your task history, instructions, tool results,
+and compaction checkpoints. In Automatic Full harness mode, Maria keeps a saved
+ChatGPT conversation for the same Codex task and Web model configuration.
+
+- **Large context:** two or three context files and any images are attached together, followed by one Send. No model acknowledgement messages or staging-model switches. File contents still count toward the configured context budget.
+- **Follow-ups:** Maria sends only the new portion when the earlier input and final Web answer match a recorded local cursor. The cursor stores hashes, not another copy of your conversation.
+- **Native → Web:** any work done with native Codex after the last Web answer is included. Maria does not assume the last assistant message came from ChatGPT.
+- **Compaction:** the ChatGPT conversation identity stays the same. Codex's current checkpoint updates the task context without discarding the saved chat. Changed or unverifiable history uses the full current Codex context.
+- **Restart or tab eviction:** completed Automatic Full harness chats reopen their exact saved `chatgpt.com/c/...` address. Existing saved links from earlier Maria builds migrate in place.
+- **Uncertain submission:** Maria keeps the saved link and stops. It does not resend an accepted prompt or open a replacement task. Inspect the existing chat before continuing.
+
+Manual mode also uses verified incremental context while its retained tab is
+available; it does not automatically inspect or reopen remote chat history.
+Read-only Web modes and isolated checkpoint fallback requests use Temporary Chat.
+Saved Full harness chats appear in your ChatGPT history and use that account's
+normal data controls. Codex compaction reduces local context; it cannot reset
+ChatGPT's internal context window. ChatGPT's own limits still apply.
+
+See [Conversation architecture](docs/CONVERSATION_CONTINUITY.md) for the recovery
+and context-selection rules.
 
 ## Reuse an existing browser login
 
@@ -108,10 +146,10 @@ your computer. Explicitly removing the integration stops its background connecti
 - **Switching models:** finish or cancel the current turn, then choose another model in Codex. Your Codex task remains the same.
 
 Maria does not automatically resend an accepted prompt. This avoids duplicate work
-when a network connection becomes uncertain. Temporary Chat is processed by OpenAI;
-it is not local-only inference. Account availability and limits still apply.
+when a network connection becomes uncertain. Both saved and Temporary Chat are
+processed by OpenAI. Account availability and limits still apply.
 
-## 我们的项目
+## Our project
 
 Source and issues live in our private GitHub repository:
 https://github.com/mikkel32/codex-web-gpt-enhanced
@@ -146,6 +184,10 @@ Packaging produces an installer for the current operating system. macOS builds
 include a signature check and a launch test. Windows and Linux builds run in CI.
 
 ## Release notes
+
+5.3.0 adds a GitHub Updates page, private-release access, repeatable release checks,
+durable completed-chat recovery, compaction continuity, and verified incremental
+context that preserves work performed by native Codex models.
 
 5.2.0 adds existing-browser sign-in, independent native recovery, and isolated checkout development.
 

@@ -66,7 +66,7 @@ type InputMessage = RunMessage
   | { type: "completion_fence_begin_ack"; id: string; requestId: number; revision: number | null }
   | { type: "completion_fence_commit_ack"; id: string; requestId: number; committed: boolean }
   | { type: "progress"; id: string; snapshot: ChatGptExternalTurnProgressSnapshot }
-  | { type: "abort"; id: string }
+  | { type: "abort"; id: string; checkpointAccepted?: boolean }
   | { type: "shutdown" };
 
 let outputFailure: Error | undefined;
@@ -458,7 +458,8 @@ input.on("line", line => {
       );
     }
   } else if (message.type === "abort") {
-    abortControllers.get(message.id)?.abort();
+    abortControllers.get(message.id)?.abort(message.checkpointAccepted === true
+      ? new DOMException("Structured compaction handoff accepted", "AbortError") : undefined);
     preparedSelections.get(message.id)?.cancel();
     const waiter = sendActivationWaiters.get(message.id);
     sendActivationWaiters.delete(message.id);

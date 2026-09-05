@@ -349,6 +349,7 @@ export type LauncherTurnActivity =
       helperPid: number;
       /** Re-establish the launcher's hidden viewport after the caller closes its CDP session. */
       refreshViewport?: boolean;
+      sendActivated?: boolean;
     }
   | {
       phase: "end";
@@ -360,7 +361,8 @@ export type LauncherTurnActivity =
       connectorBound?: boolean;
     };
 
-export const LAUNCHER_TURN_START_TIMEOUT_MS = 5_000;
+// Restoring a saved conversation can include one bounded ChatGPT document load.
+export const LAUNCHER_TURN_START_TIMEOUT_MS = 70_000;
 export const LAUNCHER_TURN_HEARTBEAT_INTERVAL_MS = 10_000;
 export const LAUNCHER_TURN_HEARTBEAT_TIMEOUT_MS = 5_000;
 export const LAUNCHER_TURN_END_TIMEOUT_MS = 15_000;

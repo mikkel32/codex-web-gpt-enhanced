@@ -35,7 +35,7 @@ test("browser turn orchestration retains owned prompt insertion and semantic sub
   expect(workerSource).toContain("await this.waitForSubmissionAccepted(");
   const sendAttachedPrompt = workerSource.slice(
     workerSource.indexOf("  private async sendAttachedPrompt("),
-    workerSource.indexOf("  private async waitForMultipartAcknowledgement("),
+    workerSource.indexOf("  private async resetCompactionComposerForRetry("),
   );
   const sendSettled = sendAttachedPrompt.indexOf("await settleChatGptUi()");
   const sendDeadline = sendAttachedPrompt.indexOf("CHATGPT_SEND_ENABLE_GRACE_MS", sendSettled);
@@ -69,30 +69,20 @@ test("browser turn orchestration retains owned prompt insertion and semantic sub
   expect(submitted).toBeGreaterThan(submissionWait);
   expect(sendAttachedPrompt).not.toContain("await this.waitForSubmissionAccepted(");
   expect(runBrowserTurn).toContain("this.sendAttachedPrompt(");
-  expect(runBrowserTurn).toContain("formatChatGptWebMultipartStage(");
-  expect(runBrowserTurn).toContain("waitForMultipartAcknowledgement(");
-  expect(runBrowserTurn).toContain("formatChatGptWebMultipartCommit(");
-  expect(runBrowserTurn).toContain("resolveChatGptWebMultipartStagingMode(");
-  expect(runBrowserTurn).toContain('"final_part_effort_selection"');
+  expect(runBrowserTurn).toContain("formatChatGptWebMultipartFileCommit(");
+  expect(runBrowserTurn).not.toContain("formatChatGptWebMultipartStage(");
+  expect(runBrowserTurn).not.toContain("waitForMultipartAcknowledgement(");
+  expect(runBrowserTurn.match(/this\.sendAttachedPrompt\(/g)).toHaveLength(1);
   const promptAttached = runBrowserTurn.indexOf('await diagnostics.capture(page, "prompt-attachment-complete")');
-  const finalEffortSelected = runBrowserTurn.indexOf('"final_part_effort_selection"');
+  const filesAttached = runBrowserTurn.indexOf('await diagnostics.capture(page, "file-attachment-complete")');
   const finalSend = runBrowserTurn.indexOf("const finalSubmissionEvidence");
-  const multipartSend = runBrowserTurn.indexOf("const evidence = await this.runStage(");
-  const multipartAccepted = runBrowserTurn.indexOf("multipart part ${index + 1}/${prepared.multipart.parts.length} submission accepted evidence=${evidence}", multipartSend);
-  const multipartResponse = runBrowserTurn.indexOf("const responseTurn = await this.waitForNewAssistantTurn(", multipartSend);
   const finalAccepted = runBrowserTurn.indexOf("submission accepted evidence=${finalSubmissionEvidence}", finalSend);
   const finalResponse = runBrowserTurn.indexOf("let responseTurn = await this.waitForNewAssistantTurn(", finalSend);
   expect(promptAttached).toBeGreaterThan(-1);
-  expect(finalEffortSelected).toBeGreaterThan(-1);
-  expect(promptAttached).toBeGreaterThan(finalEffortSelected);
-  expect(finalSend).toBeGreaterThan(promptAttached);
-  expect(multipartAccepted).toBeGreaterThan(multipartSend);
-  expect(multipartAccepted).toBeLessThan(multipartResponse);
+  expect(filesAttached).toBeGreaterThan(promptAttached);
+  expect(finalSend).toBeGreaterThan(filesAttached);
   expect(finalAccepted).toBeGreaterThan(finalSend);
   expect(finalAccepted).toBeLessThan(finalResponse);
-  expect(runBrowserTurn.slice(finalEffortSelected, promptAttached)).toContain(
-    "this.selectModelAndEffort(",
-  );
   expect(runBrowserTurn).not.toContain("userTurns.nth(initialUserTurnCount).waitFor");
   expect(workerSource).not.toMatch(/\bclipboard\b|pbcopy|pbpaste/i);
 });
@@ -508,7 +498,7 @@ test("a submission probe stall rebinds the same tab without sending the prompt t
   const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
   const recoveryStart = workerSource.indexOf("  private async waitForSubmissionAcceptedWithRecovery(");
   const sendStart = workerSource.indexOf("  private async sendAttachedPrompt(");
-  const sendEnd = workerSource.indexOf("  private async waitForMultipartAcknowledgement(", sendStart);
+  const sendEnd = workerSource.indexOf("  private async resetCompactionComposerForRetry(", sendStart);
   const recoverySource = workerSource.slice(recoveryStart, sendStart);
   const sendSource = workerSource.slice(sendStart, sendEnd);
   const sendActivation = sendSource.indexOf('await sendButton.press("Enter"');
@@ -543,10 +533,10 @@ test("a submission probe stall rebinds the same tab without sending the prompt t
   expect(runBrowserTurn).toContain(
     "const toolTurnObservationRecovery = turn.externalProgress !== undefined;",
   );
-  expect((runBrowserTurn.match(/toolTurnObservationRecovery\s*\? async/g) ?? []).length).toBe(4);
-  expect(runBrowserTurn).toContain("stageBaseline = recovered.baseline");
+  expect((runBrowserTurn.match(/toolTurnObservationRecovery\s*\? async/g) ?? []).length).toBe(2);
+  expect(runBrowserTurn).not.toContain("stageBaseline = recovered.baseline");
   expect(runBrowserTurn).toContain("submissionBaseline = recovered.baseline");
-  expect((runBrowserTurn.match(/recoverAssistantObservation\(\.\.\.args\)/g) ?? []).length).toBe(2);
+  expect((runBrowserTurn.match(/recoverAssistantObservation\(\.\.\.args\)/g) ?? []).length).toBe(1);
 });
 
 test("an accepted Full-mode send survives one stalled DOM probe and a later MCP batch without resending", async () => {
@@ -3078,12 +3068,12 @@ test("response DOM separates streaming commentary from the final Markdown answer
   expect(workerSource).toContain("sourceEnd: Math.max(...ranges.map");
   expect(workerSource).toContain("streamable: index < segments.length - 1");
   expect(workerSource).toContain("markdownBuffer.observe(snapshot.markdownSegments)");
-  expect(workerSource).toContain("if (completionTracker.update({");
+  expect(workerSource).toContain("const completionReady = completionTracker.update({");
   expect(workerSource).not.toContain("markdownBuffer.currentSnapshotIsConsistent() && completionTracker.update");
   expect(workerSource).not.toContain("streamCompletedBlocks");
-  expect(workerSource).toContain('code: "multipart_protocol_violation"');
+  expect(workerSource).not.toContain('code: "multipart_protocol_violation"');
   expect(workerSource).not.toContain("multipartFailed");
-  expect(workerSource).toContain('"final_part_effort_selection"');
+  expect(workerSource).not.toContain('"final_part_effort_selection"');
   expect(workerSource).not.toContain("stableHtml:");
   expect(workerSource).not.toContain("observeStableHtml");
   expect(workerSource).toContain("const overlapsRenderedAnswer = (candidate: HTMLElement)");
@@ -3342,12 +3332,12 @@ test("the launcher helper transport carries MCP progress into the out-of-process
   expect(helper).toMatch(/externalProgress: progress/);
 });
 
-test("turn cancellation heuristics defer to proven MCP progress in both wait loops", () => {
+test("turn cancellation heuristics defer to proven MCP progress in the single response loop", () => {
   const worker = readFileSync("src/adapters/chatgpt-web/browser-worker.ts", "utf8");
   // A stale "Stopped thinking" label must not cancel a turn that is still driving tool calls, and
-  // the multipart staging loop must not be the one place that skips the liveness guard.
-  expect((worker.match(/stoppedThinkingTracker\.clear\(\)/g) ?? []).length).toBe(2);
-  expect((worker.match(/domHealthTracker\.clearMissingResponse\(\)/g) ?? []).length).toBe(2);
+  // the one response loop keeps the liveness guard after atomic attachment transport.
+  expect((worker.match(/stoppedThinkingTracker\.clear\(\)/g) ?? []).length).toBe(1);
+  expect((worker.match(/domHealthTracker\.clearMissingResponse\(\)/g) ?? []).length).toBe(1);
 });
 
 test("proven MCP progress vetoes every terminal DOM conclusion, not just a missing response", () => {
@@ -3714,15 +3704,14 @@ test("the bundled helper is adopted only for the packaged runtime layout", () =>
   expect(heartbeat).toBeLessThan(tryStart);
 });
 
-test("Bigger Context stage sends get a budget sized for their payload", () => {
+test("Bigger Context file sends get a budget sized for their payload", () => {
   const worker = readFileSync("src/adapters/chatgpt-web/browser-worker.ts", "utf8");
 
   // The send stage covers ChatGPT accepting the submission, not just the click. A stage posts a
   // much larger payload onto a conversation that already holds the earlier parts.
   expect(worker).toContain("multipartStageSend: 180_000");
-  expect(worker).toContain("browserStageTimeouts.multipartStageSend,");
 
-  // The multipart commit lands on a conversation already carrying every staged part.
+  // All files are ingested after the one message is accepted.
   expect(worker).toContain("prepared.multipart ? browserStageTimeouts.multipartStageSend : browserStageTimeouts.send,");
 
   // The ordinary send budget is unchanged for ordinary prompts.

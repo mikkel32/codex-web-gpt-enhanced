@@ -3,6 +3,7 @@ const path = require("node:path");
 const { createHash, randomBytes } = require("node:crypto");
 const { clipboard, WebContentsView, powerMonitor, powerSaveBlocker, shell } = require("electron");
 const { writePrivateFileAtomic } = require("./atomic-file.cjs");
+const { SavedConversations, savedConversationUrl } = require("./saved-conversations.cjs");
 const {
   runBrowserHelperOperation,
   verifyConnectorWithBrowserHelper,
@@ -326,6 +327,7 @@ class BrowserHost {
     }
     this.window = window;
     this.descriptorPath = descriptorPath;
+    this.savedConversations = new SavedConversations(path.join(path.dirname(descriptorPath), "saved-conversations.json"));
     this.cdpPort = cdpPort;
     this.control = control;
     this.cancelTurn = cancelTurn;
@@ -784,7 +786,13 @@ class BrowserHost {
     contents.on("did-stop-loading", () => {
       tab.loading = false;
       tab.url = contents.getURL();
+      this.rememberSubmittedConversationUrl(tab);
       this.publishState?.(this.snapshot());
+    });
+    contents.on("did-navigate-in-page", (_event, url, mainFrame) => {
+      if (!mainFrame) return;
+      tab.url = url;
+      this.rememberSubmittedConversationUrl(tab);
     });
     contents.on("did-finish-load", () => {
       tab.url = contents.getURL();
@@ -2200,9 +2208,44 @@ class BrowserHost {
     if (sameTrace?.status === "ready" && sameTrace !== exactRetained) {
       throw new Error(`ChatGPT browser turn ${traceId} is retained under different conversation metadata`);
     }
-    const existing = sameTrace?.status === "running" ? sameTrace : exactRetained;
+    if (!sameTrace && conversationKey && [...this.turnTabs.values()].some(tab => tab.conversationKey === conversationKey && tab.status === "running")) {
+      throw new Error("This ChatGPT conversation already has an active turn. Wait for it to finish.");
+    }
+    let existing = sameTrace?.status === "running" ? sameTrace : exactRetained;
+    const saved = conversationKey ? this.savedConversations?.get(conversationKey) : null;
+    if (!existing && saved) {
+      if (saved.status !== "ready" || !saved.url || saved.connectorIdentity !== (connectorIdentity || "") || !saved.connectorBound) {
+        throw new Error("The previous ChatGPT turn needs attention. Its saved conversation was kept; no prompt was resent or replacement chat opened.");
+      }
+      const restored = await this.createTurnTab(traceId, helperPid, conversationKey, connectorIdentity);
+      try {
+        restored.initializingSurface = true;
+        await Promise.race([
+          restored.view.webContents.loadURL(saved.url),
+          new Promise((_, reject) => {
+            restored.restoreTimer = setTimeout(() => reject(new Error("Restoring the saved ChatGPT conversation timed out")), BROWSER_NAVIGATION_TIMEOUT_MS);
+            restored.restoreTimer.unref?.();
+          }),
+        ]).finally(() => clearTimeout(restored.restoreTimer));
+        if (savedConversationUrl(restored.view.webContents.getURL()) !== saved.url) throw new Error("ChatGPT did not restore the exact saved conversation. Sign in again and retry.");
+        await this.markTurnTabSurface(restored);
+        restored.initializingSurface = false;
+        restored.status = "ready";
+        restored.connectorBound = true;
+        restored.bootstrapReady = true;
+        existing = restored;
+      } catch (error) {
+        this.removeTurnTab(restored, false);
+        throw error;
+      }
+    }
     if (existing) {
       const reused = existing.status === "ready";
+      if (reused && saved && saved.status !== "ready") throw new Error("The previous ChatGPT submission has not settled. No prompt was resent.");
+      if (!reused && existing.initializingSurface) throw new Error("The saved ChatGPT surface is still being restored. Wait before continuing.");
+      const url = this.savedConversations ? savedConversationUrl(existing.view.webContents.getURL()) : null;
+      if (reused && saved?.url && url !== saved.url) throw new Error("The retained ChatGPT tab moved away from its saved conversation. No prompt was sent.");
+      if (reused) existing.submissionActivated = false;
       if (existing.status === "running" && existing.helperPid !== helperPid) {
         if (processRunning(existing.helperPid)) {
           throw new Error(`ChatGPT browser turn ${traceId} is owned by another helper process`);
@@ -2255,6 +2298,34 @@ class BrowserHost {
     return { surfaceId: tab.surfaceId, tabId: tab.id, reused: false, connectorBound: false };
   }
 
+  rememberSubmittedConversationUrl(tab) {
+    if (!tab.submissionActivated || !tab.conversationKey || !this.savedConversations) return;
+    const url = savedConversationUrl(tab.view.webContents.getURL());
+    if (!url) return;
+    try {
+      const previous = this.savedConversations.get(tab.conversationKey);
+      if (!previous || previous.url) return;
+      this.savedConversations.set(tab.conversationKey, { ...previous, url });
+    } catch { this.logger.warn("browser.conversation_url_save_failed", { traceId: tab.traceId }); }
+  }
+
+  rememberConversationSubmission(traceId, helperPid) {
+    const tab = [...this.turnTabs.values()].find(tab => tab.traceId === traceId);
+    if (!tab || tab.helperPid !== helperPid || tab.status !== "running" || tab.interactionMode !== "automatic") {
+      throw new Error("ChatGPT submission does not own an active browser tab");
+    }
+    if (tab.submissionActivated) return;
+    if (tab.conversationKey) {
+      const url = savedConversationUrl(tab.view.webContents.getURL());
+      const previous = this.savedConversations?.get(tab.conversationKey);
+      if (previous?.url && url !== previous.url) throw new Error("ChatGPT moved away from the saved task before Send. No prompt was sent.");
+      this.savedConversations?.set(tab.conversationKey, {
+        url, connectorIdentity: tab.connectorIdentity || "", connectorBound: tab.connectorBound === true, status: "in-flight",
+      });
+    }
+    tab.submissionActivated = true;
+  }
+
   async endTurn(
     traceId,
     helperPid,
@@ -2293,6 +2364,13 @@ class BrowserHost {
       && tab.conversationKey
       && (!tab.connectorIdentity || connectorBound)) {
       tab.connectorBound = connectorBound === true;
+      const completedUrl = savedConversationUrl(tab.view.webContents.getURL?.());
+      const saved = this.savedConversations?.get(tab.conversationKey);
+      if (saved?.url && saved.url !== completedUrl) throw new Error("ChatGPT moved away from its saved task. Its original link was preserved.");
+      this.savedConversations?.set(tab.conversationKey, {
+        url: completedUrl, connectorIdentity: tab.connectorIdentity || "",
+        connectorBound: tab.connectorBound, status: "ready",
+      });
       tab.lastHeartbeatAt = Date.now();
       if (hideAfterTurn && !this.activeTraceId) this.hide();
       this.logger.info("browser.tab_retained", { tabId: tab.id, traceId });

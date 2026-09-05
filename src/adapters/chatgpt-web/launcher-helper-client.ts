@@ -230,7 +230,11 @@ export class LauncherBrowserHelperClient {
               );
               return;
             }
-            void this.send({ type: "abort", id: turn.traceId }).catch(error => {
+            void this.send({ type: "abort", id: turn.traceId,
+              ...(turn.nativeConnector && turn.requireRetainedConversation
+                && turn.abortSignal?.reason?.message === "Structured compaction handoff accepted"
+                ? { checkpointAccepted: true } : {}),
+            }).catch(error => {
               this.finishWithError(
                 turn.traceId,
                 error instanceof Error ? error : new Error(String(error)),

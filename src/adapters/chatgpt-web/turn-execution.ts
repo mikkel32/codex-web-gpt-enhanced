@@ -575,6 +575,10 @@ export class ChatGptTurnSessions {
     return this.closeConversationAndWait(conversationKey);
   }
 
+  async checkpointConversationAndWait(conversationKey: string): Promise<number> {
+    return this.closeConversationAndWait(conversationKey, undefined, true);
+  }
+
   /**
    * Close the physical retained-chat epoch without discarding a terminal response that won the
    * compaction race before any compaction instruction reached that response. The detached logical
@@ -585,6 +589,7 @@ export class ChatGptTurnSessions {
     conversationKey: string,
     preserved: ChatGptTurnSession,
     preservedExecutionKey: string,
+    keepConversation = false,
   ): Promise<number> {
     if (!preservedExecutionKey) throw new Error("Preserved ChatGPT response execution key is required");
     const outcome = preserved.settledOutcome();
@@ -594,12 +599,13 @@ export class ChatGptTurnSessions {
     return this.closeConversationAndWait(conversationKey, {
       session: preserved,
       executionKey: preservedExecutionKey,
-    });
+    }, keepConversation);
   }
 
   private async closeConversationAndWait(
     conversationKey: string,
     preserved?: { session: ChatGptTurnSession; executionKey: string },
+    keepConversation = false,
   ): Promise<number> {
     const pending = this.conversationRetirements.get(conversationKey);
     if (pending) {
@@ -633,7 +639,7 @@ export class ChatGptTurnSessions {
       session.runtime.releaseRetainedConversation !== undefined
     ))?.[1].runtime.releaseRetainedConversation;
     const retirement = Promise.all(matches.map(([, session]) => session.physicalSettlement))
-      .then(async () => { await release?.(); });
+      .then(async () => { if (!keepConversation) await release?.(); });
     this.conversationRetirements.set(conversationKey, retirement);
     try {
       await retirement;

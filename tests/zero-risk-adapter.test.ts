@@ -329,6 +329,7 @@ test("Zero Risk offers only the new Codex suffix when the launcher reuses its re
   let exactBinding: ReturnType<typeof binding> | undefined;
   let fullPrompt = "";
   let resumePrompt = "";
+  let completed = 0;
   const control: ChatGptZeroRiskManualControl = {
     async start(_path, activity) {
       fullPrompt = activity.prompt;
@@ -340,13 +341,16 @@ test("Zero Risk offers only the new Codex suffix when the launcher reuses its re
     },
     waitTerminal: noManualTerminal,
     async markStarted() {
-      broker.completeSafeTurn(exactBinding!.request_id, "Incremental answer");
+      broker.completeSafeTurn(exactBinding!.request_id, completed++ === 0
+        ? "Earlier answer already visible in ChatGPT." : "Incremental answer");
     },
     async end() {},
     async cancel() {},
   };
   try {
-    await createChatGptWebAdapter(config, { broker, zeroRiskManualControl: control }).runTurn!(
+    const adapter = createChatGptWebAdapter(config, { broker, zeroRiskManualControl: control });
+    await adapter.runTurn!(request(historicalTurnId), { headers: new Headers() }, () => {});
+    await adapter.runTurn!(
       input,
       { headers: new Headers() },
       () => {},
