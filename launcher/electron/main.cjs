@@ -436,6 +436,7 @@ function validateBounds(value) {
 function registerIpc({ logger, stateStore }) {
   const handle = (channel, handler) => registerLoggedIpc(ipcMain, logger, channel, handler);
   handle("launcher:snapshot", async () => ({
+    build: require("./build-info.cjs").readBuildInfo(path.join(app.isPackaged ? process.resourcesPath : path.join(__dirname, "../build"), "build-info.json"), app.getVersion()),
     profile: LAUNCHER_PROFILE.kind,
     profilePaths: {
       coreHome: CORE_HOME,
@@ -464,17 +465,14 @@ function registerIpc({ logger, stateStore }) {
     updateTrayMenu(state.language);
     return state;
   });
-  handle("launcher:connection-status", async () => {
-    if (IS_DEV_PROFILE) return { nativeAvailable: false, browserConnected: browserHost?.snapshot().authenticated === true, activeBrowserTurns: 0, recoveryAvailable: false };
-    const config = runtimeSupervisor?.readConfig();
-    const health = config ? await runtimeSupervisor.proxyHealthPayload(config) : null;
-    return {
-      nativeAvailable: health?.service === "codex-chatgpt-web" && health?.accepting_turns === true,
-      browserConnected: health?.browser_connected !== false && Boolean(health),
-      activeBrowserTurns: health?.active_browser_turns ?? 0,
-      recoveryAvailable: runtimeSupervisor?.nativeRecovery?.status().running === true,
-    };
+  const sampleConnection = require("./connection-status.cjs").createConnectionSampler({
+    readConfig: () => runtimeSupervisor?.readConfig(),
+    readHealth: config => runtimeSupervisor.proxyHealthPayload(config),
+    recoveryStatus: () => runtimeSupervisor?.nativeRecovery?.status(),
+    browserState: () => browserHost?.snapshot(),
+    development: IS_DEV_PROFILE,
   });
+  handle("launcher:connection-status", () => sampleConnection());
   handle("launcher:copy-native-command", () => {
     require("electron").clipboard.writeText('codex -c model_provider=openai -c openai_base_url=https://chatgpt.com/backend-api/codex');
     return true;

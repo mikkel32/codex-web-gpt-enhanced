@@ -1,49 +1,29 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { ConnectionStatus } from "./types";
+import { useEffect, useSyncExternalStore } from "react";
+import { createConnectionMonitor } from "./connection-monitor";
 
-let inFlight: Promise<ConnectionStatus> | undefined;
-function readConnection(): Promise<ConnectionStatus> {
-  if (!inFlight) inFlight = window.codexWebLauncher!.connectionStatus().finally(() => { inFlight = undefined; });
-  return inFlight;
-}
-
+const monitor = createConnectionMonitor(() => window.codexWebLauncher!.connectionStatus());
+monitor.setVisible(!document.hidden);
+let bindings = 0;
+let detach = () => {};
 export function useConnectionStatus() {
-  const [status, setStatus] = useState<ConnectionStatus | null>(null);
-  const [checking, setChecking] = useState(true);
-  const [error, setError] = useState(false);
-  const refreshRef = useRef<() => void>(() => {});
+  const value = useSyncExternalStore(monitor.subscribe, monitor.getSnapshot, monitor.getSnapshot);
   useEffect(() => {
-    let disposed = false;
-    let pending = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let signature = "";
-    const check = async (manual = false) => {
-      clearTimeout(timer);
-      if (disposed || document.hidden || pending) return;
-      pending = true;
-      if (manual) setChecking(true);
-      try {
-        const next = await readConnection();
-        if (!disposed) {
-          const nextSignature = JSON.stringify(next);
-          if (nextSignature !== signature) { signature = nextSignature; setStatus(next); }
-          setError(false);
-        }
-      } catch { if (!disposed) setError(true); }
-      finally {
-        pending = false;
-        if (!disposed) {
-          setChecking(false);
-          if (!document.hidden) timer = setTimeout(() => void check(), 15_000);
-        }
-      }
-    };
-    const onVisibility = () => { clearTimeout(timer); if (!document.hidden) void check(); };
-    refreshRef.current = () => void check(true);
-    document.addEventListener("visibilitychange", onVisibility);
-    void check();
-    return () => { disposed = true; clearTimeout(timer); document.removeEventListener("visibilitychange", onVisibility); };
+    bindings += 1;
+    if (bindings === 1) {
+      const api = window.codexWebLauncher!;
+      const visibility = () => monitor.setVisible(!document.hidden);
+      let fingerprint = "";
+      const offBrowser = api.onBrowserState(state => {
+        const key = JSON.stringify([state.status, state.authenticated, state.webAccess?.status]);
+        if (key !== fingerprint) { fingerprint = key; monitor.invalidate(); }
+      });
+      const offState = api.onStateChanged(() => monitor.invalidate());
+      const offOperation = api.onOperation(operation => { if (operation.status !== "running") monitor.invalidate(); });
+      document.addEventListener("visibilitychange", visibility);
+      visibility();
+      detach = () => { offBrowser(); offState(); offOperation(); document.removeEventListener("visibilitychange", visibility); };
+    }
+    return () => { bindings -= 1; if (!bindings) detach(); };
   }, []);
-  const refresh = useCallback(() => refreshRef.current(), []);
-  return { status, checking, error, refresh };
+  return { ...value, refresh: monitor.refresh };
 }

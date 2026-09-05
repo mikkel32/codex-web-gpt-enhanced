@@ -410,6 +410,11 @@ class BrowserHost {
     }
     this.view.webContents.setZoomFactor(this.state.zoomFactor);
     this.bindShellZoomShortcuts(this.window.webContents);
+    this.window.webContents.on("did-start-navigation", (_event, _url, inPlace, mainFrame) => {
+      if (!mainFrame || inPlace) return;
+      this.boundsReady = false;
+      this.setSurfaceActive(false);
+    });
     this.bindShellZoomShortcuts(this.view.webContents);
     this.bindChatGptBackendRecovery();
     this.bindWebContents();
@@ -727,6 +732,16 @@ class BrowserHost {
   bindShellZoomShortcuts(contents) {
     if (!contents || contents.isDestroyed() || this.shellZoomShortcutBindings.has(contents)) return;
     const handler = (event, input) => {
+      const navigation = require("./shell-shortcuts.cjs").shellNavigationForInput(input);
+      if (navigation) {
+        event.preventDefault();
+        this.window.webContents.send("launcher:shortcut", navigation);
+        if (navigation.type === "commands" || (navigation.type === "navigate" && navigation.index !== 1)) {
+          this.restoreBrowserFocus = this.restoreBrowserFocus || contents !== this.window.webContents;
+          this.window.webContents.focus();
+        }
+        return;
+      }
       const action = shellZoomActionForInput(input);
       if (!action) return;
       event.preventDefault();
@@ -1366,19 +1381,15 @@ class BrowserHost {
 
   setBounds(bounds, rendererZoomFactor = 1) {
     const [width, height] = this.window.getContentSize();
-    this.bounds = constrainBrowserBounds(
+    const next = constrainBrowserBounds(
       normalizeBounds(scaleBrowserBounds(bounds, rendererZoomFactor)),
       { width, height },
     );
+    if (this.boundsReady && ["x", "y", "width", "height"].every(key => this.bounds[key] === next[key])) return;
+    this.bounds = next;
     this.boundsReady = true;
     this.authView?.setBounds(this.bounds);
     this.syncViewVisibility();
-    if (browserInteractionModeFor(this) === "automatic") {
-      void this.view.webContents.executeJavaScript("window.dispatchEvent(new Event('resize'))", true).catch(() => {});
-      if (this.authView && !this.authView.webContents.isDestroyed()) {
-        void this.authView.webContents.executeJavaScript("window.dispatchEvent(new Event('resize'))", true).catch(() => {});
-      }
-    }
   }
 
   activeView() {
@@ -1765,8 +1776,15 @@ class BrowserHost {
   }
 
   setSurfaceActive(active) {
+    if (active !== true) {
+      this.restoreBrowserFocus = this.restoreBrowserFocus || this.activeView?.()?.webContents?.isFocused?.() === true;
+    }
     this.surfaceActive = active === true;
     this.syncViewVisibility();
+    if (this.surfaceActive && this.restoreBrowserFocus && this.window?.isFocused?.()) {
+      this.activeView?.()?.webContents?.focus?.();
+      this.restoreBrowserFocus = false;
+    }
     this.setState({ surfaceActive: this.surfaceActive });
     return this.snapshot();
   }

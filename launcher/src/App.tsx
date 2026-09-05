@@ -1,4 +1,4 @@
-import { AnimatePresence, motion, MotionConfig } from "motion/react";
+import { AnimatePresence, motion, MotionConfig, LayoutGroup, useReducedMotion } from "motion/react";
 import {
   useCallback,
   useEffect,
@@ -19,6 +19,11 @@ import { WebAccessNotice } from "./WebAccessNotice";
 import { BrandMark } from "./BrandMark";
 import { CommandPalette } from "./CommandPalette";
 import { studioCopy } from "./studio-copy";
+import { useOverlayPresence } from "./useOverlayPresence";
+import { useSidebar } from "./useSidebar";
+import { useBrowserViewport } from "./useBrowserViewport";
+import { useConnectionStatus } from "./useConnectionStatus";
+import { CinematicMark, KineticHeading, SPRING, SURFACE_SPRING } from "./motion-system";
 import type {
   BrowserInteractionMode,
   BrowserState,
@@ -33,7 +38,7 @@ import type {
 
 const api = window.codexWebLauncher;
 const PANEL_TRANSITION = { duration: 0.3, ease: [0.16, 1, 0.3, 1] } as const;
-const COMPACT_SIDEBAR_QUERY = "(max-width: 820px)";
+
 
 
 export function App() {
@@ -41,6 +46,7 @@ export function App() {
   const [browser, setBrowser] = useState<BrowserState | null>(null);
   const [operation, setOperation] = useState<OperationState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [bootAttempt, setBootAttempt] = useState(0);
   const documentLanguage = snapshot?.state.language ?? "en";
 
   useEffect(() => {
@@ -67,7 +73,7 @@ export function App() {
       if (next.operation?.status === "failed" && next.operation.name !== "mcp-verification") {
         setError(next.operation.message);
       }
-    }).catch((cause) => setError(messageOf(cause)));
+    }).catch((cause) => { if (!cancelled) setError(messageOf(cause)); });
     const unsubscribeState = api.onStateChanged((state) => {
       setSnapshot((current) => current
         ? {
@@ -96,7 +102,7 @@ export function App() {
       unsubscribeOperation();
       unsubscribeUpdate();
     };
-  }, []);
+  }, [bootAttempt]);
 
   const updateState = useCallback((state: LauncherState) => {
     setSnapshot((current) => current
@@ -108,7 +114,7 @@ export function App() {
   }, []);
 
   if (!api) return <FatalMessage message="Launcher IPC is unavailable." />;
-  if (!snapshot) return <LaunchLoading />;
+  if (!snapshot) return error ? <FatalMessage message={error} retry={() => { setError(null); setBootAttempt(value => value + 1); }} /> : <LaunchLoading />;
 
   const language = snapshot.state.language ?? "en";
   const copy = copyFor(language);
@@ -132,6 +138,7 @@ export function App() {
           />
         ) : (
           <LauncherShell
+            hasError={Boolean(error)}
             browser={browser}
             copy={copy}
             key="launcher"
@@ -170,8 +177,8 @@ function Onboarding({ language, setError, snapshot, updateState }: {
   return <motion.main className="welcome studio-welcome" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
     <header className="welcome-top draggable"><div className="welcome-brand no-drag"><BrandMark small /><span>Maria</span></div><span className="welcome-version">v{snapshot.version}</span></header>
     <div className="studio-welcome-grid">
-      <section className="studio-welcome-story"><span className="maria-eyebrow">YOUR WORK. CONNECTED.</span><BrandMark />
-        <h1>{s.welcomeTitle}</h1><p>{s.welcomeBody}</p><div className="studio-welcome-capabilities"><span><Icon name="setup" />Codex</span><i /><span><Icon name="globe" />ChatGPT</span><i /><span><McpMark />{s.tools}</span></div>
+      <section className="studio-welcome-story"><span className="maria-eyebrow">YOUR WORK. CONNECTED.</span><CinematicMark large />
+        <KineticHeading text={s.welcomeTitle} /><p>{s.welcomeBody}</p><div className="studio-welcome-capabilities"><span><Icon name="setup" />Codex</span><i /><span><Icon name="globe" />ChatGPT</span><i /><span><McpMark />{s.tools}</span></div>
       </section>
       <section className="studio-welcome-options"><span className="maria-eyebrow">WELCOME TO MARIA</span><h2>{s.preferences}</h2><p>{s.preferencesBody}</p>
         <fieldset disabled={busy}><legend>{s.language}</legend><div className="studio-language-picker" role="radiogroup" aria-label={localized.chooseLanguage}>
@@ -190,6 +197,7 @@ function Onboarding({ language, setError, snapshot, updateState }: {
 }
 
 function LauncherShell({
+  hasError,
   browser,
   copy,
   language,
@@ -198,6 +206,7 @@ function LauncherShell({
   snapshot,
   updateState,
 }: {
+  hasError: boolean;
   browser: BrowserState | null;
   copy: Copy;
   language: Language;
@@ -209,13 +218,26 @@ function LauncherShell({
   const interactionSetupComplete = snapshot.state.coreSetupComplete === true
     && (snapshot.state.browserInteractionMode === "manual"
       || snapshot.state.codexCatalogVerified === true);
-  const [surface, setSurface] = useState<Surface>(
-    "home",
-  );
+  const [surface, setSurfaceState] = useState<Surface>("home");
+  const [surfaceReady, setSurfaceReady] = useState(false);
+  const surfaceRef = useRef<Surface>("home");
+  const workspaceRef = useRef<HTMLElement | null>(null);
+  const scrollPositions = useRef(new Map<Surface, number>());
+  const reducedMotion = useReducedMotion();
   const devProfile = snapshot.profile === "development";
-  const compactAtMount = useRef(window.matchMedia(COMPACT_SIDEBAR_QUERY).matches).current;
-  const [sidebarOpen, setSidebarOpen] = useState(!compactAtMount);
-  const [compactSidebar, setCompactSidebar] = useState(compactAtMount);
+  const sidebar = useSidebar(api!, snapshot.state, cause => setError(messageOf(cause)));
+  const sidebarOpen = sidebar.open;
+  const compactSidebar = sidebar.compact;
+  const connection = useConnectionStatus();
+  const shortcutActions = useRef<{ toggle: () => void; navigate: (next: Surface) => void }>({ toggle: () => {}, navigate: () => {} });
+  const setSurface = useCallback((next: Surface) => {
+    if (surfaceRef.current === next) return;
+    const viewport = workspaceRef.current?.querySelector<HTMLElement>(".content-scroll, .maria-page") ?? workspaceRef.current?.querySelector<HTMLElement>(".surface-transition");
+    if (viewport) scrollPositions.current.set(surfaceRef.current, viewport.scrollTop);
+    surfaceRef.current = next;
+    setSurfaceReady(false);
+    setSurfaceState(next);
+  }, []);
   const [browserSlot, setBrowserSlot] = useState<HTMLDivElement | null>(null);
   const [sessionReminderBusy, setSessionReminderBusy] = useState(false);
   const [sessionReminderDue, setSessionReminderDue] = useState(false);
@@ -223,22 +245,37 @@ function LauncherShell({
   const studio = studioCopy(language);
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && !event.isComposing) {
+      if (event.isComposing || event.repeat || event.shiftKey || event.altKey || !(snapshot.platform === "darwin" ? event.metaKey : event.ctrlKey)) return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") { event.preventDefault(); shortcutActions.current.toggle(); }
+      const routes: Surface[] = ["home", "browser", "setup", "mcp", "activity", "guide", "updates", "settings"];
+      if ((event.metaKey || event.ctrlKey) && /^[1-8]$/.test(event.key)) { event.preventDefault(); shortcutActions.current.navigate(routes[Number(event.key) - 1]!); }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault(); setCommandOpen(value => !value);
       }
     };
+    const offShortcut = api!.onShortcut?.(shortcut => {
+      if (shortcut.type === "commands") setCommandOpen(value => !value);
+      else if (shortcut.type === "sidebar") shortcutActions.current.toggle();
+      else if (shortcut.type === "navigate" && Number.isInteger(shortcut.index) && shortcut.index! >= 0 && shortcut.index! < 8) {
+        const routes: Surface[] = ["home", "browser", "setup", "mcp", "activity", "guide", "updates", "settings"];
+        shortcutActions.current.navigate(routes[shortcut.index!]!);
+      }
+    });
     window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
+    return () => { window.removeEventListener("keydown", handleKey); offShortcut?.(); };
   }, []);
   const [mcpTargetMode, setMcpTargetMode] = useState<BrowserInteractionMode | null>(null);
   const [biggerContextRecommendationOpen, setBiggerContextRecommendationOpen] = useState(false);
 
   const [biggerContextRecommendationBusy, setBiggerContextRecommendationBusy] = useState(false);
   const browserSlotRef = useCallback((node: HTMLDivElement | null) => setBrowserSlot(node), []);
+  const overlayPresent = useOverlayPresence(hasError || commandOpen || biggerContextRecommendationOpen || (compactSidebar && sidebarOpen), reducedMotion ? 0 : 400);
   const browserSurfaceActive = surface === "browser"
+    && surfaceReady
     && !(compactSidebar && sidebarOpen)
     && !biggerContextRecommendationOpen
-    && !commandOpen;
+    && !commandOpen
+    && !overlayPresent;
   const needsBrowser = snapshot.state.browserInteractionMode === "automatic"
     && browser?.authenticated !== true;
   const needsSetup = !needsBrowser && !interactionSetupComplete;
@@ -259,56 +296,12 @@ function LauncherShell({
   useEffect(() => {
     if (!selectedManualTab) return;
     setSurface("browser");
-    setSidebarOpen(false);
+    sidebar.closeOverlay();
     setBiggerContextRecommendationOpen(false);
-    void api!.setBrowserSurfaceActive(true).catch((cause) => setError(messageOf(cause)));
+
   }, [selectedManualTab?.id, selectedManualTab?.manualState, setError]);
 
-  useLayoutEffect(() => {
-    let cancelled = false;
-    let animationFrame = 0;
-    let observer: ResizeObserver | null = null;
-
-    const measure = () => {
-      if (!browserSlot) return;
-      cancelAnimationFrame(animationFrame);
-      animationFrame = requestAnimationFrame(() => {
-        const rect = browserSlot.getBoundingClientRect();
-        void api!.setBrowserBounds({
-          x: rect.x,
-          y: rect.y,
-          width: rect.width,
-          height: rect.height,
-        }).catch((cause) => setError(messageOf(cause)));
-      });
-    };
-
-    void api!.setBrowserSurfaceActive(browserSurfaceActive).then(() => {
-      if (cancelled || !browserSurfaceActive || !browserSlot) return;
-      measure();
-      observer = new ResizeObserver(measure);
-      observer.observe(browserSlot);
-      window.addEventListener("resize", measure);
-    }).catch((cause) => setError(messageOf(cause)));
-
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(animationFrame);
-      observer?.disconnect();
-      window.removeEventListener("resize", measure);
-    };
-  }, [browserSlot, browserSurfaceActive, setError]);
-
-  useEffect(() => {
-    const media = window.matchMedia(COMPACT_SIDEBAR_QUERY);
-    const apply = () => {
-      setCompactSidebar(media.matches);
-      setSidebarOpen(!media.matches);
-    };
-    apply();
-    media.addEventListener("change", apply);
-    return () => media.removeEventListener("change", apply);
-  }, []);
+  useBrowserViewport(api!, browserSlot, browserSurfaceActive, cause => setError(messageOf(cause)));
 
   useEffect(() => {
     const reminderAt = snapshot.state.sessionRefreshReminderAt;
@@ -329,25 +322,17 @@ function LauncherShell({
 
   const activateBrowser = useCallback(async (show = false) => {
     setSurface("browser");
-    await api!.setBrowserSurfaceActive(true);
     if (show) await api!.showBrowser();
   }, []);
 
-  const toggleSidebar = () => {
-    const next = !sidebarOpen;
-    if (compactSidebar && next && surface === "browser") {
-      void api!.setBrowserSurfaceActive(false)
-        .then(() => setSidebarOpen(true))
-        .catch((cause) => setError(messageOf(cause)));
-      return;
-    }
-    setSidebarOpen(next);
-  };
+  const toggleSidebar = sidebar.toggle;
 
   const navigateSurface = (next: Surface) => {
     setSurface(next);
-    if (compactSidebar) setSidebarOpen(false);
+    if (compactSidebar) sidebar.closeOverlay();
   };
+
+  shortcutActions.current = { toggle: toggleSidebar, navigate: navigateSurface };
 
   const installUpdate = async () => {
     setError(null);
@@ -379,7 +364,6 @@ function LauncherShell({
       const result = await api!.logoutChatGpt();
       updateState(result.state);
       navigateSurface("browser");
-      await api!.setBrowserSurfaceActive(true);
     } catch (cause) {
       setError(messageOf(cause));
     } finally {
@@ -403,10 +387,14 @@ function LauncherShell({
   return (
     <motion.main
       animate={{ opacity: 1 }}
-      className={`app-shell${compactSidebar ? " is-compact" : ""}${sidebarOpen ? " is-sidebar-open" : ""}`}
+      className={`app-shell${compactSidebar ? " is-compact" : ""}${sidebarOpen ? " is-sidebar-open" : ""}${sidebar.rail ? " is-rail" : ""}${sidebar.resizing ? " is-resizing" : ""}`}
+      style={{ "--sidebar-width": `${sidebar.width}px` } as React.CSSProperties}
       initial={{ opacity: 0 }}
     >
       <TitleBar
+        surface={surface}
+        title={surface === "home" ? copy.overview : surface === "browser" ? copy.browser : surface === "setup" ? copy.setup : surface === "mcp" ? studio.tools : surface === "activity" ? copy.activity : surface === "settings" ? copy.settings : surface === "guide" ? copy.guide : "Updates"}
+        openCommands={() => setCommandOpen(true)}
         copy={copy}
         devProfile={devProfile}
         draggable={surface !== "browser"}
@@ -414,23 +402,25 @@ function LauncherShell({
         toggleSidebar={toggleSidebar}
       />
 
-      {compactSidebar && sidebarOpen ? (
-        <button
+      <LayoutGroup id="maria-shell">
+      <AnimatePresence>{compactSidebar && sidebarOpen ? (
+        <motion.button
           aria-label={copy.hideSidebar}
           className="sidebar-backdrop"
-          onClick={() => setSidebarOpen(false)}
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          onClick={sidebar.closeOverlay}
           type="button"
         />
-      ) : null}
+      ) : null}</AnimatePresence>
 
       <motion.aside
-        animate={{ x: sidebarOpen ? 0 : -16, opacity: sidebarOpen ? 1 : 0 }}
-        style={{ width: sidebarOpen ? "var(--sidebar-width)" : 0, pointerEvents: sidebarOpen ? "auto" : "none" }}
+        animate={{ width: compactSidebar ? sidebar.width : sidebarOpen ? sidebar.width : 76, x: compactSidebar && !sidebarOpen ? -sidebar.width : 0, opacity: compactSidebar && !sidebarOpen ? 0 : 1 }}
+        style={{ pointerEvents: compactSidebar && !sidebarOpen ? "none" : "auto" }}
         className="app-sidebar"
-        aria-hidden={!sidebarOpen}
-        inert={!sidebarOpen}
+        aria-hidden={compactSidebar && !sidebarOpen}
+        inert={compactSidebar && !sidebarOpen}
         initial={false}
-        transition={{ type: "spring", duration: 0.24, bounce: 0 }}
+        transition={sidebar.resizing || sidebar.switchingMode || reducedMotion ? { duration: 0 } : SPRING}
       >
         <div className="sidebar-clip">
           <div className="sidebar-content">
@@ -443,7 +433,7 @@ function LauncherShell({
 
             </div>
 
-            <button className="studio-command-trigger" onClick={() => setCommandOpen(true)}><Icon name="globe" /><span>{studio.command}</span><kbd>{snapshot.platform === "darwin" ? "⌘ K" : "Ctrl K"}</kbd></button>
+            <button className="studio-command-trigger" title={`${studio.command} (⌘ K)`} aria-label={studio.command} onClick={() => setCommandOpen(true)}><Icon name="globe" /><span>{studio.command}</span><kbd>{snapshot.platform === "darwin" ? "⌘ K" : "Ctrl K"}</kbd></button>
             <nav className="sidebar-nav" aria-label={copy.workspace}>
               <SidebarGroup label={copy.workspace}>
                 <SidebarItem active={surface === "home"} icon="globe" label={copy.overview} onClick={() => navigateSurface("home")} />
@@ -485,7 +475,7 @@ function LauncherShell({
             </nav>
 
             <div className="sidebar-footer">
-              <div className="studio-sidebar-status"><span className={`studio-indicator ${browser?.webAccess?.status === "paused" ? "needs-attention" : browser?.authenticated ? "is-ready" : ""}`} /><span>{browser?.webAccess?.status === "paused" ? studio.attention : browser?.authenticated ? studio.connected : studio.signIn}</span><small>v{snapshot.version}</small></div>
+              <div className="studio-sidebar-status"><span className={`studio-indicator ${browser?.webAccess?.status === "paused" ? "needs-attention" : browser?.authenticated ? "is-ready" : ""}`} /><span>{connection.status?.phase === "recovering" ? "Reconnecting" : connection.status?.nativeAvailable ? studio.connected : connection.checking ? studio.checking : studio.attention}</span><small>v{snapshot.version}</small></div>
                 <SidebarItem
                   active={surface === "updates"}
                   icon="update"
@@ -502,18 +492,27 @@ function LauncherShell({
             </div>
           </div>
         </div>
+        {!compactSidebar && sidebarOpen ? <div className="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label={copy.resizeSidebar} aria-valuemin={240} aria-valuemax={420} aria-valuenow={sidebar.width} tabIndex={0} {...sidebar.resizeProps} /> : null}
       </motion.aside>
+      </LayoutGroup>
 
       <CommandPalette open={commandOpen} close={() => setCommandOpen(false)} navigate={navigateSurface} language={language} />
-      <section className="workspace">
+      <section className="workspace" ref={workspaceRef}>
+        <AnimatePresence>{operation?.status === "running" && surface !== "browser" ? <motion.aside className="runtime-operation" initial={{ opacity: 0, y: 18, scale: .94 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: .97 }} transition={SPRING} role="status"><Icon name="activity" /><span>{operation.message}</span><button onClick={() => navigateSurface("activity")}>{copy.activity}</button></motion.aside> : null}</AnimatePresence>
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
-            animate={{ opacity: 1 }}
-            className="surface-transition"
-            exit={{ opacity: 0 }}
-            initial={{ opacity: 0 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            className={`surface-transition${surface === "browser" ? " is-native-surface" : ""}`}
+            exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: surface === "browser" ? 0 : -8, scale: surface === "browser" ? 1 : .99 }}
+            initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: surface === "browser" ? 0 : 22, scale: surface === "browser" ? 1 : .985 }}
             key={surface}
-            transition={{ duration: 0.16 }}
+            transition={reducedMotion ? { duration: 0 } : SURFACE_SPRING}
+            onAnimationComplete={() => {
+              if (surfaceRef.current !== surface) return;
+              setSurfaceReady(true);
+              const viewport = workspaceRef.current?.querySelector<HTMLElement>(".content-scroll, .maria-page") ?? workspaceRef.current?.querySelector<HTMLElement>(".surface-transition");
+              if (viewport) viewport.scrollTop = scrollPositions.current.get(surface) ?? 0;
+            }}
           >
             {surface === "home" ? <MariaHome snapshot={{ ...snapshot, browser }} navigate={navigateSurface} /> : null}
             {surface === "updates" ? <MariaUpdates snapshot={{ ...snapshot, browser, operation }} install={installUpdate} /> : null}
@@ -608,12 +607,16 @@ function LauncherShell({
 }
 
 function TitleBar({
+  surface, title, openCommands,
   copy,
   devProfile,
   draggable,
   sidebarOpen,
   toggleSidebar,
 }: {
+  surface: Surface;
+  title: string;
+  openCommands: () => void;
   copy: Copy;
   devProfile: boolean;
   draggable: boolean;
@@ -621,7 +624,7 @@ function TitleBar({
   toggleSidebar: () => void;
 }) {
   return (
-    <header className={`app-titlebar${draggable ? " draggable" : ""}`}>
+    <header className={`app-titlebar${draggable ? " draggable" : ""}`} data-surface={surface}>
       <div className="titlebar-left no-drag">
         <IconButton
           icon="sidebar"
@@ -629,7 +632,9 @@ function TitleBar({
           onClick={toggleSidebar}
         />
         {devProfile ? <span className="titlebar-dev-profile">{copy.devBadge}</span> : null}
+        {surface !== "browser" ? <span className="titlebar-breadcrumb"><span>Maria</span><Icon name="chevron" /><strong>{title}</strong></span> : null}
       </div>
+      {surface !== "browser" ? <button className="titlebar-search no-drag" onClick={openCommands} aria-label="Open page search"><Icon name="globe" /><kbd>⌘ K</kbd></button> : null}
     </header>
   );
 }
@@ -661,17 +666,20 @@ function SidebarItem({
   tone?: "update";
 }) {
   return (
-    <button
+    <motion.button
+      aria-label={label} title={label}
+      whileHover={{ x: 2 }} whileTap={{ scale: .96 }}
       aria-current={active ? "page" : undefined}
       className={`sidebar-item${active ? " is-active" : ""}${tone === "update" ? " is-update" : ""}`}
       disabled={disabled}
       onClick={onClick}
       type="button"
     >
+      {active ? <motion.i className="sidebar-selection" layoutId="sidebar-selection" transition={SPRING} /> : null}
       {icon === "mcp" ? <McpMark /> : <Icon name={icon} />}
       <span>{label}</span>
       {badge ? <i className="sidebar-item-badge">{badge}</i> : null}
-    </button>
+    </motion.button>
   );
 }
 
@@ -1417,6 +1425,8 @@ function McpSurface({
   );
 }
 
+const activityPreferences = { query: "", level: "all" };
+
 function ActivitySurface({
   copy,
   language,
@@ -1428,8 +1438,9 @@ function ActivitySurface({
 }) {
   const logs = useActivityLogs();
   const s = studioCopy(language);
-  const [query, setQuery] = useState("");
-  const [level, setLevel] = useState("all");
+  const [query, setQuery] = useState(activityPreferences.query);
+  const [level, setLevel] = useState(activityPreferences.level);
+  useEffect(() => { activityPreferences.query = query; activityPreferences.level = level; }, [query, level]);
   const [paused, setPaused] = useState(false);
   const [frozen, setFrozen] = useState<typeof logs>([]);
   const shown = (paused ? frozen : logs).filter(record => (level === "all" || record.level === level)
@@ -1638,6 +1649,7 @@ function SettingsSurface({
           <small>
             {devProfile ? `${copy.devBadge} · ${snapshot.profilePaths.coreHome} · ` : ""}
             {platformLabel(snapshot.platform)} · v{snapshot.version}
+            {snapshot.build ? ` · ${snapshot.build.sourceCommit?.slice(0, 8) ?? "source build"}${snapshot.build.localChanges ? " · local changes" : ""}` : ""}
           </small>
         </span>
       </div>
@@ -1665,7 +1677,7 @@ function ContentSurface({
       <div className={`content-scroll${narrow ? " is-narrow" : ""}${fit ? " is-fit" : ""}`}>
         <header className="surface-header">
           {eyebrow ? <span>{eyebrow}</span> : null}
-          <h1>{title}</h1>
+          <KineticHeading text={title} />
           {subtitle ? <p>{subtitle}</p> : null}
         </header>
         {children}
@@ -2059,7 +2071,8 @@ function Switch({
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <button
+    <motion.button
+      whileTap={{ scale: .92 }}
       aria-checked={checked}
       aria-label={label}
       className={`switch${checked ? " is-on" : ""}`}
@@ -2068,8 +2081,8 @@ function Switch({
       role="switch"
       type="button"
     >
-      <span />
-    </button>
+      <motion.span animate={{ x: checked ? 16 : 0 }} transition={SPRING} />
+    </motion.button>
   );
 }
 
@@ -2256,18 +2269,20 @@ function McpMark() {
 function LaunchLoading() {
   return (
     <main className="launch-loading">
-      <BrandMark />
+      <CinematicMark large />
+      <p>Opening your workspace</p>
       <span />
     </main>
   );
 }
 
-function FatalMessage({ message }: { message: string }) {
+function FatalMessage({ message, retry }: { message: string; retry?: () => void }) {
   return (
     <main className="fatal-message">
       <BrandMark />
       <h1>Maria WebGPT</h1>
       <p>{message}</p>
+      {retry ? <button className="button-primary" onClick={retry}>Try connecting again</button> : null}
     </main>
   );
 }

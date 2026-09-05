@@ -30,7 +30,7 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
-      - name: Resolve and, after green main CI, create the version tag
+      - name: Resolve the immutable release candidate
         id: release
         shell: bash
         env:
@@ -57,16 +57,11 @@ jobs:
 
             if tagged_sha="$(git rev-list -n 1 "$tag" 2>/dev/null)"; then
               test "$tagged_sha" = "$source_sha"
-              if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-                publish=false
-              fi
-            else
-              git config user.name "github-actions[bot]"
-              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-              git tag -a "$tag" "$source_sha" -m "Maria WebGPT ${version}"
-              git push origin "refs/tags/${tag}"
             fi
           fi
+
+          existing_draft="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+          if [ "$existing_draft" = false ]; then publish=false; fi
 
           {
             echo "publish=$publish"
@@ -94,6 +89,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.source_sha }}
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
@@ -161,6 +157,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      RELEASE_SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+      RELEASE_EVENT_NAME: ${{ github.event_name }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -225,6 +223,22 @@ jobs:
             echo "checksums.txt is missing entries for:$missing" >&2
             exit 1
           fi
+      - name: Tag only the fully verified release source
+        run: |
+          set -euo pipefail
+          git fetch origin main --tags
+          test "$(git rev-parse HEAD)" = "$RELEASE_SOURCE_SHA"
+          if [ "$RELEASE_EVENT_NAME" = "workflow_run" ]; then
+            test "$(git rev-parse origin/main)" = "$RELEASE_SOURCE_SHA"
+          fi
+          if tagged_sha="$(git rev-list -n 1 "$RELEASE_TAG" 2>/dev/null)"; then
+            test "$tagged_sha" = "$RELEASE_SOURCE_SHA"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$RELEASE_TAG" "$RELEASE_SOURCE_SHA" -m "Maria WebGPT $RELEASE_TAG"
+            git push origin "refs/tags/$RELEASE_TAG"
+          fi
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -232,23 +246,23 @@ jobs:
           mapfile -d '' release_files < <(find release-assets -type f -print0)
           test "${#release_files[@]}" -gt 0
           release_flags=(--latest)
+          notes_flags=(--generate-notes)
+          notes_file="docs/release-${RELEASE_TAG#v}.md"
+          if [ -f "$notes_file" ]; then notes_flags=(--notes-file "$notes_file"); fi
           if [[ "$RELEASE_TAG" == *-* ]]; then
             release_flags=(--prerelease --latest=false)
           fi
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          if existing_draft="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null)"; then
+            test "$existing_draft" = true
             gh release upload "$RELEASE_TAG" "${release_files[@]}" \
               --repo "$GITHUB_REPOSITORY" \
               --clobber
-            gh release edit "$RELEASE_TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --draft=false \
-              "${release_flags[@]}"
           else
             gh release create "$RELEASE_TAG" "${release_files[@]}" \
               --repo "$GITHUB_REPOSITORY" \
               --title "$RELEASE_TAG" \
-              "${release_flags[@]}" \
-              --generate-notes
+              --draft \
+              "${notes_flags[@]}"
           fi
 
           published_manifest="$(mktemp)"
@@ -288,3 +302,8 @@ jobs:
             --json assets \
             --jq '.assets[] | select(.name == "checksums.txt") | .digest')"
           test "sha256:$local_manifest_digest" = "$remote_manifest_digest"
+          if [ "$RELEASE_EVENT_NAME" = "workflow_run" ]; then
+            git fetch origin main
+            test "$(git rev-parse origin/main)" = "$RELEASE_SOURCE_SHA"
+          fi
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false "${release_flags[@]}"

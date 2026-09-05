@@ -8,6 +8,7 @@ function subscription(channel, listener) {
 
 contextBridge.exposeInMainWorld("codexWebLauncher", {
   snapshot: () => ipcRenderer.invoke("launcher:snapshot"),
+  onShortcut: listener => subscription("launcher:shortcut", listener),
   setLanguage: (language) => ipcRenderer.invoke("launcher:set-language", language),
   connectionStatus: () => ipcRenderer.invoke("launcher:connection-status"),
   reviewWebAccess: () => ipcRenderer.invoke("launcher:browser-access-review"),

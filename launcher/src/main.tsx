@@ -4,6 +4,7 @@ import { App } from "./App";
 import "./tokens.css";
 import "./styles.css";
 import "./studio.css";
+import "./kinetic.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

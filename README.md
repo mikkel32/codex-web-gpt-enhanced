@@ -12,11 +12,17 @@ models available. Choose a native model for your Codex account, or choose a
 **Maria Web** model to use your ChatGPT session. Your task, files, tools, and results
 stay together in Codex.
 
-## Maria 5.6
+## Maria 5.7
 
-A redesigned desktop workspace with a unified copper identity, one-page onboarding,
-account-based model setup, keyboard page search (Cmd/Ctrl+K), conversation shortcuts,
-and searchable activity. Setup checks available models without sending a test message.
+A cinematic motion system brings spring-driven navigation, an interactive depth mark,
+masked heading reveals, and coordinated page transitions. The sidebar folds into an
+icon rail and remembers its width and desktop preference.
+
+Use Cmd/Ctrl+B to toggle the sidebar, Cmd/Ctrl+K for page search, and Cmd/Ctrl+1–8
+to switch pages. Drag the sidebar edge to resize it; double-click to reset its width.
+Connection checks are shared and visibility-aware, native browser geometry is
+coordinated, and failed startup connections can be retried. Setup still sends no
+test message.
 
 ## Start here
 

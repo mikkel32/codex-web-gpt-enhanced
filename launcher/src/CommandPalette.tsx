@@ -26,10 +26,13 @@ export function CommandPalette({ open, close, navigate, language }: {
   const results = pages.filter(page => page.label.toLocaleLowerCase().includes(query.toLocaleLowerCase().trim()));
   useEffect(() => {
     if (open) { setQuery(""); setSelected(0); dialog.current?.showModal(); input.current?.focus(); }
-    else dialog.current?.close();
+    else {
+      const timer = setTimeout(() => dialog.current?.close(), 170);
+      return () => clearTimeout(timer);
+    }
   }, [open]);
   const choose = (surface: Surface) => { close(); navigate(surface); };
-  return <dialog ref={dialog} className="command-palette" aria-label={s.command} onCancel={close}
+  return <dialog ref={dialog} className="command-palette" data-closing={!open} aria-label={s.command} onCancel={event => { event.preventDefault(); close(); }}
     onClick={event => { if (event.target === dialog.current) close(); }}>
     <div className="command-inner">
       <div className="command-input"><Icon name="globe" /><input ref={input} placeholder={s.search} aria-label={s.search}

@@ -6,6 +6,7 @@ import { WebAccessNotice } from "./WebAccessNotice";
 import readme from "../../README.md?raw";
 import { BrandMark } from "./BrandMark";
 import { studioCopy } from "./studio-copy";
+import { Reveal, CinematicMark, KineticHeading } from "./motion-system";
 
 export const MADE_WITH_LOVE = "Mikkel & Maria";
 
@@ -23,7 +24,7 @@ export function MariaHome({ snapshot, navigate }: {
   const tabs = snapshot.browser?.tabs ?? [];
   const paused = snapshot.browser?.webAccess?.status === "paused";
   const accountReady = !paused && (manual ? snapshot.state.mcpSetupComplete : snapshot.browser?.authenticated);
-  const webReady = !paused && (manual ? snapshot.state.mcpSetupComplete : snapshot.browser?.authenticated && snapshot.state.codexCatalogVerified);
+  const webReady = (manual ? snapshot.state.mcpSetupComplete : snapshot.browser?.authenticated && snapshot.state.codexCatalogVerified);
   const modelStep = { id: "models", title: s.manageModels, done: snapshot.state.codexCatalogVerified, surface: "setup" as const };
   const toolStep = { id: "tools", title: s.tools, done: snapshot.state.mcpSetupComplete, surface: "mcp" as const };
   const steps = manual ? [toolStep, modelStep] : [
@@ -43,14 +44,14 @@ export function MariaHome({ snapshot, navigate }: {
     catch (cause) { setActionError(cause instanceof Error ? cause.message : String(cause)); }
   };
   return <div className="studio-home maria-page">
-    <header className="studio-page-heading">
-      <div><span className="maria-eyebrow">MARIA / {s.workspace}</span><h1>{s.greeting}</h1><p>{s.intro}</p></div>
+    <Reveal className="studio-page-heading" delay={.03}>
+      <div><span className="maria-eyebrow">MARIA / {s.workspace}</span><KineticHeading text={s.greeting} /><p>{s.intro}</p></div>
       <button className="button-primary" onClick={() => navigate("browser")}>{s.emptyAction}<Icon name="forward" /></button>
-    </header>
+    </Reveal>
     <WebAccessNotice access={snapshot.browser?.webAccess} openBrowser={() => navigate("browser")} />
     <div className="studio-dashboard">
       <div className="studio-main-column">
-        <section className="studio-conversations" aria-label={s.conversations}>
+        <Reveal className="studio-conversations" delay={.1}>
           <div className="studio-section-heading"><h2>{s.conversations}<span className="studio-count">{tabs.length}</span></h2>
             {tabs.length ? <button className="text-button" onClick={() => navigate("browser")}>{s.openWorkspace}<Icon name="forward" /></button> : null}
           </div>
@@ -60,27 +61,27 @@ export function MariaHome({ snapshot, navigate }: {
               <span className="studio-session-copy"><strong>{tab.title || "ChatGPT"}</strong><small>{tab.interactionMode === "manual" ? s.manual : s.automatic}</small></span>
               <span className={`studio-status ${tab.status === "running" ? "is-running" : tab.status === "error" ? "is-error" : ""}`}><i />{tab.status === "running" ? s.working : tab.status === "error" ? s.attention : s.retained}</span><Icon name="forward" />
             </button>)}</div> : <div className="studio-empty-conversations">
-            <BrandMark />
+            <CinematicMark active={(status?.activeBrowserTurns ?? 0) > 0} />
             <h3>{s.emptyTitle}</h3><p>{s.emptyBody}</p>
             <button className="button-secondary" onClick={() => navigate("setup")}>{s.manageModels}<Icon name="forward" /></button>
           </div>}
-        </section>
+        </Reveal>
         <section className="studio-models" aria-label={s.modelTitle}>
           <div className="studio-section-heading"><h2>{s.modelTitle}</h2></div>
           <div className="studio-model-grid">
-            <article className="studio-model-card"><span className="studio-model-icon"><Icon name="setup" /></span><span className="studio-model-kind">NATIVE</span>
+            <Reveal className="studio-model-card" delay={.22}><span className="studio-model-icon"><Icon name="setup" /></span><span className="studio-model-kind">NATIVE</span>
               <h3>Codex</h3><p>{s.nativeBody}</p>
               <button className="text-button" onClick={() => void copyCommand()}>{copied ? s.copied : s.copyNative}<Icon name={copied ? "check" : "external"} /></button>
-            </article>
-            <article className="studio-model-card is-web"><span className="studio-model-icon"><Icon name="globe" /></span><span className="studio-model-kind">WEB</span>
+            </Reveal>
+            <Reveal className="studio-model-card is-web" delay={.28}><span className="studio-model-icon"><Icon name="globe" /></span><span className="studio-model-kind">WEB</span>
               <h3>ChatGPT</h3><p>{s.webBody}</p>
               <button className="text-button" onClick={() => navigate("setup")}>{webReady ? s.manageModels : s.finishSetup}<Icon name="forward" /></button>
-            </article>
+            </Reveal>
           </div>
         </section>
         <button className="studio-guide-card" onClick={() => navigate("guide")}><span className="studio-guide-icon"><Icon name="logs" /></span><span><strong>{s.guide}</strong><small>{s.guideBody}</small></span><Icon name="forward" /></button>
       </div>
-      <aside className="studio-context-column">
+      <Reveal className="studio-context-column" delay={.18}>
         <section className="studio-connection-panel" aria-label={s.connections}>
           <div className="studio-section-heading"><h2>{s.connections}</h2><button className="icon-button" aria-label="Refresh connection status" disabled={checking} onClick={refresh}><Icon name="reload" /></button></div>
           <button className="studio-connection-row" onClick={() => navigate("setup")}><Icon name="setup" /><span><strong>{s.native}</strong><small>{development ? "DEV" : nativeReady ? s.connected : checking ? s.checking : s.attention}</small></span><span className={`studio-indicator ${nativeReady ? "is-ready" : "needs-attention"}`} title={nativeReady ? s.ready : s.attention} /><span className="sr-only">{nativeReady ? s.ready : checking ? s.checking : s.attention}</span></button>
@@ -97,7 +98,7 @@ export function MariaHome({ snapshot, navigate }: {
           </button>)}
         </section> : <section className="studio-ready-panel"><Icon name="check" /><h3>{s.modelReady}</h3><p>{s.nativeAvailable}</p><button className="text-button" onClick={() => navigate("settings")}>{s.edit}<Icon name="forward" /></button></section>}
         <div className="studio-build-note"><span>MARIA</span><span>{development ? "DEV / " : ""}{snapshot.version}</span></div>
-      </aside>
+      </Reveal>
     </div>
     {actionError ? <p role="alert" className="studio-inline-error">{actionError}</p> : null}
   </div>;

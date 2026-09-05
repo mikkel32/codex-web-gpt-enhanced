@@ -117,7 +117,7 @@ test("packaged launcher owns a detached checksummed updater for every release pl
 test("CI packages and smoke-launches on macOS, Windows, and Linux", () => {
   const ci = fs.readFileSync(path.join(repositoryRoot, ".github", "workflows", "ci.yml"), "utf8");
   const release = fs.readFileSync(path.join(repositoryRoot, ".github", "workflows", "release.yml"), "utf8");
-  assert.match(ci, /macos-15, ubuntu-latest, windows-latest/);
+  assert.match(ci, /macos-15, macos-15-intel, ubuntu-latest, windows-latest/);
   assert.match(ci, /bun run app:package/);
   assert.match(ci, /bun run app:smoke/);
   assert.match(ci, /prepare-linux-libnotify\.sh/);
@@ -135,7 +135,8 @@ test("CI packages and smoke-launches on macOS, Windows, and Linux", () => {
   assert.match(release, /prepare-windows-baseline-bun\.ps1 -Version 1\.4\.0/);
   assert.match(release, /codesign --verify --deep --strict --verbose=2/);
   assert.match(release, /Maria WebGPT\.app/);
-  assert.doesNotMatch(release, /gh release create[\s\S]*?--draft/);
+  assert.match(release, /gh release create[\s\S]*?--draft/);
+  assert.ok(release.lastIndexOf("--draft=false") > release.indexOf("remote_manifest_digest="));
 });
 
 test("Linux AppImage fallback uses one owned extraction and removes it on exit", {

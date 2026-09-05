@@ -1,6 +1,6 @@
 {
   "name": "codex-web-gpt-launcher",
-  "version": "5.6.2",
+  "version": "5.7.0",
   "private": true,
   "description": "Desktop control center for Codex ChatGPT Web",
   "author": "Mikkel & Maria",
@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit",
     "build:renderer": "vite build",
     "build": "bun run typecheck && bun run build:renderer",
-    "build:runtime": "bun run scripts/prepare-runtime.cjs",
+    "build:runtime": "bun run scripts/prepare-runtime.cjs && bun run scripts/write-build-info.cjs",
     "package": "bun run build && bun run build:runtime && bun run scripts/prepare-browser-connector.cjs && bun run scripts/package.cjs",
     "package:mac": "bun run build && bun run build:runtime && bun run scripts/prepare-browser-connector.cjs && bun run scripts/package.cjs --mac",
     "package:win": "bun run build && bun run build:runtime && bun run scripts/package.cjs --win",
@@ -59,6 +59,7 @@
       "package.json"
     ],
     "extraResources": [
+      { "from": "build/build-info.json", "to": "build-info.json" },
       { "from": "../browser-connector/extension", "to": "browser-connector" },
       {
         "from": "build/runtime",

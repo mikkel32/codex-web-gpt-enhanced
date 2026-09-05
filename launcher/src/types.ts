@@ -74,6 +74,9 @@ export interface LogRecord {
 }
 
 export interface ConnectionStatus {
+  phase?: "online" | "recovering" | "offline" | "unconfigured" | "development";
+  checkedAt?: string;
+  latencyMs?: number;
   nativeAvailable: boolean;
   browserConnected: boolean;
   activeBrowserTurns: number;
@@ -106,6 +109,7 @@ export type UpdateState = ({ checkedAt?: string; authenticated?: boolean } & (
   | { status: "error" | "access-required"; message: string; version?: string }));
 
 export interface LauncherSnapshot {
+  build?: { version: string; sourceCommit: string | null; builtAt: string; localChanges: boolean } | null;
   profile: LauncherProfile;
   profilePaths: {
     coreHome: string;
@@ -132,6 +136,7 @@ export interface LauncherSnapshot {
 }
 
 export interface LauncherApi {
+  onShortcut(listener: (shortcut: { type: "commands" | "sidebar" | "navigate"; index?: number }) => void): () => void;
   copyNativeCodexCommand(): Promise<boolean>;
   signInBrowsers(): Promise<Array<{ id: "chrome" | "edge" | "safari"; name: string; available: boolean }>>;
   beginBrowserSignIn(browser: string): Promise<{ phase: string; code: string; expiresAt: number }>;

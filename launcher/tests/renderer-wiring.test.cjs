@@ -12,8 +12,9 @@ const preloadSource = fs.readFileSync(path.join(launcherRoot, "electron", "prelo
 
 test("embedded ChatGPT is measured only after its animated surface mounts", () => {
   assert.match(appSource, /const \[browserSlot, setBrowserSlot\] = useState<HTMLDivElement \| null>\(null\)/);
-  assert.match(appSource, /setBrowserSurfaceActive\(browserSurfaceActive\)\.then\(\(\) => \{/);
-  assert.match(appSource, /observer\.observe\(browserSlot\)/);
+  assert.match(appSource, /useBrowserViewport\(api!, browserSlot, browserSurfaceActive/);
+  const viewportSource = fs.readFileSync(path.join(launcherRoot, "src", "useBrowserViewport.ts"), "utf8");
+  assert.match(viewportSource, /observer\.observe\(slot\)/);
   assert.match(appSource, /ref=\{browserSlotRef\}/);
 });
 
@@ -135,7 +136,7 @@ test("Bigger Context stays optional without interrupting startup and retains its
     appSource,
     /const \[biggerContextRecommendationOpen, setBiggerContextRecommendationOpen\] = useState\(false\)/,
   );
-  assert.match(appSource, /&& !biggerContextRecommendationOpen[\s\S]*?&& !commandOpen;/);
+  assert.match(appSource, /&& !biggerContextRecommendationOpen[\s\S]*?&& !commandOpen[\s\S]*?&& !overlayPresent;/);
   assert.match(appSource, /updateState\(await api!\.setBiggerContext\(enabled\)\)/);
   assert.match(
     appSource,
