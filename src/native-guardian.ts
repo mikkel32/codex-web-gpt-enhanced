@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, openSync, closeSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, closeSync, readFileSync, rmSync, statSync, writeFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { uptime } from "node:os";
+import { Database } from "bun:sqlite";
 import { atomicWriteFile, assertDurableRuntimeCommand, getConfigDir, getConfigPath, loadConfig, type AppConfig } from "./config";
 import { processRunning } from "./process";
 
@@ -37,6 +38,20 @@ async function healthy(config: AppConfig): Promise<boolean> {
   } catch { return false; }
 }
 
+/** OS-released SQLite locking prevents stale-file reclamation races between guardian starts. */
+export function acquireGuardianLease(path: string): Database | undefined {
+  const database = new Database(path, { create: true });
+  try { chmodSync(path, 0o600); } catch {}
+  try {
+    database.exec("PRAGMA busy_timeout=0; BEGIN EXCLUSIVE");
+    return database;
+  } catch (error) {
+    database.close();
+    if (["SQLITE_BUSY", "SQLITE_LOCKED"].includes((error as { code?: string }).code ?? "")) return undefined;
+    throw error;
+  }
+}
+
 export async function runNativeGuardian(): Promise<void> {
   const initial = loadConfig();
   if (initial.purpose === "dev-harness" || initial.browserHost !== "launcher") {
@@ -44,6 +59,14 @@ export async function runNativeGuardian(): Promise<void> {
   }
   const runtime = join(getConfigDir(), "runtime");
   mkdirSync(runtime, { recursive: true, mode: 0o700 });
+  const leasePath = join(runtime, "native-guardian-lease.sqlite");
+  const lease = acquireGuardianLease(leasePath);
+  if (!lease) return;
+  try { await runLeasedNativeGuardian(runtime); }
+  finally { lease.close(); }
+}
+
+async function runLeasedNativeGuardian(runtime: string): Promise<void> {
   const lock = join(runtime, "native-guardian.lock");
   const marker = join(runtime, "native-guardian.json");
   const ownerPath = join(runtime, "launcher-supervisor.json");
@@ -61,7 +84,7 @@ export async function runNativeGuardian(): Promise<void> {
     try { previous = JSON.parse(readFileSync(lock, "utf8")); } catch { return; }
     if (Date.parse(previous.startedAt) >= boot - 5000 && processRunning(previous.pid)) return;
     rmSync(lock);
-    return runNativeGuardian();
+    return runLeasedNativeGuardian(runtime);
   }
   atomicWriteFile(marker, JSON.stringify(identity));
   let stopped = false;
@@ -78,9 +101,9 @@ export async function runNativeGuardian(): Promise<void> {
         const pausePath = join(runtime, "native-recovery-pause.json");
         const pause = existsSync(pausePath) ? JSON.parse(readFileSync(pausePath, "utf8")) : null;
         const paused = pause?.version === 1 && Date.parse(pause.updatedAt) >= boot - 5000 && processRunning(pause.pid);
-        if (!paused && journal?.active === true && !await healthy(config)) {
-          const owner = readOwner(ownerPath);
-          if (guardianMayRecover(owner, process.pid, processRunning, boot)) {
+        const owner = readOwner(ownerPath);
+        if (!paused && journal?.active === true && guardianMayRecover(owner, process.pid, processRunning, boot)) {
+          if (!await healthy(config)) {
             assertDurableRuntimeCommand(config.runtimeCommand);
             const before = existsSync(ownerPath) ? readFileSync(ownerPath, "utf8") : null;
             const logDir = join(getConfigDir(), "logs"); mkdirSync(logDir, { recursive: true, mode: 0o700 });
@@ -107,7 +130,7 @@ export async function runNativeGuardian(): Promise<void> {
         failures = Math.min(failures + 1, 5);
         console.error(`[maria-native-recovery] ${error instanceof Error ? error.message : String(error)}`);
       }
-      const delay = Math.min(30_000, 1000 * 2 ** failures);
+      const delay = failures === 0 ? 5_000 : Math.min(30_000, 1000 * 2 ** failures);
       for (let waited = 0; waited < delay && !stopped; waited += 250) await new Promise(resolve => setTimeout(resolve, 250));
     }
   } finally {

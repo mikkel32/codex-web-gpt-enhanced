@@ -12,7 +12,16 @@ export function chatGptConversationKey(parsed: CodexParsedRequest, namespace: st
 }
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
-const historyDigest = (messages: CodexMessage[]) => digest(JSON.stringify(messages.map(({ timestamp: _timestamp, ...message }) => message)));
+function historyDigest(messages: CodexMessage[]): string {
+  // Preserve the existing JSON-array digest without allocating another complete transcript.
+  const hash = createHash("sha256").update("[");
+  for (let index = 0; index < messages.length; index++) {
+    const { timestamp: _timestamp, ...message } = messages[index]!;
+    if (index) hash.update(",");
+    hash.update(JSON.stringify(message));
+  }
+  return hash.update("]").digest("hex");
+}
 const answerText = (message: CodexMessage) => message.role === "assistant"
   ? message.content.filter(part => part.type === "text").map(part => part.text).join("").trim()
   : "";
@@ -23,10 +32,15 @@ export interface ConversationCursor { count: number; prefix: string; answer: str
 export function retainedConversationResumeRequest(parsed: CodexParsedRequest, cursor?: ConversationCursor): CodexParsedRequest | undefined {
   const messages = parsed.context.messages;
   if (!cursor || cursor.count > messages.length || historyDigest(messages.slice(0, cursor.count)) !== cursor.prefix) return undefined;
-  const matches = messages.flatMap((message, index) => index >= cursor.count && answerText(message)
-    && digest(answerText(message)) === cursor.answer ? [index] : []);
-  if (matches.length !== 1 || matches[0] === messages.length - 1) return undefined;
-  return { ...parsed, context: { ...parsed.context, messages: messages.slice(matches[0]! + 1) } };
+  let match = -1;
+  for (let index = cursor.count; index < messages.length; index++) {
+    const text = answerText(messages[index]!);
+    if (!text || digest(text) !== cursor.answer) continue;
+    if (match !== -1) return undefined;
+    match = index;
+  }
+  if (match === -1 || match === messages.length - 1) return undefined;
+  return { ...parsed, context: { ...parsed.context, messages: messages.slice(match + 1) } };
 }
 
 /** Metadata only: Codex owns the history; ChatGPT owns its saved document. No third transcript. */

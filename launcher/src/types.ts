@@ -65,6 +65,13 @@ export interface LogRecord {
   detail: Record<string, unknown>;
 }
 
+export interface ConnectionStatus {
+  nativeAvailable: boolean;
+  browserConnected: boolean;
+  activeBrowserTurns: number;
+  recoveryAvailable?: boolean;
+}
+
 export interface DoctorCheck {
   id: string;
   status: "ok" | "warning" | "error";
@@ -129,7 +136,7 @@ export interface LauncherApi {
   enableSafariConnector(): Promise<boolean>;
   snapshot(): Promise<LauncherSnapshot>;
   setLanguage(language: Language): Promise<LauncherState>;
-  connectionStatus(): Promise<{ nativeAvailable: boolean; browserConnected: boolean; activeBrowserTurns: number; recoveryAvailable?: boolean }>;
+  connectionStatus(): Promise<ConnectionStatus>;
   completeOnboarding(language: Language, browserInteractionMode: BrowserInteractionMode): Promise<LauncherState>;
   openExternal(url: string): Promise<boolean>;
   setBrowserBounds(bounds: { x: number; y: number; width: number; height: number }): Promise<boolean>;

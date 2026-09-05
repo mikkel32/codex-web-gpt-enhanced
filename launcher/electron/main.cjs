@@ -333,13 +333,11 @@ function createWindow({ logger, stateStore, windowStatePath, startHidden }) {
     title: LAUNCHER_PROFILE.displayName,
     icon: APP_ICON_PATH,
     show: false,
-    backgroundColor: isMac ? "#00000000" : "#181818",
+    backgroundColor: "#101010",
     titleBarStyle: isMac ? "hiddenInset" : "hidden",
-    transparent: isMac,
+    transparent: false,
     ...(isMac ? {
       trafficLightPosition: { x: 16, y: 17 },
-      vibrancy: "under-window",
-      visualEffectState: "active",
     } : {
       titleBarOverlay: {
         color: "#181818",

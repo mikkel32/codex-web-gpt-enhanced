@@ -1,6 +1,6 @@
 {
   "name": "codex-chatgpt-web",
-  "version": "5.3.0",
+  "version": "5.4.0",
   "private": true,
   "description": "A focused local Responses bridge that runs Codex tasks through a user-authenticated ChatGPT web session.",
   "repository": {
@@ -45,6 +45,7 @@
     "launcher": "bun run scripts/start-launcher.ts",
     "app": "bun run scripts/start-launcher.ts",
     "app:package": "bun run --cwd launcher package",
+    "app:performance": "bun run launcher:build && node launcher/scripts/smoke-ui-performance.cjs",
     "app:smoke": "bun run --cwd launcher smoke:package",
     "launcher:dev": "bun run --cwd launcher dev",
     "launcher:audit": "bun run --cwd launcher audit",

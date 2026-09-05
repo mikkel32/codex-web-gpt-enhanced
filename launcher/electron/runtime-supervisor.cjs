@@ -1131,6 +1131,14 @@ class RuntimeSupervisor {
   }
 
   async startDaemon(config) {
+    if (this.daemonStartPromise) return this.daemonStartPromise;
+    const pending = this.startDaemonOnce(config);
+    this.daemonStartPromise = pending;
+    try { return await pending; }
+    finally { if (this.daemonStartPromise === pending) this.daemonStartPromise = null; }
+  }
+
+  async startDaemonOnce(config) {
     if (this.daemon) {
       const child = this.daemon;
       const identity = Number.isInteger(child.pid)

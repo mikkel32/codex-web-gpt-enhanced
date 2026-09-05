@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Icon } from "./icons";
 import type { LauncherSnapshot, Surface } from "./types";
+import { useConnectionStatus } from "./useConnectionStatus";
 import readme from "../../README.md?raw";
 
 export const MADE_WITH_LOVE = "Made with love -- Maria GPT 6 Astra 👀";
@@ -9,77 +10,66 @@ export function MariaHome({ snapshot, navigate }: {
   snapshot: LauncherSnapshot;
   navigate: (surface: Surface) => void;
 }) {
-  const [status, setStatus] = useState<{ nativeAvailable: boolean; browserConnected: boolean; activeBrowserTurns: number; recoveryAvailable?: boolean } | null>(null);
-  const [checking, setChecking] = useState(false);
-  const [error, setError] = useState(false);
-  const [refresh, setRefresh] = useState(0);
+  const { status, checking, error, refresh } = useConnectionStatus();
   const [nativeCommandCopied, setNativeCommandCopied] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    let pending = false;
-    const check = async () => {
-      if (pending) return;
-      pending = true;
-      if (alive) setChecking(true);
-      try {
-        const next = await window.codexWebLauncher!.connectionStatus();
-        if (alive) { setStatus(next); setError(false); }
-      } catch { if (alive) setError(true); }
-      finally { pending = false; if (alive) setChecking(false); }
-    };
-    void check();
-    const timer = window.setInterval(() => void check(), 10_000);
-    return () => { alive = false; window.clearInterval(timer); };
-  }, [refresh]);
   const nativeReady = !error && status?.nativeAvailable === true;
   const development = snapshot.profile === "development";
   const manual = snapshot.state.browserInteractionMode === "manual";
+  const tabs = snapshot.browser?.tabs ?? [];
+  const activeTurns = status?.activeBrowserTurns ?? tabs.filter(tab => tab.status === "running").length;
   const steps = [
-    { title: manual ? "Connect your manual harness" : "Sign in to ChatGPT", done: manual ? snapshot.state.mcpSetupComplete : snapshot.browser?.authenticated, surface: manual ? "mcp" : "browser", body: manual ? "Link the connector for manual turns." : "Use your own ChatGPT session." },
-    { title: "Add your Web models", done: snapshot.state.codexCatalogVerified, surface: "setup", body: "Keep Codex models in the same picker." },
-    { title: "Give ChatGPT your Codex tools", done: snapshot.state.mcpSetupComplete, surface: "mcp", body: "Connect files, commands, and app tools." },
+    { id: "signin", title: manual ? "Connect your manual harness" : "Sign in to ChatGPT", done: manual ? snapshot.state.mcpSetupComplete : snapshot.browser?.authenticated, surface: manual ? "mcp" : "browser", body: manual ? "Link the connector for manual turns." : "Use a session from your existing browser." },
+    { id: "models", title: "Add your Web models", done: snapshot.state.codexCatalogVerified, surface: "setup", body: "Native and Web models, in the same Codex picker." },
+    { id: "tools", title: "Connect your workspace tools", done: snapshot.state.mcpSetupComplete, surface: "mcp", body: "Files, commands, and results in the same task." },
   ] as const;
-  return (
-    <div className="maria-page">
-      <header className="maria-hero">
-        <div className="maria-eyebrow"><span className="maria-spark">✦</span> {development ? "ISOLATED DEVELOPMENT WORKSPACE" : "YOUR MODELS. YOUR WORKSPACE."}</div>
-        <h1>A little more <span>possibility.</span></h1>
-        <p>Codex when you want it. ChatGPT when you need it.<br />One calm place to keep everything connected.</p>
+  const readyCount = steps.filter(step => step.done).length;
+  return <div className="maria-page moon-home">
+    <div className="moon-topline"><span className="maria-eyebrow">MARIA / MOONLIGHT</span><span className="moon-edition">{development ? "ISOLATED DEV" : "CODEX + CHATGPT"}</span></div>
+    <header className="maria-hero moon-hero">
+      <div className="moon-hero-copy"><h1>Your workspace,<br /><span>in a different light.</span></h1>
+        <p>A focused home for your models and conversations.<br />Keep building. Maria keeps the connection.</p>
         <div className="maria-hero-actions">
           <button className="button-primary" onClick={() => navigate("browser")}>Open ChatGPT <Icon name="forward" /></button>
           <button className="button-secondary" onClick={() => navigate("guide")}>Explore the guide <Icon name="logs" /></button>
         </div>
-        <div className="maria-orbit" aria-hidden="true"><i /><i /><b>M</b><span>✦</span></div>
-      </header>
-
-      <section className="maria-connections" aria-label="Connections">
-        <article className={`maria-connection ${nativeReady ? "is-ready" : ""}`}>
-          <div className="maria-card-top"><span className="maria-card-icon"><Icon name="activity" /></span><span className="maria-pill">{development ? "Separate production environment" : nativeReady ? status?.recoveryAvailable ? "Protected" : "Connected" : checking && !status ? "Checking" : "Needs setup"}</span></div>
-          <h2>Native Codex</h2>
-          <p>{development ? "This development window has its own browser, files, and port. Your installed Maria and native Codex settings stay separate." : status?.recoveryAvailable ? "Your native connection has independent recovery. It stays available after the window closes and restarts if the transport exits." : "Your regular models, reasoning controls, and tools. The connection stays available when Maria's window closes."}</p>
-          <button className="text-button" onClick={() => nativeReady ? navigate("guide") : navigate("setup")}>{nativeReady ? "How it works" : "Set up connection"} <Icon name="chevron" /></button>
-        </article>
-        <article className="maria-connection maria-web-connection">
-          <div className="maria-card-top"><span className="maria-card-icon"><Icon name="browser" /></span><span className="maria-pill">{manual ? "Manual mode" : "Automatic mode"}</span></div>
-          <h2>ChatGPT Web</h2>
-          <p>{manual ? "Choose your model, paste your prompt, and send. Maria brings the tools and results back to your Codex task." : "Your ChatGPT session, connected to your Codex workspace. Select a Maria Web model in Codex to get started."}</p>
-          <button className="text-button" onClick={() => navigate("settings")}>Choose how you work <Icon name="chevron" /></button>
-        </article>
-      </section>
-
-      <section className="maria-checklist" aria-label="Getting started">
-        <div className="maria-section-title"><div><span className="maria-eyebrow">MAKE YOURSELF AT HOME</span><h2>Your next steps</h2></div><span>{steps.filter(s => s.done).length} / 3 ready</span></div>
-        {steps.map((step, i) => <button key={step.title} className="maria-checklist-row" onClick={() => navigate(step.surface)}>
-          <span className={`maria-step-number ${step.done ? "is-done" : ""}`}>{step.done ? <Icon name="check" /> : i + 1}</span>
-          <span><strong>{step.title}</strong><small>{step.body}</small></span><Icon name="chevron" />
-        </button>)}
-      </section>
-
-      <div className="maria-connection-note" role="status"><Icon name={error ? "alert" : "info"} /><span>{error ? "Connection status is unavailable. Check Activity for details." : status?.activeBrowserTurns ? `${status.activeBrowserTurns} ChatGPT turn${status.activeBrowserTurns === 1 ? "" : "s"} running. Closing the window keeps your work going.` : "Close the window, keep your flow. Native Codex stays connected in the background."}</span><button className="text-button" disabled={checking} onClick={() => setRefresh(n => n + 1)}>{checking ? "Checking…" : "Refresh"}</button></div>
-      <div className="maria-connection-note"><Icon name="setup" /><span>Developing Maria? Open a direct native Codex session from your project terminal, even if Maria is completely stopped.</span><button className="text-button" onClick={() => void window.codexWebLauncher!.copyNativeCodexCommand().then(() => setNativeCommandCopied(true)).catch(() => setNativeCommandCopied(false))}>{nativeCommandCopied ? "Copied" : "Copy native command"}</button></div>
-      <footer className="maria-signature"><span>{MADE_WITH_LOVE}</span><span>v{snapshot.version}</span></footer>
-    </div>
-  );
+      </div>
+      <div className="moon-art" aria-hidden="true"><div className="moon-halo" /><div className="moon-disc" /><span className="moon-orbit-label">A SPACE FOR YOUR NEXT IDEA</span></div>
+    </header>
+    <section className="moon-pulse" aria-label="Workspace status">
+      <div><span className="moon-metric-label">NATIVE CODEX</span><strong><i className={nativeReady ? "moon-status is-ready" : "moon-status"} />{development ? "Separate" : nativeReady ? "Connected" : checking && !status ? "Checking" : error ? "Unavailable" : "Needs setup"}</strong></div>
+      <div><span className="moon-metric-label">WEB ACTIVITY</span><strong>{activeTurns ? `${activeTurns} running` : "Ready when you are"}</strong></div>
+      <div><span className="moon-metric-label">BROWSER WORKSPACE</span><strong>{tabs.length} / {snapshot.browser?.maxTabs ?? 5} tabs</strong></div>
+      <button className="icon-button" aria-label="Refresh connection status" disabled={checking} onClick={refresh}><Icon name="reload" /></button>
+    </section>
+    <div className="moon-section-heading"><h2>Choose your route</h2><span>ONE WORKSPACE. YOUR CHOICE.</span></div>
+    <section className="maria-connections" aria-label="Connections">
+      <article className={`maria-connection ${nativeReady ? "is-ready" : ""}`}>
+        <div className="maria-card-top"><span className="moon-route-number">01 / NATIVE</span><span className="maria-pill">{development ? "Production stays separate" : status?.recoveryAvailable ? "Recovery enabled" : "Codex account"}</span></div>
+        <h2>Native Codex <Icon name="activity" /></h2>
+        <p>{development ? "This checkout has its own state, browser, and port. Your installed connection stays independent." : "Your regular models, reasoning controls, and tools. Keep working even when Maria's window closes."}</p>
+        <button className="text-button" onClick={() => nativeReady ? navigate("guide") : navigate("setup")}>{nativeReady ? "How it works" : "Set up connection"} <Icon name="forward" /></button>
+      </article>
+      <article className="maria-connection maria-web-connection">
+        <div className="maria-card-top"><span className="moon-route-number">02 / WEB</span><span className="maria-pill">{manual ? "Manual mode" : "Automatic mode"}</span></div>
+        <h2>ChatGPT Web <Icon name="browser" /></h2>
+        <p>{manual ? "Choose your model and send in ChatGPT. Maria connects the tools and brings the results back to your Codex task." : "Your ChatGPT session, with your Codex workspace. Continue the same task with less repeated context."}</p>
+        <button className="text-button" onClick={() => navigate("settings")}>Choose how you work <Icon name="forward" /></button>
+      </article>
+    </section>
+    {tabs.length ? <section className="moon-sessions" aria-label="Current browser sessions">
+      <div className="moon-section-heading"><h2>Your conversations</h2><button className="text-button" onClick={() => navigate("browser")}>Open workspace <Icon name="forward" /></button></div>
+      {tabs.map(tab => <button key={tab.id} className="moon-session-row" onClick={() => navigate("browser")}><Icon name="browser" /><span>{tab.title || "ChatGPT conversation"}</span><small>{tab.status === "running" ? "Working" : tab.status === "ready" ? "Retained" : "Needs attention"}</small><Icon name="chevron" /></button>)}
+    </section> : null}
+    <details className="moon-setup" open={readyCount < 3}>
+      <summary><span>Connection setup</span><span>{readyCount} / 3 ready</span></summary>
+      {steps.map((step, index) => <button key={step.id} className="maria-checklist-row" onClick={() => navigate(step.surface)}>
+        <span className={`maria-step-number ${step.done ? "is-done" : ""}`}>{step.done ? <Icon name="check" /> : index + 1}</span><span><strong>{step.title}</strong><small>{step.body}</small></span><Icon name="chevron" />
+      </button>)}
+    </details>
+    {error ? <p className="moon-inline-error" role="status">Connection status is unavailable. Check Activity for details.</p> : null}
+    <aside className="moon-native-access"><span className="maria-card-icon"><Icon name="setup" /></span><div><strong>Keep Codex independent.</strong><p>Open a native session from your terminal, even when Maria is stopped.</p></div><button className="text-button" onClick={() => void window.codexWebLauncher!.copyNativeCodexCommand().then(() => setNativeCommandCopied(true)).catch(() => setNativeCommandCopied(false))}>{nativeCommandCopied ? "Copied" : "Copy native command"} <Icon name={nativeCommandCopied ? "check" : "external"} /></button></aside>
+    <footer className="maria-signature"><span>{MADE_WITH_LOVE}</span><span>MOONLIGHT EDITION · {snapshot.version}</span></footer>
+  </div>;
 }
 
 function inline(text: string, openLink?: (url: string) => void): ReactNode[] {

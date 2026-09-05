@@ -2173,6 +2173,22 @@ class BrowserHost {
   }
 
   async beginTurn(
+    traceId, reveal, helperPid, conversationKey, connectorIdentity, requireRetainedConversation = false,
+  ) {
+    this.beginOperations ??= new Map();
+    const fingerprint = JSON.stringify([helperPid, conversationKey, connectorIdentity, requireRetainedConversation]);
+    const existing = this.beginOperations.get(traceId);
+    if (existing) {
+      if (existing.fingerprint !== fingerprint) throw new Error("The pending ChatGPT turn belongs to another helper or conversation");
+      return existing.promise;
+    }
+    const promise = BrowserHost.prototype.beginTurnOnce.call(this, traceId, reveal, helperPid, conversationKey, connectorIdentity, requireRetainedConversation);
+    this.beginOperations.set(traceId, { fingerprint, promise });
+    try { return await promise; }
+    finally { if (this.beginOperations.get(traceId)?.promise === promise) this.beginOperations.delete(traceId); }
+  }
+
+  async beginTurnOnce(
     traceId,
     reveal,
     helperPid,

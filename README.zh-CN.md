@@ -176,6 +176,7 @@ bun run app
 bun run verify
 bun run app:package
 bun run app:smoke
+bun run app:performance
 ```
 
 Verification covers the runtime, launcher, model routing, process lifecycle,
@@ -184,6 +185,11 @@ Packaging produces an installer for the current operating system. macOS builds
 include a signature check and a launch test. Windows and Linux builds run in CI.
 
 ## Release notes
+
+5.4.0 introduces the monochrome Moonlight interface, reduced-motion-aware interactions,
+visibility-aware connection checks, batched Activity updates, exclusive guardian
+ownership, and shared daemon/browser startup operations. Context hashing now avoids
+allocating another complete serialized transcript.
 
 5.3.0 adds a GitHub Updates page, private-release access, repeatable release checks,
 durable completed-chat recovery, compaction continuity, and verified incremental

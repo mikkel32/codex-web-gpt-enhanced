@@ -1,0 +1,115 @@
+/* Moonlight: opaque surfaces, quiet contrast, motion only in response to an action. */
+:root {
+  --color-background-surface-under: #080808;
+  --color-background-surface: #101010;
+  --color-background-sidebar: #141414;
+  --color-text-accent: #efefef;
+  --color-text-success: #d8d8d8;
+  --color-text-warning: #d6c29d;
+  --color-text-error: #e0a7a7;
+  --color-border-focus: #d4d4d4;
+  --color-background-status-success: #ffffff0c;
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+}
+.app-root, .app-shell, .workspace { background: #101010; }
+.app-sidebar { background: #151515; border-right: 1px solid #ffffff09; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.sidebar-brand-row { margin: 2px 0 18px; }
+.sidebar-brand-row strong { font-weight: 520; letter-spacing: -.025em; }
+.sidebar-item { border-radius: 8px; }
+.sidebar-item.is-active { background: #ffffff0a; color: #f3f3f3; }
+.sidebar-item.is-update { background: #e8e8e8; color: #161616; }
+.maria-brand-mark { background: linear-gradient(135deg, #fff, #aaa); color: #121212; box-shadow: none; }
+.maria-sidebar-credit { color: #969696; padding-bottom: 12px; }
+.maria-eyebrow { color: #b8b8b8; font: 10px var(--font-mono); letter-spacing: .17em; }
+.maria-page { padding: 32px clamp(24px, 4vw, 56px) 24px; }
+.maria-page .button-primary { background: #ececec; border-color: #ececec; color: #151515; font-weight: 550; }
+.maria-page .button-primary:hover { background: #fff; }
+.maria-page .button-secondary { background: #ffffff03; color: #c4c4c4; border-color: #ffffff18; }
+.moon-home { max-width: 1240px; margin: 0 auto; }
+.app-shell.is-compact .maria-page { padding-top: calc(var(--height-titlebar) + 18px); }
+.moon-topline { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.moon-edition { color: #747474; font: 9px var(--font-mono); letter-spacing: .12em; }
+.moon-hero { display: grid; grid-template-columns: minmax(0, 1fr) 220px; padding: 56px 0 44px; gap: 18px; align-items: center; }
+.moon-hero-copy { position: relative; z-index: 1; }
+.moon-hero h1 { margin: 0 0 20px; font-size: clamp(35px, 4.3vw, 56px); font-weight: 470; line-height: 1.08; letter-spacing: -.055em; }
+.moon-hero h1 span { color: #969696; display: inline; }
+.moon-hero p { font-size: 13px; color: #a0a0a0; margin: 0; line-height: 1.85; }
+.moon-hero .maria-hero-actions { margin-top: 27px; gap: 9px; }
+.moon-hero .maria-hero-actions button { min-height: 38px; padding-inline: 15px; font-size: 12px; border-radius: 9px; }
+.moon-art { position: relative; width: 210px; height: 250px; display: grid; place-items: center; pointer-events: none; }
+.moon-halo { position: absolute; width: 250px; height: 250px; border: 1px solid #ffffff09; border-radius: 50%; transform: rotate(-20deg) scaleY(.83); }
+.moon-halo::after { content: ""; position: absolute; inset: -17px; border: 1px solid #ffffff05; border-radius: 50%; }
+.moon-disc { width: 152px; height: 152px; border-radius: 50%; background: radial-gradient(ellipse at 26% 28%, #fbfbfb, #b9b9b9 21%, #737373 43%, #202020 67%, #101010 84%); box-shadow: inset 1px 1px 2px #ffffff70, 0 0 48px #ffffff05; position: relative; animation: moon-arrive 650ms var(--ease-enter) both; }
+.moon-disc::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: radial-gradient(circle at 29% 29%, #30303010 0 9%, transparent 10%), radial-gradient(circle at 25% 49%, #20202017 0 12%, transparent 13%), radial-gradient(circle at 47% 23%, #20202015 0 5%, transparent 6%); }
+.moon-orbit-label { position: absolute; bottom: 0; width: 100%; text-align: center; font: 8px var(--font-mono); letter-spacing: .12em; color: #737373; }
+@keyframes moon-arrive { from { opacity: 0; transform: translateY(12px) rotate(-10deg); } to { opacity: 1; transform: translateY(0) rotate(0); } }
+.moon-pulse { display: grid; grid-template-columns: 1fr 1.2fr 1fr auto; gap: 18px; border-top: 1px solid #ffffff10; border-bottom: 1px solid #ffffff10; padding: 21px 0; align-items: center; }
+.moon-metric-label { display: block; font: 9px var(--font-mono); color: #828282; letter-spacing: .09em; margin-bottom: 11px; }
+.moon-pulse strong { font-size: 12px; font-weight: 450; display: flex; align-items: center; gap: 8px; color: #dadada; }
+.moon-status { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #777; }
+.moon-status.is-ready { background: #eee; box-shadow: 0 0 0 3px #ffffff06; }
+.moon-section-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin: 30px 0 15px; }
+.moon-section-heading h2 { font-size: 15px; font-weight: 500; margin: 0; letter-spacing: -.02em; }
+.moon-section-heading > span { color: #767676; font: 8px var(--font-mono); letter-spacing: .1em; }
+.maria-connections { gap: 14px; }
+.maria-connection { background: #151515; border-color: #ffffff10; padding: 23px; border-radius: 14px; transition: transform 180ms var(--ease-enter), border-color 180ms ease, background-color 180ms ease; }
+.maria-connection:hover { transform: translateY(-2px); border-color: #ffffff26; background: #181818; }
+.moon-route-number { font: 9px var(--font-mono); color: #858585; letter-spacing: .08em; }
+.maria-pill, .maria-connection.is-ready .maria-pill { font-size: 9px; color: #b2b2b2; background: #ffffff04; border-color: #ffffff0d; padding: 4px 8px; }
+.maria-connection h2 { display: flex; align-items: center; justify-content: space-between; margin-top: 23px; font-size: 21px; }
+.maria-connection h2 svg { width: 20px; height: 20px; color: #858585; }
+.maria-connection p { color: #a6a6a6; font-size: 12px; margin-bottom: 22px; }
+.maria-connection .text-button { color: #dfdfdf; }
+.moon-sessions .text-button { display: inline-flex; gap: 7px; align-items: center; color: #c0c0c0; font-size: 11px; }
+.moon-sessions .text-button svg { width: 12px; height: 12px; }
+.moon-session-row { width: 100%; display: flex; align-items: center; gap: 14px; background: none; border: 0; border-bottom: 1px solid #ffffff08; padding: 15px 0; text-align: left; }
+.moon-session-row > svg { width: 16px; height: 16px; color: #898989; flex-shrink: 0; }
+.moon-session-row > span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.moon-session-row > small { font-size: 10px; color: #969696; }
+.moon-session-row:hover { background: #ffffff03; }
+.moon-setup { margin-top: 22px; border: 1px solid #ffffff0b; border-radius: 12px; padding: 0 18px; }
+.moon-setup summary { display: flex; justify-content: space-between; gap: 10px; cursor: pointer; padding: 17px 0; list-style: none; font-size: 12px; color: #bababa; }
+.moon-setup summary::-webkit-details-marker { display: none; }
+.moon-setup summary:focus-visible { outline: 1px solid #ccc; outline-offset: 4px; border-radius: 4px; }
+.moon-setup summary > span:first-child::after { content: "+"; display: inline-block; margin-left: 10px; color: #777; }
+.moon-setup[open] summary > span:first-child::after { content: "−"; }
+.moon-setup summary > span:last-child { font: 10px var(--font-mono); color: #8a8a8a; }
+.moon-setup[open] summary { border-bottom: 1px solid #ffffff0a; }
+.moon-setup .maria-checklist-row:last-child { border-bottom: 0; }
+.maria-step-number, .maria-step-number.is-done { color: #ddd; background: #ffffff04; border-color: #ffffff12; }
+.moon-native-access { display: flex; align-items: center; gap: 13px; margin-top: 25px; padding: 20px 0; border-bottom: 1px solid #ffffff0a; }
+.moon-native-access strong { font-size: 12px; font-weight: 500; color: #c8c8c8; }
+.moon-native-access p { color: #919191; font-size: 11px; line-height: 1.7; margin: 5px 0 0; }
+.moon-native-access .text-button { margin-left: auto; white-space: nowrap; display: flex; align-items: center; gap: 8px; font-size: 11px; color: #bcbcbc; }
+.moon-native-access .text-button svg { width: 13px; height: 13px; }
+.moon-native-access .maria-card-icon { background: #ffffff04; color: #939393; flex-shrink: 0; }
+.maria-signature { color: #858585; font-size: 9px; margin-top: 21px; }
+.maria-signature > span:last-child { font-family: var(--font-mono); font-size: 8px; letter-spacing: .07em; }
+.moon-inline-error { font-size: 12px; color: var(--color-text-error); }
+.maria-update-card, .maria-update-card.has-update { background: linear-gradient(140deg, #202020, #151515); border-color: #ffffff25; }
+.maria-update-access, .browser-signin-card { background: #141414; border-color: #ffffff12; }
+.activity-row { content-visibility: auto; contain-intrinsic-size: auto 62px; }
+html[data-maria-hidden="true"] *, html[data-maria-hidden="true"] *::before, html[data-maria-hidden="true"] *::after { animation-play-state: paused !important; }
+@media (max-width: 1050px) {
+  .moon-hero { grid-template-columns: minmax(0, 1fr) 170px; }
+  .moon-art { width: 170px; height: 215px; }
+  .moon-halo { width: 200px; height: 200px; }
+  .moon-disc { width: 135px; height: 135px; }
+}
+@media (max-width: 760px) {
+  .maria-page { padding: 26px 22px 22px; }
+  .moon-hero { padding-top: 38px; grid-template-columns: minmax(0, 1fr) 130px; gap: 4px; }
+  .moon-hero h1 { font-size: 35px; }
+  .moon-art { width: 130px; height: 180px; }
+  .moon-disc { width: 112px; height: 112px; }
+  .moon-halo { width: 150px; height: 150px; }
+  .moon-orbit-label { font-size: 6px; }
+  .moon-pulse { gap: 14px; grid-template-columns: 1fr 1fr auto; }
+  .moon-pulse > div:nth-child(3) { display: none; }
+  .moon-native-access { flex-wrap: wrap; }
+  .moon-native-access .text-button { margin-left: 49px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .moon-disc { animation: none; }
+  .maria-connection:hover { transform: none; }
+}

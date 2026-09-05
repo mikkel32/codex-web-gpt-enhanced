@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, MotionConfig } from "motion/react";
 import {
   useCallback,
   useEffect,
@@ -14,6 +14,7 @@ import { Icon, type IconName } from "./icons";
 import { MariaHome, MariaGuide, MADE_WITH_LOVE } from "./MariaHome";
 import { MariaUpdates } from "./MariaUpdates";
 import { BrowserSignIn } from "./BrowserSignIn";
+import { useActivityLogs } from "./useActivityLogs";
 import type {
   BrowserInteractionMode,
   BrowserState,
@@ -35,7 +36,6 @@ export function App() {
   const [snapshot, setSnapshot] = useState<LauncherSnapshot | null>(null);
   const [browser, setBrowser] = useState<BrowserState | null>(null);
   const [operation, setOperation] = useState<OperationState | null>(null);
-  const [logs, setLogs] = useState<LogRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const documentLanguage = snapshot?.state.language ?? "en";
 
@@ -44,13 +44,21 @@ export function App() {
   }, [documentLanguage]);
 
   useEffect(() => {
+    const updateVisibility = () => { document.documentElement.dataset.mariaHidden = String(document.hidden); };
+    updateVisibility();
+    document.addEventListener("visibilitychange", updateVisibility);
+    return () => document.removeEventListener("visibilitychange", updateVisibility);
+  }, []);
+
+  useEffect(() => {
     if (!api) return;
     let cancelled = false;
+    let browserFingerprint = "";
     void api.snapshot().then((next) => {
       if (cancelled) return;
       setSnapshot(next);
       setBrowser(next.browser);
-      setLogs(next.logs);
+      browserFingerprint = JSON.stringify(next.browser);
       setOperation(next.operation);
       if (next.operation?.status === "failed" && next.operation.name !== "mcp-verification") {
         setError(next.operation.message);
@@ -66,12 +74,16 @@ export function App() {
           }
         : current);
     });
-    const unsubscribeBrowser = api.onBrowserState(setBrowser);
+    const unsubscribeBrowser = api.onBrowserState(next => {
+      const fingerprint = JSON.stringify(next);
+      if (fingerprint === browserFingerprint) return;
+      browserFingerprint = fingerprint;
+      setBrowser(next);
+    });
     const unsubscribeOperation = api.onOperation((next) => {
       setOperation(next);
       if (next.status === "failed" && next.name !== "mcp-verification") setError(next.message);
     });
-    const unsubscribeLog = api.onLog((record) => setLogs((current) => [...current.slice(-299), record]));
     const unsubscribeUpdate = api.onUpdateState((update) => {
       setSnapshot((current) => current ? { ...current, update } : current);
     });
@@ -80,7 +92,6 @@ export function App() {
       unsubscribeState();
       unsubscribeBrowser();
       unsubscribeOperation();
-      unsubscribeLog();
       unsubscribeUpdate();
     };
   }, []);
@@ -103,7 +114,7 @@ export function App() {
   const copy = copyFor(language);
 
   return (
-    <div
+    <MotionConfig reducedMotion="user"><div
       className="app-root"
       data-language={language}
       data-platform={snapshot.platform}
@@ -125,7 +136,6 @@ export function App() {
             copy={copy}
             key="launcher"
             language={language}
-            logs={logs}
             operation={operation}
             setError={setError}
             snapshot={snapshot}
@@ -136,7 +146,7 @@ export function App() {
       <AnimatePresence>
         {error ? <ErrorToast copy={copy} message={error} onDismiss={() => setError(null)} /> : null}
       </AnimatePresence>
-    </div>
+    </div></MotionConfig>
   );
 }
 
@@ -303,7 +313,6 @@ function LauncherShell({
   browser,
   copy,
   language,
-  logs,
   operation,
   setError,
   snapshot,
@@ -312,7 +321,6 @@ function LauncherShell({
   browser: BrowserState | null;
   copy: Copy;
   language: Language;
-  logs: LogRecord[];
   operation: OperationState | null;
   setError: (error: string | null) => void;
   snapshot: LauncherSnapshot;
@@ -527,10 +535,13 @@ function LauncherShell({
       ) : null}
 
       <motion.aside
-        animate={{ width: sidebarOpen ? "var(--sidebar-width)" : 0 }}
+        animate={{ x: sidebarOpen ? 0 : -16, opacity: sidebarOpen ? 1 : 0 }}
+        style={{ width: sidebarOpen ? "var(--sidebar-width)" : 0, pointerEvents: sidebarOpen ? "auto" : "none" }}
         className="app-sidebar"
+        aria-hidden={!sidebarOpen}
+        inert={!sidebarOpen}
         initial={false}
-        transition={{ type: "spring", duration: 0.5, bounce: 0.08 }}
+        transition={{ type: "spring", duration: 0.24, bounce: 0 }}
       >
         <div className="sidebar-clip">
           <div className="sidebar-content">
@@ -659,7 +670,7 @@ function LauncherShell({
               />
             ) : null}
             {surface === "activity" ? (
-              <ActivitySurface copy={copy} language={language} logs={logs} setError={setError} />
+              <ActivitySurface copy={copy} language={language} setError={setError} />
             ) : null}
             {surface === "settings" ? (
               <SettingsSurface
@@ -1515,14 +1526,13 @@ function McpSurface({
 function ActivitySurface({
   copy,
   language,
-  logs,
   setError,
 }: {
   copy: Copy;
   language: Language;
-  logs: LogRecord[];
   setError: (error: string | null) => void;
 }) {
+  const logs = useActivityLogs();
   return (
     <ContentSurface subtitle={copy.activitySubtitle} title={copy.activityTitle}>
       <div className="section-heading activity-heading">
@@ -1541,8 +1551,8 @@ function ActivitySurface({
             <span>{copy.noLogs}</span>
           </div>
         ) : null}
-        {[...logs].reverse().map((record, index) => (
-          <div className="activity-row" key={`${record.at}-${record.event}-${index}`}>
+        {[...logs].reverse().map((record) => (
+          <div className="activity-row" key={record.uiId}>
             <StateDot state={record.level === "error" ? "error" : record.level === "warning" ? "busy" : "ready"} />
             <div>
               <strong>{humanEvent(record.event)}</strong>

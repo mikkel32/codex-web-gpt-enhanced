@@ -15,7 +15,7 @@ function monitorBackgroundProcess(pid) {
     clearInterval(timer);
     child.exitCode = 0;
     child.emit("exit", 0, null);
-  }, 250);
+  }, 2_000);
   timer.unref();
   child.unref = () => timer.unref();
   child.release = () => { clearInterval(timer); child.removeAllListeners(); };

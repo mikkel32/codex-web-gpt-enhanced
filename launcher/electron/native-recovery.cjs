@@ -42,6 +42,13 @@ class NativeRecovery {
     } catch (error) { if (error.code !== "ENOENT") throw error; }
   }
   async ensure(config) {
+    if (this.ensurePromise) return this.ensurePromise;
+    const pending = this.ensureOnce(config);
+    this.ensurePromise = pending;
+    try { return await pending; }
+    finally { if (this.ensurePromise === pending) this.ensurePromise = null; }
+  }
+  async ensureOnce(config) {
     this.resume();
     const command = [...config.runtimeCommand, "--home", this.coreHome, "guard"];
     const logsDir = path.join(this.coreHome, "logs"); fs.mkdirSync(logsDir, { recursive: true, mode: 0o700 });
@@ -65,9 +72,15 @@ class NativeRecovery {
     try {
       const child = spawn(command[0], command.slice(1), { env: { ...process.env, CODEX_CHATGPT_WEB_HOME: this.coreHome }, detached: true, windowsHide: true, stdio: ["ignore", output, output] });
       child.on("error", error => this.logger.warn("native_recovery.start_failed", { message: error.message })); child.unref();
+      // Keep concurrent ensure calls joined until the child has published its ownership.
+      const deadline = Date.now() + 5_000;
+      while (child.pid && processRunning(child.pid) && !this.status().running && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
     } finally { fs.closeSync(output); }
   }
   async stop() {
+    if (this.ensurePromise) await this.ensurePromise;
     this.pause();
     if (process.platform === "darwin" && this.persistent && fs.existsSync(this.plistPath)) {
       spawnSync("launchctl", ["bootout", `gui/${process.getuid()}/${LABEL}`], { stdio: "ignore", timeout: 5000 });
