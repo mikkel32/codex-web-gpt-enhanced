@@ -340,11 +340,8 @@ function LauncherShell({
   const [sessionReminderBusy, setSessionReminderBusy] = useState(false);
   const [sessionReminderDue, setSessionReminderDue] = useState(false);
   const [mcpTargetMode, setMcpTargetMode] = useState<BrowserInteractionMode | null>(null);
-  const [biggerContextRecommendationOpen, setBiggerContextRecommendationOpen] = useState(
-    snapshot.state.browserInteractionMode === "automatic"
-      && snapshot.state.coreSetupComplete === true
-      && !snapshot.state.experimentalBiggerContext,
-  );
+  const [biggerContextRecommendationOpen, setBiggerContextRecommendationOpen] = useState(false);
+
   const [biggerContextRecommendationBusy, setBiggerContextRecommendationBusy] = useState(false);
   const browserSlotRef = useCallback((node: HTMLDivElement | null) => setBrowserSlot(node), []);
   const browserSurfaceActive = surface === "browser"

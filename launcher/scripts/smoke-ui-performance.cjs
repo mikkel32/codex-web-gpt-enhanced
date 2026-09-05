@@ -2,9 +2,9 @@
 const { chromium } = require('playwright-core');
 const http=require('node:http'),fs=require('node:fs'),path=require('node:path');
 function serve(root){const server=http.createServer((req,res)=>{const file=path.join(root,req.url==='/'?'index.html':req.url.split('?')[0]);if(!file.startsWith(root)){res.writeHead(403).end();return;}try{res.setHeader('content-type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html');res.end(fs.readFileSync(file));}catch{res.writeHead(404).end();}});return new Promise(resolve=>server.listen(0,'127.0.0.1',()=>resolve({server,url:`http://127.0.0.1:${server.address().port}`})));}
-function fixture(){
+function fixture(options){
  const listeners={};window.testListeners=listeners;window.testCalls=0;
- const state={version:1,language:'en',onboardingComplete:true,autoStart:true,keepRunningOnClose:true,showBrowserDuringTurns:true,browserInteractionMode:'automatic',experimentalBiggerContext:true,zeroRiskProEnabled:false,sidebarOpen:true,sidebarWidth:252,coreSetupComplete:true,codexCatalogVerified:true,mcpSetupComplete:true,mcpGuideStep:0,sessionRefreshReminderAt:null};
+ const state={version:1,language:'en',onboardingComplete:true,autoStart:true,keepRunningOnClose:true,showBrowserDuringTurns:true,browserInteractionMode:'automatic',experimentalBiggerContext:options?.biggerContext!==false,zeroRiskProEnabled:false,sidebarOpen:true,sidebarWidth:252,coreSetupComplete:true,codexCatalogVerified:true,mcpSetupComplete:true,mcpGuideStep:0,sessionRefreshReminderAt:null};
  const b={status:'ready',message:'Ready',url:'',title:'ChatGPT',authenticated:true,visible:false,surfaceActive:false,loading:false,canGoBack:false,canGoForward:false,zoomFactor:1,activeTabId:'main',maxTabs:5,tabs:[]};
  const snapshot={profile:'production',profilePaths:{coreHome:'test',codexHome:'test',userData:'test'},state,browser:b,connectorName:'Codex Native2',connectorNames:{automatic:'Codex Native2',manual:'Codex Zero Risk'},mcpCredentialsConfigured:true,logs:[],urls:{github:'https://github.com/mikkel32/codex-web-gpt-enhanced',connectors:'',tunnels:'',keys:''},platform:'darwin',packaged:true,version:'5.4.0',smokePassed:true,operation:null,update:{status:'up-to-date',latestVersion:'5.4.0'}};
  window.testBrowser=b;
@@ -14,7 +14,7 @@ function fixture(){
 try{for(const [name,root] of [...(process.env.MARIA_BASELINE_RENDERER ? [['before',path.resolve(process.env.MARIA_BASELINE_RENDERER)]] : []), ['after',path.resolve(__dirname,'../dist')]]){
  const {server,url}=await serve(root);
  try{for(const width of name==='after'?[1180,700]:[1180]){
-  const context=await browser.newContext({viewport:{width,height:1000}});await context.addInitScript(fixture);const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  const context=await browser.newContext({viewport:{width,height:1000}});await context.addInitScript(fixture,{biggerContext:name==='before'});const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(url);await page.getByRole('button',{name:'Open ChatGPT',exact:true}).waitFor();await page.waitForTimeout(900);
   if(name==='after')await page.screenshot({path:`${require('node:os').tmpdir()}/maria-moonlight-${width}.png`});
   const idle=await page.evaluate(()=>({animations:document.getAnimations().filter(x=>x.playState==='running').length,logSubscribers:window.testListeners.onLog?.size??0,connectionCalls:window.testCalls,overflow:document.documentElement.scrollWidth>innerWidth}));
@@ -26,7 +26,7 @@ try{for(const [name,root] of [...(process.env.MARIA_BASELINE_RENDERER ? [['befor
   const rows=await page.locator('.activity-row').count();
   if(name==='after'&&(idle.logSubscribers!==0||idle.animations!==0||rows!==300||idle.overflow||errors.length))throw Error(JSON.stringify({idle,rows,errors}));
   results.push({name,width,idle,rows,scriptMs:Math.round((end.ScriptDuration-start.ScriptDuration)*1000),taskMs:Math.round((end.TaskDuration-start.TaskDuration)*1000),errors});
-  if(width<820)await page.getByRole('button',{name:'Show sidebar',exact:true}).click();await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('heading',{name:'Launcher settings',exact:true}).waitFor();if(name==='after')await page.screenshot({path:`${require('node:os').tmpdir()}/maria-settings-${width}.png`});
+  if(width<820)await page.getByRole('button',{name:'Show sidebar',exact:true}).click();await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('heading',{name:'Launcher settings',exact:true}).waitFor();await page.waitForFunction(()=>[...document.querySelectorAll('.surface-transition')].every(e=>Number(getComputedStyle(e).opacity)>.999));if(name==='after')await page.screenshot({path:`${require('node:os').tmpdir()}/maria-settings-${width}.png`});
   if(name==='after') {
    if(width<820)await page.getByRole('button',{name:'Show sidebar',exact:true}).click();
    await page.getByRole('button',{name:'Overview',exact:true}).click();await page.locator('.moon-home').waitFor({state:'visible'});

@@ -130,10 +130,10 @@ test("macOS passkey sign-in is additive to the unchanged embedded login action",
   assert.match(browserHostSource, /await this\.waitForAuthenticated\(60_000\)[\s\S]*?runSessionInspection\(false\)/);
 });
 
-test("Bigger Context startup recommendation reuses the persisted setting and setup transaction", () => {
+test("Bigger Context stays optional without interrupting startup and retains its settings transaction", () => {
   assert.match(
     appSource,
-    /const \[biggerContextRecommendationOpen, setBiggerContextRecommendationOpen\] = useState\([\s\S]*?snapshot\.state\.browserInteractionMode === "automatic"[\s\S]*?snapshot\.state\.coreSetupComplete === true[\s\S]*?!snapshot\.state\.experimentalBiggerContext,/,
+    /const \[biggerContextRecommendationOpen, setBiggerContextRecommendationOpen\] = useState\(false\)/,
   );
   assert.match(appSource, /&& !biggerContextRecommendationOpen;/);
   assert.match(appSource, /updateState\(await api!\.setBiggerContext\(enabled\)\)/);
