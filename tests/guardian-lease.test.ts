@@ -12,8 +12,9 @@ test("guardian ownership is exclusive and released when its owner exits", async 
     import { appendFileSync } from 'node:fs';
     const lease=acquireGuardianLease(${JSON.stringify(leasePath)});
     if(!lease)process.exit(0);
-    appendFileSync(${JSON.stringify(record)},process.pid+'\\n');
-    setInterval(()=>{},1000);`;
+    // Retain the Database like the guardian's finally block, even under collection.
+    setInterval(()=>{if(!lease.inTransaction)process.exit(2);},50);
+    setTimeout(()=>{Bun.gc(true);appendFileSync(${JSON.stringify(record)},process.pid+'\\n');},0);`;
   const children: ReturnType<typeof Bun.spawn>[] = [];
   try {
     for (let i = 0; i < 6; i++) children.push(Bun.spawn([process.execPath, "-e", script], { stdout: "ignore", stderr: "pipe" }));
@@ -21,8 +22,11 @@ test("guardian ownership is exclusive and released when its owner exits", async 
     while ((!existsSync(record) || children.filter(child => child.exitCode !== null).length < 5) && Date.now() < deadline) await Bun.sleep(50);
     const owners = readFileSync(record, "utf8").trim().split("\n").map(Number);
     expect(owners).toHaveLength(1);
-    expect(acquireGuardianLease(leasePath)).toBeUndefined();
     const owner = children.find(child => child.pid === owners[0])!;
+    expect(owner?.exitCode).toBeNull();
+    const competing = acquireGuardianLease(leasePath);
+    try { expect(competing).toBeUndefined(); }
+    finally { competing?.close(); }
     owner.kill("SIGKILL"); await owner.exited;
     const recovered = acquireGuardianLease(leasePath);
     expect(recovered).toBeDefined(); recovered?.close();
