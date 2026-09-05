@@ -397,10 +397,32 @@ export function tunnelStatus(config: AppConfig): TunnelRuntimeStatus {
   }
   const result = runCommand(
     settings.binaryPath,
-    ["runtimes", "status", settings.alias, "--json"],
+    ["runtimes", "cleanup", "--json"],
     { timeout: 10_000 },
   );
-  return parseTunnelStatus(tunnelCommandOutput(result), result.status);
+  return parseLocalTunnelStatus(tunnelCommandOutput(result), settings.alias, result.status);
+}
+
+// The official cleanup inventory is read-only without --apply and never queries
+// the control plane. `runtimes status` can perform a remote metadata request.
+export function parseLocalTunnelStatus(output: string, alias: string, exitStatus = 0): TunnelRuntimeStatus {
+  if (exitStatus !== 0) return parseTunnelStatus(output, exitStatus);
+  try {
+    const parsed = JSON.parse(output);
+    if (!Array.isArray(parsed?.entries)) throw new Error("missing entries array");
+    const matches = parsed.entries.filter((entry: { alias?: string } | null) => entry?.alias === alias);
+    if (matches.length > 1) throw new Error("ambiguous runtime alias");
+    const entry = matches[0];
+    const state = entry?.runtime_state ?? (entry ? undefined : "stopped");
+    if (!["stopped", "starting", "healthy", "ready"].includes(state)) throw new Error("unknown runtime state");
+    return parseTunnelStatus(JSON.stringify({
+      process_running: state !== "stopped", healthy: state === "healthy" || state === "ready",
+      ready: state === "ready", runtime_state: state,
+    }));
+  } catch (error) {
+    return { ok: false, processRunning: false, healthy: false, ready: false,
+      detail: `Local tunnel inventory could not be read: ${error instanceof Error ? error.message : "invalid data"}` };
+  }
 }
 
 export async function waitForTunnelReady(

@@ -842,7 +842,8 @@ test("fresh tunnel recovery discovers its official loopback diagnostics before p
     return {
       code: 0,
       output: JSON.stringify({
-        local: { health: { base_url: "http://127.0.0.1:43127" } },
+        entries: [{ alias: "codex-chatgpt-web", runtime_state: "ready",
+          live_runtime: { base_url: "http://127.0.0.1:43127" } }],
       }),
     };
   };
@@ -855,7 +856,7 @@ test("fresh tunnel recovery discovers its official loopback diagnostics before p
   try {
     await supervisor.waitForTunnelMcpTransport(config, 25);
     assert.equal(supervisor.tunnelHealthBaseUrl, "http://127.0.0.1:43127");
-    assert.deepEqual(commands, [["runtimes", "status", "codex-chatgpt-web", "--json"]]);
+    assert.deepEqual(commands, [["runtimes", "cleanup", "--json"]]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -872,7 +873,8 @@ test("tunnel diagnostics discovery rejects a non-loopback endpoint", async () =>
   });
   supervisor.runTunnelCommand = async () => ({
     code: 0,
-    output: JSON.stringify({ health_url: "https://example.com/healthz" }),
+    output: JSON.stringify({ entries: [{ alias: "codex-chatgpt-web", runtime_state: "ready",
+      live_runtime: { base_url: "https://example.com/healthz" } }] }),
   });
   try {
     await assert.rejects(

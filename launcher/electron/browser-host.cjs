@@ -316,6 +316,7 @@ class BrowserHost {
     showWindow = () => {},
     clipboardApi = clipboard,
     getBrowserInteractionMode = () => "automatic",
+    assertWebTransportAvailable = () => {},
   }) {
     if (typeof getConnectorName !== "function") {
       throw new Error("Browser host connector-name resolver is unavailable");
@@ -325,6 +326,7 @@ class BrowserHost {
     }
     this.window = window;
     this.descriptorPath = descriptorPath;
+    this.assertWebTransportAvailable = assertWebTransportAvailable;
     this.savedConversations = new SavedConversations(path.join(path.dirname(descriptorPath), "saved-conversations.json"));
     this.accessGate = new BrowserAccessGate({ filePath: path.join(path.dirname(descriptorPath), "browser-access.json") });
     this.cdpPort = cdpPort;
@@ -1906,6 +1908,7 @@ class BrowserHost {
   }
 
   beginManualTurn(traceId, helperPid, prompt, conversationKey, resumePrompt) {
+    this.assertWebTransportAvailable?.();
     this.accessGate?.assertAvailable();
     if (this.manualOperation) {
       throw new Error(`ChatGPT browser is busy with ${this.manualOperation}`);
@@ -2209,6 +2212,7 @@ class BrowserHost {
     connectorIdentity,
     requireRetainedConversation = false,
   ) {
+    this.assertWebTransportAvailable?.();
     this.accessGate?.assertAvailable();
     if (this.manualOperation) {
       throw new Error(`ChatGPT browser is busy with ${this.manualOperation}`);
@@ -2353,11 +2357,13 @@ class BrowserHost {
   }
 
   async admitConversationSubmission(tab, helperPid) {
+    this.assertWebTransportAvailable?.();
     const gate = this.accessGate;
     const revision = gate?.revision;
     if (gate) await gate.beforeSend(() => this.turnTabs.get(tab.id) === tab && tab.status === "running" && tab.helperPid === helperPid && tab.interactionMode === "automatic");
     if (tab.submissionActivated) return;
     gate?.assertAvailable?.();
+    this.assertWebTransportAvailable?.();
     if (gate !== this.accessGate || revision !== gate?.revision) throw new BrowserAccessPausedError("The Web send was invalidated before handoff. Return to the original task to continue; no prompt was sent.");
     if (this.turnTabs.get(tab.id) !== tab || tab.status !== "running" || tab.helperPid !== helperPid || tab.interactionMode !== "automatic") throw new Error("The Web turn ended before Send");
     if (tab.conversationKey) {

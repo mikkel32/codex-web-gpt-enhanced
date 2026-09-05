@@ -1070,6 +1070,7 @@ async function start() {
     publishState: (state) => send("launcher:browser-state", state),
     showWindow: showMainWindow,
     getBrowserInteractionMode: () => stateStore.read().browserInteractionMode,
+    assertWebTransportAvailable: () => runtimeSupervisor.assertTunnelAccess(),
   });
   await browserHost.ready();
   const updaterRuntimeRoot = runtimeRootProvider();

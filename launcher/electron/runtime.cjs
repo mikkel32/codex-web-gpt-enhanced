@@ -452,6 +452,7 @@ class RuntimeHost {
       this.supervisor.configPath,
       path.join(coreHome, "codex", "integration-journal.json"),
       path.join(coreHome, "codex", "integration-journal.recovery.json"),
+      path.join(coreHome, "runtime", "tunnel-authorization-pause.json"),
       path.join(this.codexHome, "config.toml"),
       path.join(this.codexHome, "models_cache.json"),
       path.join(coreHome, "secrets", "tunnel-runtime.key"),
@@ -1330,6 +1331,8 @@ class RuntimeHost {
 
   async runSetup(name, args, options) {
     if (this.currentOperation()) throw new Error(`Another launcher operation is active: ${this.currentOperation()}`);
+    const repairsTunnelAccess = name === "mcp-setup" || name === "dev-mcp-setup";
+    if (!repairsTunnelAccess) this.supervisor.assertTunnelAccess?.();
     const previousRuntime = this.runtimeConfigSnapshot();
     const checkpoint = this.captureSetupCheckpoint(previousRuntime);
     this.lifecycleOperation = name;
@@ -1349,6 +1352,7 @@ class RuntimeHost {
       else await this.supervisor.stopForSetup();
       setupCommandStarted = true;
       const result = await this.run(name, args, options);
+      if (repairsTunnelAccess) this.supervisor.clearTunnelAuthorizationPause?.();
       const runtime = await this.supervisor.startIfConfigured();
       if (runtime.status !== "ready") {
         throw new Error(`Setup completed, but the launcher-owned runtime is ${runtime.status}: ${runtime.detail || "not ready"}`);

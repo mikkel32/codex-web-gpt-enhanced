@@ -13,6 +13,9 @@ const {
 const { runtimeInvocation } = require("./runtime-command.cjs");
 const { monitorBackgroundProcess } = require("./background-process.cjs");
 const { guardianStatus } = require("./native-recovery.cjs");
+const { RecoveryBudget } = require("./recovery-budget.cjs");
+const { tunnelAuthorizationFailure } = require("./tunnel-authorization.cjs");
+const { BrowserAccessPausedError } = require("./browser-access.cjs");
 
 const RESTART_WINDOW_MS = 60_000;
 const MAX_RESTARTS_PER_WINDOW = 5;
@@ -344,17 +347,22 @@ class RuntimeSupervisor {
     this.nativeRecovery = nativeRecovery;
     this.configPath = path.join(coreHome, "config.json");
     this.statePath = path.join(coreHome, "runtime", "launcher-supervisor.json");
+    this.tunnelAuthorizationPausePath = path.join(coreHome, "runtime", "tunnel-authorization-pause.json");
+    this.tunnelAuthorizationPaused = false;
     this.daemon = null;
     this.tunnel = null;
     this.stopping = false;
     this.startPromise = null;
     this.stopPromise = null;
     this.restartHistory = { daemon: [], tunnel: [] };
+    this.recoveryBudget = new RecoveryBudget();
+    this.recoveringChildren = new Set();
     this.restartTimers = { daemon: null, tunnel: null };
     this.tunnelMonitorTimer = null;
     this.tunnelMonitorInFlight = false;
     this.tunnelMonitorFailures = 0;
     this.tunnelMonitorObservationUnavailable = false;
+    this.tunnelDependencyWaiting = false;
     this.tunnelMonitorGeneration = 0;
     this.tunnelHealthBaseUrl = null;
     this.recoveryTasks = new Set();
@@ -764,6 +772,9 @@ class RuntimeSupervisor {
       if (!body || typeof body !== "object" || !Array.isArray(body.events)) {
         throw new Error("response has no events array");
       }
+      const authorization = tunnelAuthorizationFailure(body.events);
+      if (authorization) return { observed: true, ok: false, fatal: false, authorization,
+        detail: `Tunnel authorization rejected with HTTP ${authorization.status}; review access and run setup again` };
       const cutoff = Date.now() - TUNNEL_MCP_FAILURE_RECENCY_MS;
       const failure = body.events.findLast(event => {
         if (!event || typeof event !== "object") return false;
@@ -799,35 +810,12 @@ class RuntimeSupervisor {
   }
 
   async discoverTunnelHealthBaseUrl(config) {
-    const tunnel = config.tunnel;
-    if (!tunnel) throw new Error("launcher-owned tunnel has no runtime configuration");
-    const result = await this.runTunnelCommand(
-      config,
-      ["runtimes", "status", tunnel.alias, "--json"],
-      5_000,
-      "Local tunnel health discovery",
-    );
-    if (result.code !== 0) {
-      throw new Error(`Local tunnel health discovery failed: ${tunnelControlDiagnostic(result)}`);
-    }
-    let parsed;
-    try {
-      parsed = JSON.parse(result.output);
-    } catch (error) {
-      throw new Error(`Local tunnel health discovery returned invalid JSON: ${errorMessage(error)}`);
-    }
-    const candidates = [
-      parsed?.local?.effective_health?.base_url,
-      parsed?.local?.health?.base_url,
-      parsed?.health_url,
-      parsed?.ui_url,
-    ];
-    const baseUrl = candidates.map(loopbackHealthBaseURL).find(Boolean);
-    if (!baseUrl) {
+    this.tunnelHealthBaseUrl = null;
+    await this.readTunnelHealth(config);
+    if (!this.tunnelHealthBaseUrl) {
       throw new Error("Local tunnel health discovery returned no verified loopback endpoint");
     }
-    this.tunnelHealthBaseUrl = baseUrl;
-    return baseUrl;
+    return this.tunnelHealthBaseUrl;
   }
 
   async waitForTunnelMcpTransport(config, timeoutMs = 10_000) {
@@ -895,6 +883,8 @@ class RuntimeSupervisor {
       absent: false,
       statusKnown: true,
       fatal: mcp.fatal === true,
+      authorization: mcp.authorization,
+      waitingOnDependency: healthz.observed && healthz.ok && readyz.observed && !readyz.ok && mcpReady,
       detail: `${healthz.detail}; ${readyz.detail}; ${mcp.detail}`,
     };
   }
@@ -981,6 +971,7 @@ class RuntimeSupervisor {
 
   async startTunnel(config, operationName = "runtime-start", { forceRestart = false } = {}) {
     if (config.mode !== "full") return;
+    this.assertTunnelAccess();
     this.assertTunnelClientReady(config);
     try {
       const existing = await this.waitForKnownTunnelStatus(config);
@@ -1082,9 +1073,15 @@ class RuntimeSupervisor {
         || this.tunnelMonitorInFlight
         || this.restartTimers.tunnel) return;
       this.tunnelMonitorInFlight = true;
-      void this.observeTunnelForMonitor(config).then((health) => {
+      void this.observeTunnelForMonitor(config).then(async (health) => {
         if (this.stopping || generation !== this.tunnelMonitorGeneration) return;
+        if (health.authorization) {
+          await this.pauseTunnelForAuthorization(config, health.authorization);
+          return;
+        }
         if (!health.statusKnown) {
+          this.tunnelMonitorFailures = 0;
+          this.recoveryBudget.unhealthy("tunnel");
           if (!this.tunnelMonitorObservationUnavailable) {
             this.tunnelMonitorObservationUnavailable = true;
             this.logger.warn("runtime.tunnel_monitor_observation_unavailable", {
@@ -1100,7 +1097,14 @@ class RuntimeSupervisor {
           });
         }
         if (health.ready) {
+          this.recoveryBudget.healthy("tunnel");
           this.tunnelMonitorFailures = 0;
+          if (this.tunnelDependencyWaiting) {
+            this.tunnelDependencyWaiting = false;
+            this.logger.info("runtime.tunnel_dependency_recovered", { message: health.detail });
+            if ((this.daemon || this.launcherProfile === "development")
+              && !this.restartTimers.daemon && !this.recoveringChildren.has("daemon")) this.tryWriteState("ready");
+          }
           if (this.tunnel?.pid !== health.pid) {
             this.tunnel = {
               pid: health.pid,
@@ -1112,9 +1116,27 @@ class RuntimeSupervisor {
           }
           return;
         }
+        this.recoveryBudget.unhealthy("tunnel");
+        if (health.waitingOnDependency) {
+          // The official client owns network retry and Retry-After. Restarting it here
+          // would throw away its backoff and create another registration/poll cycle.
+          this.tunnelMonitorFailures = 0;
+          if (!this.tunnelDependencyWaiting) {
+            this.tunnelDependencyWaiting = true;
+            this.logger.warn("runtime.tunnel_waiting_on_dependency", { message: health.detail });
+            this.tryWriteState("degraded", "Tunnel process is alive; waiting for its dependency to become ready. No restart requested.");
+          }
+          return;
+        }
         recordFailure(`Tunnel runtime lost readiness: ${health.detail}`, health.fatal === true);
       }).catch((error) => {
-        recordFailure(`Tunnel health probe failed: ${errorMessage(error)}`);
+        if (this.stopping || generation !== this.tunnelMonitorGeneration) return;
+        this.tunnelMonitorFailures = 0;
+        this.recoveryBudget.unhealthy("tunnel");
+        if (!this.tunnelMonitorObservationUnavailable) {
+          this.tunnelMonitorObservationUnavailable = true;
+          this.logger.warn("runtime.tunnel_monitor_observation_unavailable", { message: errorMessage(error) });
+        }
       }).finally(() => {
         this.tunnelMonitorInFlight = false;
       });
@@ -1127,7 +1149,46 @@ class RuntimeSupervisor {
     this.tunnelMonitorTimer = null;
     this.tunnelMonitorFailures = 0;
     this.tunnelMonitorObservationUnavailable = false;
+    this.tunnelDependencyWaiting = false;
     this.tunnelMonitorGeneration += 1;
+  }
+
+  async pauseTunnelForAuthorization(config, authorization) {
+    const message = `Tunnel authorization returned HTTP ${authorization.status}. Automatic reconnect is paused; review access and run setup again.`;
+    this.tunnelAuthorizationPaused = true;
+    if (this.restartTimers.tunnel) clearTimeout(this.restartTimers.tunnel);
+    this.restartTimers.tunnel = null;
+    const failures = [];
+    try {
+      writePrivateFileAtomic(this.tunnelAuthorizationPausePath, JSON.stringify({
+        version: 1, status: authorization.status, detectedAt: authorization.detectedAt,
+      }));
+    } catch (error) {
+      failures.push(`pause persistence failed: ${errorMessage(error)}`);
+    }
+    try {
+      await this.stopTunnelGracefully(config);
+    } catch (error) {
+      failures.push(`tunnel stop could not be verified: ${errorMessage(error)}`);
+    } finally {
+      this.stopTunnelMonitor();
+    }
+    const detail = failures.length ? `${message} ${failures.join("; ")}` : message;
+    this.tryWriteState("failed", detail);
+    if (failures.length) this.logger.error("runtime.tunnel_authorization_pause_failed", { message: detail });
+    else this.logger.warn("runtime.tunnel_authorization_paused", { status: authorization.status });
+    this.publishOperation?.({ name: "runtime-recovery", status: "failed", message: detail });
+  }
+
+  clearTunnelAuthorizationPause() {
+    fs.rmSync(this.tunnelAuthorizationPausePath, { force: true });
+    this.tunnelAuthorizationPaused = false;
+  }
+
+  assertTunnelAccess() {
+    if (this.tunnelAuthorizationPaused || fs.existsSync(this.tunnelAuthorizationPausePath)) {
+      throw new BrowserAccessPausedError("Tunnel access is paused after an authorization failure. Review the runtime key and approved access, then run setup again. Automatic reconnect is disabled.");
+    }
   }
 
   async startDaemon(config) {
@@ -1306,6 +1367,8 @@ class RuntimeSupervisor {
       if (!tunnelOnly) await this.startDaemon(config);
       this.restartHistory.daemon = [];
       this.restartHistory.tunnel = [];
+      this.recoveryBudget.reset();
+      if (config.mode === "full") this.assertTunnelAccess();
       this.writeState("ready");
       if (this.nativeRecovery) {
         try { await this.nativeRecovery.ensure(config); }
@@ -1347,23 +1410,31 @@ class RuntimeSupervisor {
 
   scheduleRecovery(name) {
     if (this.stopping) return;
-    if (this.restartTimers[name]) return;
+    if (name === "tunnel" && (this.tunnelAuthorizationPaused || fs.existsSync(this.tunnelAuthorizationPausePath))) return;
+    if (this.restartTimers[name] || this.recoveringChildren.has(name)) return;
     const attempts = this.recordRestart(name);
-    if (attempts > MAX_RESTARTS_PER_WINDOW) {
+    const budget = this.recoveryBudget.failure(name);
+    if (attempts > MAX_RESTARTS_PER_WINDOW || !budget.allowed) {
       const cause = this.lastChildFailure[name];
-      const message = `${name} stopped more than ${MAX_RESTARTS_PER_WINDOW} times in 60 seconds; automatic restart is disabled`
+      const message = `${name} exceeded its recovery budget; automatic restart is disabled. Review the failure and start it explicitly`
         + (cause ? `; last failure: ${cause}` : "");
       this.tryWriteState("failed", message);
       this.publishOperation?.({ name: "runtime-recovery", status: "failed", message });
       return;
     }
-    const delay = Math.min(attempts * 1_000, 5_000);
+    const delay = budget.delayMs;
     this.restartTimers[name] = setTimeout(() => {
       this.restartTimers[name] = null;
+      this.recoveringChildren.add(name);
+      let retry = false;
       const recovery = this.recover(name).catch((error) => {
         const message = errorMessage(error);
         this.logger.error(`runtime.${name}_recovery_failed`, { message });
-        if (this.tryWriteState("failed", message)) this.scheduleRecovery(name);
+        retry = this.tryWriteState("failed", message);
+      }).finally(() => {
+        this.recoveringChildren.delete(name);
+        if (retry) this.scheduleRecovery(name);
+        else this.recoveryBudget.healthy(name);
       });
       this.recoveryTasks.add(recovery);
       void recovery.finally(() => this.recoveryTasks.delete(recovery));
@@ -1388,6 +1459,7 @@ class RuntimeSupervisor {
     if (!tunnelOnly) await this.waitForProxy(config);
     if (config.mode === "full") {
       await this.waitForTunnel(config, TUNNEL_START_TIMEOUT_MS, "runtime-recovery");
+      this.assertTunnelAccess();
     }
     if (!this.tryWriteState("ready")) {
       let cleanupError;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { TUNNEL_VERSION, parseTunnelStatus, tunnelClientInstallAction, tunnelCommandOutput, tunnelConnectLaunchError } from "../src/tunnel";
+import { TUNNEL_VERSION, parseTunnelStatus, parseLocalTunnelStatus, tunnelClientInstallAction, tunnelCommandOutput, tunnelConnectLaunchError } from "../src/tunnel";
 
 test("pins the fixed tunnel-client and migrates only the previously shipped version", () => {
   expect(TUNNEL_VERSION).toBe("0.0.12");
@@ -10,6 +10,20 @@ test("pins the fixed tunnel-client and migrates only the previously shipped vers
 });
 
 describe("tunnel status boundary", () => {
+  test("local inventory isolates the configured alias and requires a known ready state", () => {
+    const inventory = (state: string) => JSON.stringify({ entries: [
+      { alias: "other", runtime_state: "ready" }, { alias: "owned", runtime_state: state },
+    ] });
+    expect(parseLocalTunnelStatus(inventory("ready"), "owned").ok).toBe(true);
+    for (const state of ["starting", "healthy", "stopped", "unknown"]) {
+      expect(parseLocalTunnelStatus(inventory(state), "owned").ok).toBe(false);
+    }
+    expect(parseLocalTunnelStatus(inventory("ready"), "absent").state).toBe("stopped");
+    for (const output of ['{}', 'null', 'invalid', JSON.stringify({ entries: [
+      { alias: "owned", runtime_state: "ready" }, { alias: "owned", runtime_state: "ready" },
+    ] })]) expect(parseLocalTunnelStatus(output, "owned").ok).toBe(false);
+    expect(parseLocalTunnelStatus(inventory("ready"), "owned", 1).ok).toBe(false);
+  });
   test("requires the managed runtime process, health, and readiness together", () => {
     expect(parseTunnelStatus(JSON.stringify({
       process_running: true,
