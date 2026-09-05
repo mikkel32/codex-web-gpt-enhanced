@@ -22,6 +22,7 @@ export function MariaHome({ snapshot, navigate }: {
   const manual = snapshot.state.browserInteractionMode === "manual";
   const tabs = snapshot.browser?.tabs ?? [];
   const paused = snapshot.browser?.webAccess?.status === "paused";
+  const accountReady = !paused && (manual ? snapshot.state.mcpSetupComplete : snapshot.browser?.authenticated);
   const webReady = !paused && (manual ? snapshot.state.mcpSetupComplete : snapshot.browser?.authenticated && snapshot.state.codexCatalogVerified);
   const steps = [
     { id: "account", title: s.web, done: manual ? snapshot.state.mcpSetupComplete : snapshot.browser?.authenticated, surface: manual ? "mcp" : "browser" },
@@ -81,7 +82,7 @@ export function MariaHome({ snapshot, navigate }: {
         <section className="studio-connection-panel" aria-label={s.connections}>
           <div className="studio-section-heading"><h2>{s.connections}</h2><button className="icon-button" aria-label="Refresh connection status" disabled={checking} onClick={refresh}><Icon name="reload" /></button></div>
           <button className="studio-connection-row" onClick={() => navigate("setup")}><Icon name="setup" /><span><strong>{s.native}</strong><small>{development ? "DEV" : nativeReady ? s.connected : checking ? s.checking : s.attention}</small></span><span className={`studio-indicator ${nativeReady ? "is-ready" : "needs-attention"}`} title={nativeReady ? s.ready : s.attention} /><span className="sr-only">{nativeReady ? s.ready : checking ? s.checking : s.attention}</span></button>
-          <button className="studio-connection-row" onClick={() => navigate("browser")}><Icon name="browser" /><span><strong>{s.web}</strong><small>{paused ? s.attention : snapshot.browser?.authenticated ? s.connected : manual ? s.manual : s.signIn}</small></span><span className={`studio-indicator ${webReady ? "is-ready" : "needs-attention"}`} /></button>
+          <button className="studio-connection-row" onClick={() => navigate("browser")}><Icon name="browser" /><span><strong>{s.web}</strong><small>{paused ? s.attention : accountReady ? s.connected : manual ? s.manual : s.signIn}</small></span><span className={`studio-indicator ${accountReady ? "is-ready" : "needs-attention"}`} /></button>
           <button className="studio-connection-row" onClick={() => navigate("mcp")}><Icon name="mcp" /><span><strong>{s.tools}</strong><small>{snapshot.state.mcpSetupComplete ? s.connected : s.connect}</small></span><span className={`studio-indicator ${snapshot.state.mcpSetupComplete ? "is-ready" : "needs-attention"}`} /></button>
           <div className="studio-mode"><span>{s.mode}</span><button onClick={() => navigate("settings")}>{manual ? s.manual : s.automatic}<Icon name="chevron" /></button></div>
           {error ? <p role="status" className="studio-inline-error">{s.attention}: {error}</p> : null}

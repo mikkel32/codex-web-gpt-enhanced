@@ -32,7 +32,7 @@ export function CommandPalette({ open, close, navigate, language }: {
   return <dialog ref={dialog} className="command-palette" aria-label={s.command} onCancel={close}
     onClick={event => { if (event.target === dialog.current) close(); }}>
     <div className="command-inner">
-      <div className="command-input"><Icon name="globe" /><input ref={input} placeholder={s.search}
+      <div className="command-input"><Icon name="globe" /><input ref={input} placeholder={s.search} aria-label={s.search}
         value={query} role="combobox" aria-expanded="true" aria-controls="command-results"
         aria-activedescendant={results[selected] ? `command-${results[selected]!.id}` : undefined}
         onChange={event => { setQuery(event.target.value); setSelected(0); }}

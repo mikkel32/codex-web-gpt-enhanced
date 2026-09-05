@@ -1446,7 +1446,7 @@ function ActivitySurface({
         <input type="search" aria-label={s.searchActivity} placeholder={s.searchActivity} value={query} onChange={event => setQuery(event.target.value)} />
         <button className="button-secondary" onClick={() => { if (!paused) setFrozen(logs); setPaused(!paused); }}>{paused ? s.resume : s.pause}</button>
       </div>
-      <div className="studio-activity-count">{shown.length} {s.matching}</div>
+      <div className="studio-activity-count">{shown.length} {language === "en" && shown.length === 1 ? "event" : s.matching}</div>
       <div className="activity-table">
         {shown.length === 0 ? (
           <div className="surface-empty">
@@ -1694,6 +1694,7 @@ function SetupRow({
   title: string;
   titleAction?: ReactNode;
 }) {
+  const ActionButton = complete ? SecondaryButton : PrimaryButton;
   return (
     <div className={`setup-row${complete ? " is-complete" : ""}`}>
       <span className="setup-index">{complete ? <Icon name="check" /> : index}</span>
@@ -1710,9 +1711,9 @@ function SetupRow({
             {secondaryAction}
           </SecondaryButton>
         ) : null}
-        <SecondaryButton disabled={disabled || (complete && !repeatable)} onClick={onAction}>
+        <ActionButton disabled={disabled || (complete && !repeatable)} onClick={onAction}>
           {action}
-        </SecondaryButton>
+        </ActionButton>
       </div>
     </div>
   );
