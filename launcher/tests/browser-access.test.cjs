@@ -93,3 +93,98 @@ test('duplicate Send admission calls share one pacing slot', async () => {
   release();await Promise.all(attempts);
   assert.equal(tab.submissionActivated,true);assert.equal(tab.sendAdmission,null);
 });
+
+test('mixed failures during one cooldown do not inflate incidents or downgrade verification', () => {
+  let now = Date.parse('2026-09-05T10:00:00Z');
+  const gate = new BrowserAccessGate({ now: () => now });
+  gate.pause('verification');
+  const started = gate.snapshot().detectedAt;
+  gate.pause('rate-limit');
+  const until = gate.snapshot().retryAt;
+  for (let i = 0; i < 45; i++) {
+    now += 1000;
+    gate.pause(i % 2 ? 'rate-limit' : 'service');
+    gate.pause('sign-in');
+  }
+  assert.deepEqual(gate.snapshot(), { status: 'paused', reason: 'verification',
+    detectedAt: started, retryAt: until, incidents: 1, canResume: false });
+  now = Date.parse(until) + 1000;
+  gate.pause('rate-limit');
+  assert.equal(gate.snapshot().incidents, 2);
+  assert.equal(Date.parse(gate.snapshot().retryAt), now + 120000);
+  assert.equal(gate.snapshot().reason, 'verification');
+});
+
+test('an explicit later server deadline still extends a mixed incident', () => {
+  let now = Date.parse('2026-09-05T10:00:00Z');
+  const gate = new BrowserAccessGate({ now: () => now });
+  gate.pause('verification'); gate.pause('rate-limit', '60');
+  now += 40000; gate.pause('service', '300');
+  assert.equal(Date.parse(gate.snapshot().retryAt), now + 300000);
+  assert.equal(gate.snapshot().incidents, 1);
+  assert.equal(gate.snapshot().reason, 'verification');
+});
+
+test('cancelled queued reservations do not wait or consume a pacing slot', async () => {
+  let waits = 0;
+  const gate = new BrowserAccessGate({ now: () => 0, wait: async () => { waits++; } });
+  await gate.beforeSend();
+  await assert.rejects(gate.beforeSend(() => false), /pending Web send was stopped/);
+  assert.equal(waits, 0);
+  const stale = gate.beforeSend();
+  gate.pause('verification'); gate.resume();
+  await assert.rejects(stale, /pending Web send was stopped/);
+  assert.equal(waits, 0);
+});
+
+test('the explicit challenge header is authoritative regardless of HTTP status', () => {
+  const host = Object.assign(Object.create(BrowserHost.prototype), {
+    accessGate: new BrowserAccessGate(), turnTabs: new Map(),
+    view: { webContents: { id: 7, isDestroyed: () => false } }, logger: { warn() {} },
+  });
+  for (const statusCode of [200, 403, 429, 503]) {
+    host.accessGate.resume();
+    assert.equal(host.handleChatGptBackendResponse({ webContentsId: 7,
+      url: 'https://chatgpt.com/backend-api/me', statusCode,
+      responseHeaders: { 'CF-Mitigated': ['challenge'] } }), true);
+    assert.equal(host.accessGate.snapshot().reason, 'verification');
+  }
+  host.accessGate.resume();
+  for (const url of ['https://chatgpt.com/backend-api/me', 'https://example.com/backend-api/me']) {
+    assert.equal(host.handleChatGptBackendResponse({webContentsId: 7, url, statusCode: 403}), false);
+  }
+  assert.equal(host.accessGate.snapshot().status, 'ready');
+});
+
+test('secondary failures preserve the review page, but a new primary reason selects its page', () => {
+  const host = Object.assign(Object.create(BrowserHost.prototype), {
+    accessGate: new BrowserAccessGate(), logger: { warn() {} },
+  });
+  host.pauseWebAccess('rate-limit', '60', 'limited-tab');
+  host.pauseWebAccess('verification', undefined, 'challenge-tab');
+  host.pauseWebAccess('service', '120', 'background-tab');
+  host.pauseWebAccess('sign-in', undefined, 'other-tab');
+  host.pauseWebAccess('verification', undefined, 'other-tab');
+  assert.equal(host.accessReviewTabId, 'challenge-tab');
+});
+
+test('Send handoff rechecks helper ownership and access after admission resolves', async () => {
+  for (const mutation of ['helper', 'pause', 'mode', 'resume', 'replace-gate']) {
+    let release;
+    const gate = new BrowserAccessGate();
+    const tab = { id: 'tab', helperPid: 10, status: 'running', interactionMode: 'automatic' };
+    const host = Object.assign(Object.create(BrowserHost.prototype), {
+      turnTabs: new Map([[tab.id, tab]]), accessGate: gate,
+    });
+    gate.beforeSend = () => new Promise(resolve => { release = resolve; });
+    const pending = host.admitConversationSubmission(tab, 10);
+    release();
+    if (mutation === 'helper') tab.helperPid = 11;
+    if (mutation === 'pause') gate.pause('verification');
+    if (mutation === 'mode') tab.interactionMode = 'manual';
+    if (mutation === 'resume') { gate.pause('verification'); gate.resume(); }
+    if (mutation === 'replace-gate') host.accessGate = new BrowserAccessGate();
+    await assert.rejects(pending);
+    assert.equal(tab.submissionActivated, undefined);
+  }
+});

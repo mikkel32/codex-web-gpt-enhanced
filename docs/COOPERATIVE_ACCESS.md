@@ -25,6 +25,8 @@ stateDiagram-v2
   HTTP 429, backend HTTP 401, and conversation-endpoint HTTP 503. It considers only
   this launcher's owned ChatGPT surfaces. An ordinary permission-related 403 or a
   third-party resource failure is not classified as a verification challenge.
+  Challenge detection uses the `cf-mitigated: challenge` header independently of
+  the HTTP status, following [Cloudflare's documented signal](https://developers.cloudflare.com/cloudflare-challenges/challenge-types/challenge-pages/detect-response/).
 - Rate-limit dialogs remain visible and produce terminal errors. Structured errors
   after Send activation or acceptance also become terminal, even when a lower
   layer incorrectly labels them retryable.
@@ -37,6 +39,12 @@ stateDiagram-v2
   cannot shorten it. Without a server time, the initial cooldown is one minute.
   Persistent incident responses back off up to fifteen minutes. Expiry alone does
   not resume work.
+- Mixed failures within an active cooldown count as one incident. Verification
+  takes precedence over sign-in, rate limits, and service failures. Secondary
+  failures keep the original review page; an explicit later server deadline can
+  still extend the wait. A new failure after the cooldown can increase backoff.
+- Cancelled reservations fail before waiting. Send admission rechecks ownership,
+  interaction mode, and pause state after the asynchronous pacing handoff.
 - Challenges are never automatically reloaded or solved. Users review the existing
   ChatGPT surface and complete any check themselves. Successful background assets
   cannot clear the pause. Startup authentication refresh is skipped while paused.

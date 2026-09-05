@@ -56,13 +56,14 @@ class BrowserAccessGate {
     const now = this.now();
     const previous = this.record;
     // A burst of failed subrequests represents one incident, not an exponential retry loop.
-    const sameIncident = previous?.reason === reason && now - previous.detectedAt < 30_000;
+    const sameIncident = previous && (previous.retryAt === null || previous.retryAt > now || now - previous.detectedAt < 30_000);
     const incidents = sameIncident ? previous.incidents : (previous?.incidents ?? 0) + 1;
     const timed = reason === "rate-limit" || reason === "service";
     const retryAt = timed ? Math.max(previous?.retryAt ?? 0, retryAfterTime(retryAfter, now)
       ?? (sameIncident && previous.retryAt > now ? previous.retryAt : now + Math.min(15 * 60_000, DEFAULT_COOLDOWN_MS * 2 ** Math.min(incidents - 1, 4)))) : previous?.retryAt ?? null;
     // Verification and sign-in require an explicit human acknowledgement, even if a later asset loads.
-    const effectiveReason = previous && ["verification", "sign-in"].includes(previous.reason) && timed ? previous.reason : reason;
+    const priority = { service: 0, "rate-limit": 1, "sign-in": 2, verification: 3, "local-state": 4 };
+    const effectiveReason = previous && priority[previous.reason] > priority[reason] ? previous.reason : reason;
     const next = { version: 1, reason: effectiveReason, detectedAt: sameIncident ? previous.detectedAt : now, retryAt: retryAt === null ? null : Math.ceil(retryAt / 1000) * 1000, incidents };
     if (JSON.stringify(next) === JSON.stringify(previous)) return this.snapshot();
     this.record = next;
@@ -83,14 +84,17 @@ class BrowserAccessGate {
 
   beforeSend(stillOwned = () => true) {
     const revision = this.revision;
-    const send = this.tail.then(async () => {
+    const assertOwned = () => {
       this.assertAvailable();
+      if (revision !== this.revision || !stillOwned()) throw new BrowserAccessPausedError("This pending Web send was stopped. Return to the original Codex task to continue; no prompt was sent.");
+    };
+    const send = this.tail.then(async () => {
+      assertOwned();
       if (this.lastSendAt !== null) {
         const remaining = this.sendIntervalMs - (this.now() - this.lastSendAt);
         if (remaining > 0) await this.wait(remaining);
       }
-      this.assertAvailable();
-      if (revision !== this.revision || !stillOwned()) throw new BrowserAccessPausedError("This pending Web send was stopped. Return to the original Codex task to continue; no prompt was sent.");
+      assertOwned();
       this.lastSendAt = this.now();
     });
     this.tail = send.catch(() => {});

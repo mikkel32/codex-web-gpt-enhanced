@@ -4,7 +4,7 @@ const { createHash, randomBytes } = require("node:crypto");
 const { clipboard, WebContentsView, powerMonitor, powerSaveBlocker, shell } = require("electron");
 const { writePrivateFileAtomic } = require("./atomic-file.cjs");
 const { SavedConversations, savedConversationUrl } = require("./saved-conversations.cjs");
-const { BrowserAccessGate } = require("./browser-access.cjs");
+const { BrowserAccessGate, BrowserAccessPausedError } = require("./browser-access.cjs");
 const {
   runBrowserHelperOperation,
   verifyConnectorWithBrowserHelper,
@@ -202,8 +202,7 @@ function responseHeaderIncludes(responseHeaders, name, expectedValue) {
 }
 
 function isChatGptCloudflareChallengeResponse(details) {
-  return details?.statusCode === 403
-    && (() => { try { return new URL(details.url).origin === CHATGPT_ORIGIN; } catch { return false; } })()
+  return (() => { try { return new URL(details?.url).origin === CHATGPT_ORIGIN; } catch { return false; } })()
     && responseHeaderIncludes(details.responseHeaders, "cf-mitigated", "challenge");
 }
 
@@ -1190,12 +1189,17 @@ class BrowserHost {
 
   pauseWebAccess(reason, retryAfter, tabId, evidence = { source: "page-dialog" }) {
     this.accessGate ??= new BrowserAccessGate();
-    this.accessReviewTabId = tabId ?? this.selectedTabId;
-    const previous = JSON.stringify(this.accessGate.snapshot());
+    const previousState = this.accessGate.snapshot();
+    const previous = JSON.stringify(previousState);
     try { this.accessGate.pause(reason, retryAfter); }
     catch (error) { this.logger.warn("browser.access_pause_persistence_failed", { message: error.message }); }
     if (JSON.stringify(this.accessGate.snapshot()) === previous) return;
-    this.logger.warn("browser.access_paused", { reason, retryAt: this.accessGate.snapshot().retryAt, ...evidence });
+    const state = this.accessGate.snapshot();
+    // Keep the page that needs attention selected when other tabs report secondary failures.
+    if (previousState.status !== "paused" || previousState.reason !== state.reason) {
+      this.accessReviewTabId = tabId ?? this.selectedTabId;
+    }
+    this.logger.warn("browser.access_paused", { reason: state.reason, signalReason: reason, retryAt: state.retryAt, ...evidence });
     this.publishState?.(this.snapshot());
   }
 
@@ -2349,9 +2353,13 @@ class BrowserHost {
   }
 
   async admitConversationSubmission(tab, helperPid) {
-    if (this.accessGate) await this.accessGate.beforeSend(() => this.turnTabs.get(tab.id) === tab && tab.status === "running" && tab.helperPid === helperPid);
+    const gate = this.accessGate;
+    const revision = gate?.revision;
+    if (gate) await gate.beforeSend(() => this.turnTabs.get(tab.id) === tab && tab.status === "running" && tab.helperPid === helperPid && tab.interactionMode === "automatic");
     if (tab.submissionActivated) return;
-    if (this.turnTabs.get(tab.id) !== tab || tab.status !== "running") throw new Error("The Web turn ended before Send");
+    gate?.assertAvailable?.();
+    if (gate !== this.accessGate || revision !== gate?.revision) throw new BrowserAccessPausedError("The Web send was invalidated before handoff. Return to the original task to continue; no prompt was sent.");
+    if (this.turnTabs.get(tab.id) !== tab || tab.status !== "running" || tab.helperPid !== helperPid || tab.interactionMode !== "automatic") throw new Error("The Web turn ended before Send");
     if (tab.conversationKey) {
       const url = savedConversationUrl(tab.view.webContents.getURL());
       const previous = this.savedConversations?.get(tab.conversationKey);
