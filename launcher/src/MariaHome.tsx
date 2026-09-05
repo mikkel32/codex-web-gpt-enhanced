@@ -24,11 +24,13 @@ export function MariaHome({ snapshot, navigate }: {
   const paused = snapshot.browser?.webAccess?.status === "paused";
   const accountReady = !paused && (manual ? snapshot.state.mcpSetupComplete : snapshot.browser?.authenticated);
   const webReady = !paused && (manual ? snapshot.state.mcpSetupComplete : snapshot.browser?.authenticated && snapshot.state.codexCatalogVerified);
-  const steps = [
-    { id: "account", title: s.web, done: manual ? snapshot.state.mcpSetupComplete : snapshot.browser?.authenticated, surface: manual ? "mcp" : "browser" },
-    { id: "models", title: s.manageModels, done: snapshot.state.codexCatalogVerified, surface: "setup" },
-    { id: "tools", title: s.tools, done: snapshot.state.mcpSetupComplete, surface: "mcp" },
-  ] as const;
+  const modelStep = { id: "models", title: s.manageModels, done: snapshot.state.codexCatalogVerified, surface: "setup" as const };
+  const toolStep = { id: "tools", title: s.tools, done: snapshot.state.mcpSetupComplete, surface: "mcp" as const };
+  const steps = manual ? [toolStep, modelStep] : [
+    { id: "account", title: s.web, done: snapshot.browser?.authenticated, surface: "browser" as const },
+    modelStep,
+    toolStep,
+  ];
   const complete = steps.filter(step => step.done).length;
   const selectTab = async (id: string) => {
     setActionError("");

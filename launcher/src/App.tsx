@@ -1045,6 +1045,13 @@ function SetupSurface({
 
   const studio = studioCopy(snapshot.state.language);
   const readySteps = Number(browser?.authenticated === true) + Number(snapshot.state.codexCatalogVerified === true);
+  if (manualInteraction && !snapshot.state.coreSetupComplete) {
+    return <ContentSurface eyebrow={studio.tools} title={copy.setupTitle} subtitle={copy.manualInteractionBody}>
+      <div className="studio-setup-summary"><span className="studio-setup-summary-icon"><McpMark /></span><div><strong>{studio.tools}</strong><p>{copy.mcpBody}</p></div></div>
+      <PrimaryButton onClick={showMcp}>{copy.configureMcp}</PrimaryButton>
+      <p className="studio-native-note"><Icon name="check" />{studio.nativeAvailable}</p>
+    </ContentSurface>;
+  }
   return (
     <ContentSurface
       eyebrow={copy.required}
@@ -1053,7 +1060,7 @@ function SetupSurface({
         : manualInteraction ? copy.manualInteractionBody : copy.setupSubtitle}
       title={devProfile ? copy.devSetupTitle : copy.setupTitle}
     >
-      <div className="studio-setup-summary"><span className="studio-setup-summary-icon"><Icon name={snapshot.state.codexCatalogVerified ? "check" : "setup"} /></span><div><strong>{snapshot.state.codexCatalogVerified ? studio.modelReady : studio.modelPending}</strong><p>{studio.setupPrivacy}</p></div>{!manualInteraction ? <span>{readySteps}/2</span> : null}</div>
+      <div className="studio-setup-summary"><span className="studio-setup-summary-icon"><Icon name={snapshot.state.codexCatalogVerified ? "check" : "setup"} /></span><div><strong>{manualInteraction ? studio.tools : snapshot.state.codexCatalogVerified ? studio.modelReady : studio.modelPending}</strong><p>{manualInteraction ? copy.manualInteractionBody : studio.setupPrivacy}</p></div>{!manualInteraction ? <span>{readySteps}/2</span> : null}</div>
       <div className="setup-list">
         {!manualInteraction ? <>
           <SetupRow
@@ -1073,7 +1080,7 @@ function SetupSurface({
             ? devProfile ? copy.devReinstall : copy.reinstall
             : manualInteraction ? studio.tools : devProfile ? copy.devInstall : copy.install}
           complete={snapshot.state.codexCatalogVerified === true}
-          description={devProfile ? copy.devStepInstallBody : copy.stepInstallBody}
+          description={manualInteraction ? copy.zeroRiskModelSettingsBody : devProfile ? copy.devStepInstallBody : copy.stepInstallBody}
           disabled={busy || (!manualInteraction && !browser?.authenticated)}
           index={manualInteraction ? 1 : 2}
           onAction={install}
@@ -1223,7 +1230,7 @@ function McpSurface({
     <ContentSurface
       fit
       subtitle={devProfile ? copy.devMcpSubtitle : copy.mcpSubtitle}
-      title={devProfile ? copy.devMcpTitle : "MCP"}
+      title={devProfile ? copy.devMcpTitle : studioCopy(snapshot.state.language).tools}
     >
       {!manualInteraction && !configuringInactiveMode && !snapshot.state.codexCatalogVerified ? (
         <NoticeRow icon="setup" tone="warning">{copy.mcpCatalogRequired}</NoticeRow>

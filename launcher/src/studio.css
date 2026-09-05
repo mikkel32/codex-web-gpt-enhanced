@@ -397,5 +397,9 @@ html[data-maria-hidden="true"] *, html[data-maria-hidden="true"] *::before, html
 .studio-settings-section .settings-list { padding-inline: 19px; }
 .studio-settings-section .setting-row:last-child { border-bottom: 0; }
 .studio-release-status { display: flex; align-items: center; gap: 8px; color: #c0b49e; font-size: 11px; margin-bottom: 26px; }
+.content-scroll.is-fit .surface-header { display: block; flex-shrink: 0; margin-bottom: 24px; }
+.content-scroll.is-fit .surface-header h1 { font-size: 32px; line-height: 1.15; letter-spacing: -.045em; font-weight: 530; margin: 0 0 12px; }
+.content-scroll.is-fit .surface-header p { display: block; white-space: normal; font-size: 12px; line-height: 1.8; color: #a9a295; margin: 0; }
+.wizard-stepper em { display: inline; white-space: normal; font-size: 10px; line-height: 1.4; text-align: left; }
 .signin-browser-icon { width: 42px; height: 42px; object-fit: contain; flex-shrink: 0; }
 @media (max-width: 1050px) { .studio-settings-section { grid-template-columns: 1fr; gap: 12px; } .studio-settings-section > div > h2 { margin-top: 0; } }
