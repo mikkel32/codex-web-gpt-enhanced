@@ -170,6 +170,12 @@ export function bridgeToResponsesSSE(
   let emittedFrames = 0;
   let gated = false;
   let stepping = false;
+  let capacityWaiter: (() => void) | undefined;
+  const wakeCapacity = () => {
+    const resolve = capacityWaiter;
+    capacityWaiter = undefined;
+    resolve?.();
+  };
   const emit = (name: string, data: Record<string, unknown>) => {
         if (closed) return;
         try {
@@ -781,6 +787,9 @@ export function bridgeToResponsesSSE(
             closed = true;
             return;
           }
+          // A heartbeat only helps a reader that can receive it. Keep the watchdog
+          // active, but never accumulate keep-alives behind a stalled consumer.
+          if ((controller.desiredSize ?? 0) <= 0) return;
           try {
             controller.enqueue(heartbeatFrame);
             emittedFrames++;
@@ -792,7 +801,7 @@ export function bridgeToResponsesSSE(
 
       const waitForCapacity = async () => {
         while (!closed && (controller.desiredSize ?? 1) <= 0) {
-          await new Promise<void>(resolve => setTimeout(resolve, 5));
+          await new Promise<void>(resolve => { capacityWaiter = resolve; });
         }
       };
 
@@ -809,6 +818,7 @@ export function bridgeToResponsesSSE(
     // cancelled turn does not leak the upstream stream or keep draining tokens (RC2).
     clientCancelled = true;
     closed = true;
+    wakeCapacity();
     if (beat) clearInterval(beat);
     onCancel?.();
     returnIterator();
@@ -816,8 +826,8 @@ export function bridgeToResponsesSSE(
 
   if ((options?.streamPlatform ?? process.platform) === "win32") {
     // Returning a Promise from a ReadableStream pull() served by Bun on Windows hits Bun#32111's
-    // native teardown crash. Keep only Windows push-driven and retain HWM backpressure by polling
-    // desiredSize; Darwin/Linux use the native pull contract below.
+    // native teardown crash. The Windows pull hook only wakes the independent pump
+    // synchronously; Darwin/Linux use the native async pull contract below.
     return new ReadableStream<Uint8Array>({
       start(streamController) {
         controller = streamController;
@@ -825,11 +835,15 @@ export function bridgeToResponsesSSE(
         void pump().catch(error => {
           if (closed) return;
           closed = true;
+          wakeCapacity();
           if (beat) clearInterval(beat);
           onCancel?.();
           returnIterator();
           try { controller.error(error); } catch { /* already closed */ }
         });
+      },
+      pull() {
+        wakeCapacity();
       },
       cancel: cancelStream,
     });
