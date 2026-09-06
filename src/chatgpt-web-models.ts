@@ -335,7 +335,7 @@ export const CHATGPT_WEB_MODEL_ROUTES: readonly ChatGptWebAutomaticModelRoute[] 
   {
     slug: "chatgpt-web/astra-pro",
     displayName: "Maria Web — Astra Pro",
-    description: "Regular Chat Latest + Pro, verified as GPT-6 Pro before sending. Requires account access.",
+    description: "Regular Chat with Latest selected and Power set to Pro, checked before sending. Requires account access.",
     interactionMode: "automatic",
     backendModel: CHATGPT_WEB_ASTRA_BACKEND_MODEL,
     codexEffort: "ultra",

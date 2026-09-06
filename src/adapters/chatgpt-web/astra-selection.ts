@@ -3,14 +3,11 @@ import { activateChatGptEffortMenu, parseChatGptEffortSliderState } from "../../
 import { ChatGptWebAdapterError } from "./adapter-error";
 
 const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
-export function isChatGptAstraProBadge(text: string): boolean {
-  return /^(?:GPT[- ]?)?6(?:\.0)?(?:[- ]?Astra)?\s*Pro$/i.test(normalize(text));
-}
 function unavailable(phase: string, observed = ""): ChatGptWebAdapterError {
   // Only picker labels are included, never a page dump or conversation text.
   const label = normalize(observed).replace(/[^a-zA-Z0-9 ._-]/g, "").slice(0, 80);
   return new ChatGptWebAdapterError(
-    `Astra selection could not confirm ${phase}${label ? ` (picker: ${label})` : ""}. Regular Chat must expose Latest + GPT-6 Pro in this browser session.`,
+    `Astra selection could not confirm ${phase}${label ? ` (picker: ${label})` : ""}. Select Latest and set Power to Pro in regular Chat.`,
     { status: 400, errorType: "invalid_request_error", code: "astra_pro_unavailable", retryable: false },
   );
 }
@@ -29,7 +26,7 @@ async function until<T>(read: () => Promise<T | undefined>, phase: string, signa
   } while (Date.now() < deadline);
   throw unavailable(phase);
 }
-async function badge(control: Locator): Promise<{ astra: boolean; label: string; expanded: boolean }> {
+async function badge(control: Locator): Promise<{ label: string; expanded: boolean }> {
   // Read one DOM revision, rather than mixing labels from successive transitions.
   const raw = await control.evaluate(element => ({
     visible: (element as HTMLElement).innerText ?? element.textContent ?? "",
@@ -41,14 +38,20 @@ async function badge(control: Locator): Promise<{ astra: boolean; label: string;
   const visible = normalize(raw.visible);
   const candidates = [visible, raw.label, raw.title, raw.content]
     .filter((value): value is string => typeof value === "string").map(normalize);
-  const compact = !visible || /^(?:Pro|Thinking effort|Select effort|Select model)$/i.test(visible);
-  return { astra: isChatGptAstraProBadge(visible) || (compact && candidates.some(isChatGptAstraProBadge)), label: visible || candidates.find(Boolean) || "", expanded: raw.expanded === "true" };
+  return { label: visible || candidates.find(Boolean) || "", expanded: raw.expanded === "true" };
 }
 const placeholder = (label: string) => !label || /^(?:Thinking effort|Select effort|Select model)$/i.test(label);
 const closedBadge = (control: Locator, signal?: AbortSignal) => until(async () => {
   const value = await badge(control);
   return value.expanded || placeholder(value.label) ? undefined : value;
 }, "the closed model control", signal);
+async function closePicker(page: Page, menu: Locator, control: Locator, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  await page.keyboard.press("Escape");
+  // Wait for the exiting menu to release its focus trap before the Send boundary.
+  await until(async () => !await menu.isVisible() ? true : undefined, "the closed picker", signal);
+  await closedBadge(control, signal);
+}
 const powerControl = (menu: Locator) => menu.getByRole("menuitem", { name: "Power", exact: true });
 async function modelListVisible(menu: Locator): Promise<boolean> {
   if (!await menu.getByRole("menuitemradio", { name: "Latest", exact: true }).isVisible()) return false;
@@ -67,37 +70,35 @@ async function readyPower(menu: Locator, signal?: AbortSignal) {
     return state;
   }, "the enabled Power control", signal);
 }
-async function confirmMenu(menu: Locator, signal?: AbortSignal): Promise<void> {
-  const state = await readyPower(menu, signal);
-  if (state.value !== 4) throw unavailable("Pro power");
-  const model = menu.getByRole("menuitem", { name: "Select model", exact: true });
-  const evidence = await until(async () => {
-    if (!await model.isVisible()) return undefined;
-    const value = await badge(model);
-    return placeholder(value.label) ? undefined : value;
-  }, "the model badge", signal);
-  if (!evidence.astra) throw unavailable("GPT-6 Pro", evidence.label);
+async function latestChoice(menu: Locator, signal?: AbortSignal): Promise<Locator> {
+  const opening = await until(async () => {
+    if (await modelListVisible(menu)) return "list";
+    if (await menu.getByRole("menuitem", { name: "Select model", exact: true }).isVisible()) return "toggle";
+    return undefined;
+  }, "the model list", signal);
+  if (opening === "toggle") {
+    signal?.throwIfAborted();
+    await menu.getByRole("menuitem", { name: "Select model", exact: true }).press("Enter", { timeout: 5_000 });
+  }
+  await until(async () => await modelListVisible(menu) ? true : undefined, "the model list", signal);
+  return menu.getByRole("menuitemradio", { name: "Latest", exact: true });
 }
-/** A compact Pro trigger needs fresh proof from its owned model menu. */
+/** Verify the user's Latest + Pro route, independent of numeric model labels. */
 export async function assertChatGptAstraProReady(control: Locator, signal?: AbortSignal, page?: Page): Promise<void> {
   try {
-    const evidence = await closedBadge(control, signal);
-    if (evidence.astra) return;
-    if (!page || !/^Pro$/i.test(evidence.label)) throw unavailable("GPT-6 Pro", evidence.label);
+    signal?.throwIfAborted();
+    if (!page) throw unavailable("Latest + Pro controls");
     const { menu } = await activateChatGptEffortMenu(page, control, { signal });
-    if (await modelListVisible(menu)) {
-      const selected = menu.locator('[role="menuitemradio"][aria-checked="true"]');
-      if (await selected.count() !== 1) throw unavailable("the current model choice");
-      signal?.throwIfAborted();
-      // Return from the submenu using its already-selected row; do not switch models.
-      await selected.press("Enter", { timeout: 2_000 });
-    }
-    await confirmMenu(menu, signal);
+    const latest = await latestChoice(menu, signal);
+    const selected = await latest.getAttribute("aria-checked");
     signal?.throwIfAborted();
-    await page.keyboard.press("Escape");
-    const closed = await closedBadge(control, signal);
+    if (selected !== "true") throw unavailable("Latest selection");
+    // Return through the already-selected row. Verification never switches models.
+    await latest.press("Enter", { timeout: 2_000 });
+    const state = await readyPower(menu, signal);
+    if (state.value !== 4) throw unavailable("Pro power");
+    await closePicker(page, menu, control, signal);
     signal?.throwIfAborted();
-    if (!closed.astra && !/^Pro$/i.test(closed.label)) throw unavailable("the final Pro control", closed.label);
   } catch (error) {
     preserveCancellation(error, signal);
     if (error instanceof ChatGptWebAdapterError) throw error;
@@ -112,22 +113,13 @@ export async function selectChatGptAstraPro(page: Page, control: Locator, signal
   };
   try {
     const { menu } = await checked(() => activateChatGptEffortMenu(page, control, { signal }));
-    const latest = menu.getByRole("menuitemradio", { name: "Latest", exact: true });
     phase = "the model list";
-    const opening = await until(async () => {
-      if (await modelListVisible(menu)) return "list";
-      if (await menu.getByRole("menuitem", { name: "Select model", exact: true }).isVisible()) return "toggle";
-      return undefined;
-    }, phase, signal);
-    if (opening === "toggle") {
-      await checked(() => menu.getByRole("menuitem", { name: "Select model", exact: true }).press("Enter", { timeout: 5_000 }));
-    }
-    await until(async () => await modelListVisible(menu) ? true : undefined, phase, signal);
+    const latest = await latestChoice(menu, signal);
     if (await checked(() => latest.getAttribute("aria-disabled")) === "true") throw unavailable("Latest access");
     await checked(() => latest.press("Enter", { timeout: 5_000 }));
     phase = "Latest selection";
-    // Some ChatGPT versions unmount the radio rows after selection. The restored
-    // Power state and numeric generation badge are the acknowledgment, not stale rows.
+    // Some versions unmount the radio rows after selection. Power returning
+    // acknowledges the submenu transition; selection is re-read below.
     let state = await readyPower(menu, signal);
     phase = "Pro power";
     while (state.value < 4) {
@@ -140,10 +132,12 @@ export async function selectChatGptAstraPro(page: Page, control: Locator, signal
         return next;
       }, phase, signal);
     }
-    await confirmMenu(menu, signal);
-    await checked(() => page.keyboard.press("Escape"));
-    const closed = await closedBadge(control, signal);
-    if (!closed.astra && !/^Pro$/i.test(closed.label)) throw unavailable("the closed Pro label", closed.label);
+    // Read back the actual radio choice; a numbered badge is neither required nor proof.
+    const selectedLatest = await latestChoice(menu, signal);
+    if (await checked(() => selectedLatest.getAttribute("aria-checked")) !== "true") throw unavailable("Latest selection");
+    await checked(() => selectedLatest.press("Enter", { timeout: 2_000 }));
+    if ((await readyPower(menu, signal)).value !== 4) throw unavailable("Pro power");
+    await closePicker(page, menu, control, signal);
   } catch (error) {
     preserveCancellation(error, signal);
     if (error instanceof ChatGptWebAdapterError) throw error;

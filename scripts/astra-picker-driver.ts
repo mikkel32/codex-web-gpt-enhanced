@@ -12,21 +12,27 @@ try {
   }
   assert(page, "Missing fixture page");
   await page.waitForFunction(() => typeof (window as unknown as { setCase?: unknown }).setCase === "function");
-  for (const options of [{}, { compact: true }, { hiddenGeneration: true }, { expanded: true, compact: true },
+  for (const options of [{ noGeneration: true, latest: true, position: 4, verifyOnly: true },
+    {}, { compact: true }, { hiddenGeneration: true }, { expanded: true, compact: true },
     { compact: true, expanded: true, latest: true, position: 4, verifyOnly: true },
     { compact: true, expanded: true, modelsOnly: true },
     { compact: true, expanded: true, modelsOnly: true, latest: true, position: 4, verifyOnly: true },
-    { generation: "5.6", compact: true }]) {
+    { noGeneration: true, compact: true },
+    { noGeneration: true, compact: true, expanded: true, modelsOnly: true, latest: true, position: 4, verifyOnly: true },
+    { generation: "5.6", compact: true },
+    { noGeneration: true, latest: false, position: 4, verifyOnly: true, reject: true },
+    { noGeneration: true, latest: true, position: 2, verifyOnly: true, reject: true }]) {
     await page.evaluate(value => (window as unknown as { setCase(v: unknown): void }).setCase(value), options);
     const control = page.getByTestId("model-switcher-dropdown-button");
-    if (options.generation === "5.6") {
-      await assert.rejects(selectChatGptAstraPro(page, control), { code: "astra_pro_unavailable" });
+    if (options.reject) {
+      await assert.rejects(assertChatGptAstraProReady(control, undefined, page), { code: "astra_pro_unavailable" });
     } else {
       if (!options.verifyOnly) await selectChatGptAstraPro(page, control);
       await assertChatGptAstraProReady(control, undefined, page);
+      assert.equal(await page.getByRole("menu").isVisible(), false, "Picker must release focus before Send");
     }
     const events = await page.evaluate(() => (window as unknown as { events: string[] }).events);
     assert(!events.includes("disabled-power"), "Pressed Power during a disabled transition");
   }
-  console.log(`ASTRA_ELECTRON_PICKER_OK ${process.platform}/${process.arch} electron=${process.versions.electron} normal compact hidden-label expanded-menu model-list-only retained-compact wrong-generation`);
+  console.log(`ASTRA_ELECTRON_PICKER_OK ${process.platform}/${process.arch} electron=${process.versions.electron} normal compact hidden-label expanded-menu model-list-only retained-compact latest-pro-no-generation already-selected rejects-nonlatest rejects-nonpro`);
 } finally { await browser.close(); }
