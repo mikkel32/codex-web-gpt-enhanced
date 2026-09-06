@@ -2344,6 +2344,17 @@ describe("ChatGPT outer-native harness v4", () => {
       await adapter.runTurn!(secondRequest, { headers: new Headers() }, event => replayEvents.push(event));
       expect(browserStarts).toBe(2);
       expect(replayEvents).toEqual(secondEvents);
+      const changedProvider = { ...provider, chatgptWeb: { ...provider.chatgptWeb, headed: false, experimentalBiggerContext: true, turnTimeoutMs: 45_000 } };
+      const changedWorker = ChatGptBrowserWorker.forProvider(changedProvider);
+      const changedRun = changedWorker.run;
+      changedWorker.run = async () => { throw new Error("A settings change must not resend a completed turn"); };
+      try {
+        expect(chatGptWebTraceId(changedProvider, secondRequest)).toBe(chatGptWebTraceId(provider, secondRequest));
+        const changedReplay: AdapterEvent[] = [];
+        await createChatGptWebAdapter(changedProvider).runTurn!(secondRequest, { headers: new Headers() }, event => changedReplay.push(event));
+        expect(changedReplay).toEqual(secondEvents);
+        expect(browserStarts).toBe(2);
+      } finally { changedWorker.run = changedRun; }
     } finally {
       (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = originalRun;
       await TurnBroker.forSocket(socketPath).close();

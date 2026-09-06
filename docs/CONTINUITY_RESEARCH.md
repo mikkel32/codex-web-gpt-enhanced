@@ -57,7 +57,21 @@ This trades two ordinary attachment uploads for a smaller visible message on tho
 
 Idle-page reclamation preserves server-side history and the saved URL. It does not erase conversations or force an active task into a new chat. The tradeoff is that returning to a reclaimed page requires loading that same saved conversation again. The currently active ChatGPT page can still retain its own history internally; this release does not promise zero browser history memory.
 
-## Limits and next research questions
+## Local history storage and stable profile identity
+
+Source inspection found another independent cause of conversation loss: the adapter hashed the entire provider configuration into conversation, trace, ownership, and cursor identities. Changing timeouts, Bigger Context, or approval preferences consequently changed the namespace used to find an existing chat. Full launcher profiles now persist the first namespace they use in a private, immutable binding. This adopts the existing configuration hash, preserving its saved cursor filename and conversation keys. Later operational settings reuse that identity while still selecting a browser worker with the updated configuration.
+
+Bindings remain separate for browser descriptors, connector names, automatic/manual interaction, base URLs, and configured account storage. Publication is atomic and first-writer-wins across processes. Invalid records stop resolution rather than silently choosing another conversation. Configurations that changed before the first binding was created cannot be recovered from their old one-way hashes; this migration does not guess or merge those historical identities.
+
+The Responses cache previously serialized the entire expanded input/output prefix for every response ID. It now retains immutable, content-addressed history nodes with response IDs referencing their final node. Matching prefixes share storage even when callers send complete inputs instead of `previous_response_id`. Expansions reconstruct fresh JSON objects; mutable callers cannot alter earlier stored history. Expiring an ancestor response ID preserves nodes still needed by a descendant.
+
+A deterministic 200-response fixture with a shared 100,000-character prefix has a flat serialized payload baseline of 21,481,090 bytes. The new restart snapshot, including metadata and hashes, is 172,247 bytes with 201 unique nodes. This is about 125 times smaller for that fixture. It is a serialized-storage comparison, not an Electron RSS, CPU, token, or live ChatGPT measurement. Hashing full input still visits its items, and expanding an input still reconstructs its complete history.
+
+Snapshot v2 stores complete dependency closures within a UTF-8 byte budget. A missing/corrupt parent or an oversized dependency excludes the entire affected history instead of replaying a partial prefix. Independent valid branches remain usable. Existing v1 snapshots migrate on load. Tests also cover forks, TTL, restart, Unicode limits, native tool/goal metadata, mutation isolation, and writes remaining scoped to the original runtime home.
+
+The profile tests race six independent processes with different timeout settings and require one common persistent identity. An adapter test changes settings after a completed post-compaction tool turn and requires identical trace identity and replayed events with no new browser execution. These verify local transport behavior; applying the update and observing representative ongoing tasks remains separate runtime evidence.
+
+## Remaining live measurements
 
 There is no evidence here that compaction can safely be removed altogether, that personalization guarantees exact recall, or that a lightweight DOM means a small model context. Private response-stream interception would require independent evidence for request correlation, tool-only completion, reconnect behavior, and cancellation before replacing the current observer. It is not implemented by this release.
 
