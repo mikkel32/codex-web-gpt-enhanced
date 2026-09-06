@@ -16,6 +16,7 @@ import { responsesRequestSchema } from "./schema";
 import { compactionItemToText } from "./compaction";
 import { previousResponseReplayPrefixLength } from "./state";
 import { decodeReasoningEnvelope } from "./reasoning-envelope";
+import { recordNativeMessageTurn } from "./message-provenance";
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -313,7 +314,8 @@ export function parseRequest(body: unknown): CodexParsedRequest {
   if (typeof data.input === "string") {
     messages.push({ role: "user", content: data.input, timestamp: now });
   } else if (data.input) {
-    for (const item of data.input) {
+    const rawInput = isObj(body) && Array.isArray(body.input) ? body.input : [];
+    for (const [inputIndex, item] of data.input.entries()) {
       const effectiveType = (item as { type?: string }).type ?? ("role" in item ? "message" : undefined);
 
       if (effectiveType === "compaction_trigger") {
@@ -399,7 +401,7 @@ export function parseRequest(body: unknown): CodexParsedRequest {
           }
           case "assistant": {
             const parts = outputTextOf(msg.content as unknown[] | string | undefined);
-            messages.push({
+            messages.push(recordNativeMessageTurn({
               role: "assistant",
               content: pendingReasoning.length > 0
                 ? [...pendingReasoning.map(entry => entry.part), ...parts]
@@ -407,7 +409,7 @@ export function parseRequest(body: unknown): CodexParsedRequest {
               ...(msg.phase ? { phase: msg.phase } : {}),
               model: data.model,
               timestamp: now,
-            });
+            }, rawInput[inputIndex]));
             pendingReasoning.length = 0;
             break;
           }

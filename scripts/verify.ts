@@ -9,6 +9,7 @@ const runtimeBundle = join(scratch, "runtime");
 async function run(args: string[]): Promise<void> {
   const child = Bun.spawn([process.execPath, ...args], {
     cwd: root,
+    env: { ...process.env, CODEX_CHATGPT_WEB_HOME: join(scratch, "home") },
     stdin: "inherit",
     stdout: "inherit",
     stderr: "inherit",

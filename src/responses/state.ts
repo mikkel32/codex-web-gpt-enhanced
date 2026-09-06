@@ -68,7 +68,7 @@ export function previousResponseReplayPrefixLength(body: unknown): number {
 export function rememberResponseState(
   requestBody: unknown,
   response: { id?: unknown; output?: unknown; status?: unknown; incomplete_details?: unknown },
-  opts?: { force?: boolean },
+  opts?: { force?: boolean; nativeTurnId?: string },
 ): void {
   if (!requestBody || typeof requestBody !== "object" || Array.isArray(requestBody)) return;
   const request = requestBody as Record<string, unknown>;
@@ -80,7 +80,15 @@ export function rememberResponseState(
       || (details as { reason?: unknown }).reason !== "max_output_tokens") return;
   } else if (response.status !== undefined && response.status !== "completed") return;
   const store = requestStores.get(requestBody) ?? currentStore();
-  store.remember(response.id, [...inputItems(request.input), ...response.output]);
+  const output = opts?.nativeTurnId ? response.output.map(item => {
+    if (!item || typeof item !== "object" || Array.isArray(item) || item.role !== "assistant") return item;
+    const metadata = item.internal_chat_message_metadata_passthrough;
+    return { ...item, internal_chat_message_metadata_passthrough: {
+      ...(metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {}),
+      turn_id: opts.nativeTurnId,
+    } };
+  }) : response.output;
+  store.remember(response.id, [...inputItems(request.input), ...output]);
   schedulePersist(store);
 }
 

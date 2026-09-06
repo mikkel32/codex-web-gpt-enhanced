@@ -5,12 +5,15 @@ import { join } from "node:path";
 import { ChatGptBrowserWorker, type BrowserTurn } from "../src/adapters/chatgpt-web/browser-worker";
 import {
   createChatGptWebAdapter,
+  recordChatGptWebResponseReceipt,
   type ChatGptZeroRiskManualControl,
 } from "../src/adapters/chatgpt-web/index";
 import { chatGptTurnSessions } from "../src/adapters/chatgpt-web/turn-execution";
 import { TurnBroker } from "../src/adapters/chatgpt-web/turn-broker";
 import { CHATGPT_WEB_ZERO_RISK_BACKEND_MODEL } from "../src/chatgpt-web-models";
 import { defaultBrokerEndpoint } from "../src/config";
+import { buildResponseJSON } from "../src/bridge";
+import { parseRequest } from "../src/responses/parser";
 import type { AdapterEvent, CodexParsedRequest, CodexProviderConfig } from "../src/types";
 
 const testTempRoot = process.platform === "win32" ? tmpdir() : "/tmp";
@@ -349,7 +352,15 @@ test("Zero Risk offers only the new Codex suffix when the launcher reuses its re
   };
   try {
     const adapter = createChatGptWebAdapter(config, { broker, zeroRiskManualControl: control });
-    await adapter.runTurn!(request(historicalTurnId), { headers: new Headers() }, () => {});
+    const historical = request(historicalTurnId);
+    const priorEvents: AdapterEvent[] = [];
+    await adapter.runTurn!(historical, { headers: new Headers() }, event => priorEvents.push(event));
+    const response = buildResponseJSON(priorEvents, historical.modelId);
+    recordChatGptWebResponseReceipt(config, historical, response);
+    const answer = { ...(response.output as Array<Record<string, unknown>>).find(item => item.type === "message" && item.phase === "final_answer")!,
+      internal_chat_message_metadata_passthrough: { turn_id: historicalTurnId } };
+    input.context.messages[input.context.messages.length - 2] = parseRequest({ model: historical.modelId, input: [answer] }).context.messages[0]!;
+    rawInput[rawInput.length - 2] = answer;
     await adapter.runTurn!(
       input,
       { headers: new Headers() },

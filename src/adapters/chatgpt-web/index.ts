@@ -197,6 +197,20 @@ export function chatGptWebExecutionNamespace(provider: CodexProviderConfig): str
   return conversationProfileNamespace(provider);
 }
 
+function conversationCursorPath(provider: CodexProviderConfig, namespace: string): string | undefined {
+  const descriptor = provider.chatgptWeb?.browserHost === "launcher" && provider.chatgptWeb.browserHostDescriptorPath;
+  return descriptor ? join(dirname(resolve(expandUserPath(descriptor))), `conversation-cursors-${createHash("sha256").update(namespace).digest("hex").slice(0, 16)}.json`) : undefined;
+}
+
+/** Called after the bridge constructs final output, before sending response.completed. */
+export function recordChatGptWebResponseReceipt(provider: CodexProviderConfig, parsed: CodexParsedRequest, response: Record<string, unknown>): void {
+  if (!provider.chatgptWeb?.localToolsEnabled || parsed._compactionRequest || parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID) return;
+  const namespace = chatGptWebExecutionNamespace(provider);
+  const path = conversationCursorPath(provider, namespace);
+  const key = path && chatGptConversationKey(parsed, namespace);
+  if (key) new ChatGptConversationCursors(path).recordOutput(key, parsed, response);
+}
+
 export function chatGptWebTraceId(provider: CodexProviderConfig, parsed: CodexParsedRequest): string {
   const executionKey = chatGptTurnExecutionKey(parsed);
   return createHash("sha256")
@@ -387,9 +401,7 @@ export function createChatGptWebAdapter(
       : parsed
   );
 
-  const conversationCursors = new ChatGptConversationCursors(retainedLauncherDescriptor
-    ? join(dirname(retainedLauncherDescriptor), `conversation-cursors-${createHash("sha256").update(executionNamespace).digest("hex").slice(0, 16)}.json`)
-    : undefined);
+  const conversationCursors = new ChatGptConversationCursors(conversationCursorPath(provider, executionNamespace));
 
   const startRuntime = (
     parsed: CodexParsedRequest,

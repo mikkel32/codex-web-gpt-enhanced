@@ -71,6 +71,20 @@ Snapshot v2 stores complete dependency closures within a UTF-8 byte budget. A mi
 
 The profile tests race six independent processes with different timeout settings and require one common persistent identity. An adapter test changes settings after a completed post-compaction tool turn and requires identical trace identity and replayed events with no new browser execution. These verify local transport behavior; applying the update and observing representative ongoing tasks remains separate runtime evidence.
 
+## Exact answer receipts instead of matching text alone
+
+The prior suffix detector accepted a matching input-prefix hash and a unique matching answer text. Source inspection exposed a false match: if the original Web answer was absent but a later native answer used the same wording, the detector could omit work between that prefix and the later answer. Repeated short answers also caused unnecessary full snapshots because text alone could not distinguish them.
+
+Current Codex source at commit `6af345407d9c2a568da9d01b6c4b81a9e61495c0` supplies a better boundary. Its [message protocol](https://github.com/openai/codex/blob/6af345407d9c2a568da9d01b6c4b81a9e61495c0/codex-rs/protocol/src/models.rs) carries optional message IDs, phases, and native turn metadata. Its [request formatter](https://github.com/openai/codex/blob/6af345407d9c2a568da9d01b6c4b81a9e61495c0/codex-rs/core/src/client_common.rs) clones the input items and only removes image-detail fields for the relevant lightweight route. These are public protocol/source observations, not a signed-in Web inference trace.
+
+The parser now associates translated assistant messages with their raw item and turn IDs using private object metadata, leaving model-visible text and historical hashes unchanged. After the Responses bridge constructs a completed final answer, the server records its actual output-item ID against the already-completed Web cursor, before emitting `response.completed`. JSON responses use the same completion hook. The cursor accepts bounded aliases for re-observed completed rounds because rebuilding the wire response can assign a fresh message ID without another browser Send.
+
+A suffix now requires the prefix hash, source native turn, emitted item receipt, and answer text to match. Commentary cannot satisfy the final-answer boundary. New user/developer instructions or agent notifications between the accepted prefix and final answer prevent trimming. Unrelated later native turns remain in the suffix, including answers with identical wording. Missing receipts and legacy cursors use the canonical snapshot in the same saved conversation; a subsequent completed answer establishes the new receipt.
+
+Locally generated assistant items also retain their source native turn in the stored continuation copy. The outgoing response object is not mutated. Tests exercise actual JSON/SSE HTTP completion callbacks, previous-response expansion, restart, same-turn responses from different item IDs, repeated wording across native turns, missing metadata, commentary, instruction gaps, and receipt aliases. A turn ID alone was rejected as insufficient because one native turn can contain multiple responses.
+
+During verification, HTTP fixtures were found writing synthetic continuation entries to the default runtime cache. The core test command and full verifier now launch children with temporary runtime homes. A nested-process regression test gives the parent a sentinel cache, proves the child writes elsewhere, and checks cleanup. This isolates validation from saved runtime state. The affected cache was not used as live-context evidence; its earlier contents were not established.
+
 ## Remaining live measurements
 
 There is no evidence here that compaction can safely be removed altogether, that personalization guarantees exact recall, or that a lightweight DOM means a small model context. Private response-stream interception would require independent evidence for request correlation, tool-only completion, reconnect behavior, and cancellation before replacing the current observer. It is not implemented by this release.

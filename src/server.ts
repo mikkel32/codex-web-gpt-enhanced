@@ -1,4 +1,4 @@
-import { chatGptWebTraceId, createChatGptWebAdapter } from "./adapters/chatgpt-web";
+import { chatGptWebTraceId, createChatGptWebAdapter, recordChatGptWebResponseReceipt } from "./adapters/chatgpt-web";
 import { closeChatGptBrowserWorkers } from "./adapters/chatgpt-web/browser-worker";
 import { closeTurnBrokers, TurnBroker } from "./adapters/chatgpt-web/turn-broker";
 import { timingSafeEqual } from "node:crypto";
@@ -543,6 +543,11 @@ export async function responseRequest(
   }
 
   const provider = providerConfig(config);
+  const rememberWebResponse = (response: Record<string, unknown>): void => {
+    rememberResponseState(parsed._rawBody, response, { force: true, nativeTurnId: extractChatGptTurnIdentity(parsed).turnId });
+    try { recordChatGptWebResponseReceipt(provider, parsed, response); }
+    catch { console.warn("[chatgpt-web] Answer receipt could not be saved; the next turn will use canonical history."); }
+  };
   let traceId: string | undefined;
   try {
     traceId = chatGptWebTraceId(provider, parsed);
@@ -617,7 +622,7 @@ export async function responseRequest(
           : {}),
         ...(compaction ? { compaction: true } : {
           ...(options.rememberState === false ? {} : {
-            onCompletedResponse: (response: Record<string, unknown>) => rememberResponseState(parsed._rawBody, response, { force: true }),
+            onCompletedResponse: rememberWebResponse,
           }),
         }),
       },
@@ -642,7 +647,7 @@ export async function responseRequest(
     ...(compaction ? { compaction: true } : {}),
   });
   if (!compaction && options.rememberState !== false) {
-    rememberResponseState(parsed._rawBody, json, { force: true });
+    rememberWebResponse(json);
   }
   return Response.json(json);
 }

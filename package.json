@@ -1,6 +1,6 @@
 {
   "name": "codex-chatgpt-web",
-  "version": "5.11.0",
+  "version": "5.12.0",
   "private": true,
   "description": "A focused local Responses bridge that runs Codex tasks through a user-authenticated ChatGPT web session.",
   "repository": {
@@ -29,7 +29,7 @@
     "dev:launcher": "bun run src/cli.ts dev launcher",
     "dev:chat": "bun run scripts/dev-chat.ts",
     "codex:native": "bun run scripts/native-codex.ts",
-    "test": "bun test tests/*.test.ts",
+    "test": "bun run scripts/test-core.ts",
     "audit": "bun audit",
     "check-version": "bun run scripts/check-version.ts",
     "typecheck": "bunx tsc --noEmit",

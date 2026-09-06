@@ -11,7 +11,7 @@ import { ChatGptCompletionTracker, chatGptImageFilePayloads, chatGptPromptFilePa
 import { ChatGptBrowserWorker, type BrowserTurn } from "../src/adapters/chatgpt-web/browser-worker";
 import { chatGptConversationKey } from "../src/adapters/chatgpt-web/conversation-key";
 import { CHATGPT_TURN_REVISION_CONFLICT_MESSAGE, extractChatGptTurnEnvironment, extractChatGptTurnIdentity, extractChatGptTurnUserRevision, priorChatGptAbortedTurnIds } from "../src/adapters/chatgpt-web/environment";
-import { CHATGPT_WEB_ADAPTER_HEARTBEAT_MS, chatGptWebExecutionNamespace, chatGptWebTraceId, createChatGptWebAdapter } from "../src/adapters/chatgpt-web/index";
+import { CHATGPT_WEB_ADAPTER_HEARTBEAT_MS, chatGptWebExecutionNamespace, chatGptWebTraceId, createChatGptWebAdapter, recordChatGptWebResponseReceipt } from "../src/adapters/chatgpt-web/index";
 import { chatGptHtmlToMarkdown, ChatGptMarkdownBuffer } from "../src/adapters/chatgpt-web/markdown";
 import { CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
 import {
@@ -436,7 +436,15 @@ describe("ChatGPT outer-native harness v4", () => {
 
     try {
       const adapter = createChatGptWebAdapter(provider);
-      await adapter.runTurn!(first, { headers: new Headers() }, () => {});
+      const firstEvents: AdapterEvent[] = [];
+      await adapter.runTurn!(first, { headers: new Headers() }, event => firstEvents.push(event));
+      const response = buildResponseJSON(firstEvents, first.modelId);
+      recordChatGptWebResponseReceipt(provider, first, response);
+      const answer = { ...(response.output as Array<Record<string, unknown>>).find(item => item.type === "message" && item.phase === "final_answer")!,
+        internal_chat_message_metadata_passthrough: { turn_id: "turn_test_123" } };
+      second.context.messages[1] = parseRequest({ model: first.modelId, input: [answer] }).context.messages[0]!;
+      const secondRaw = second._rawBody as { input: unknown[] };
+      secondRaw.input[secondRaw.input.length - 2] = answer;
       await adapter.runTurn!(second, { headers: new Headers() }, () => {});
 
       expect(browserMessages).toBe(2);

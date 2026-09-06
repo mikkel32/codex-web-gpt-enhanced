@@ -223,6 +223,9 @@ bun run app:performance
 
 Verification covers the runtime, launcher, model routing, process lifecycle,
 TypeScript, the renderer, dependency audits, and relocatable runtime smoke checks.
+Run core tests with `bun run test`, or select files with
+`bun run scripts/test-core.ts tests/conversation-cursors.test.ts`. These commands
+and the full verifier isolate runtime caches in temporary homes.
 Packaging produces an installer for the current operating system. macOS builds
 include a signature check and a launch test. Windows and Linux builds run in CI.
 
