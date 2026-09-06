@@ -13,7 +13,10 @@ try {
   assert(page, "Missing fixture page");
   await page.waitForFunction(() => typeof (window as unknown as { setCase?: unknown }).setCase === "function");
   for (const options of [{}, { compact: true }, { hiddenGeneration: true }, { expanded: true, compact: true },
-    { compact: true, expanded: true, latest: true, position: 4, verifyOnly: true }, { generation: "5.6", compact: true }]) {
+    { compact: true, expanded: true, latest: true, position: 4, verifyOnly: true },
+    { compact: true, expanded: true, modelsOnly: true },
+    { compact: true, expanded: true, modelsOnly: true, latest: true, position: 4, verifyOnly: true },
+    { generation: "5.6", compact: true }]) {
     await page.evaluate(value => (window as unknown as { setCase(v: unknown): void }).setCase(value), options);
     const control = page.getByTestId("model-switcher-dropdown-button");
     if (options.generation === "5.6") {
@@ -25,5 +28,5 @@ try {
     const events = await page.evaluate(() => (window as unknown as { events: string[] }).events);
     assert(!events.includes("disabled-power"), "Pressed Power during a disabled transition");
   }
-  console.log(`ASTRA_ELECTRON_PICKER_OK ${process.platform}/${process.arch} electron=${process.versions.electron} normal compact hidden-label expanded-menu retained-compact wrong-generation`);
+  console.log(`ASTRA_ELECTRON_PICKER_OK ${process.platform}/${process.arch} electron=${process.versions.electron} normal compact hidden-label expanded-menu model-list-only retained-compact wrong-generation`);
 } finally { await browser.close(); }

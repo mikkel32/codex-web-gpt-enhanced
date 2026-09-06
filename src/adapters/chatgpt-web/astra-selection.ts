@@ -50,6 +50,12 @@ const closedBadge = (control: Locator, signal?: AbortSignal) => until(async () =
   return value.expanded || placeholder(value.label) ? undefined : value;
 }, "the closed model control", signal);
 const powerControl = (menu: Locator) => menu.getByRole("menuitem", { name: "Power", exact: true });
+async function modelListVisible(menu: Locator): Promise<boolean> {
+  if (!await menu.getByRole("menuitemradio", { name: "Latest", exact: true }).isVisible()) return false;
+  const power = powerControl(menu);
+  return await menu.locator('[role="menuitem"][aria-expanded="true"]').isVisible()
+    || !await power.isVisible() || await power.getAttribute("aria-disabled") === "true";
+}
 async function readyPower(menu: Locator, signal?: AbortSignal) {
   const power = powerControl(menu), slider = power.locator('[role="slider"]');
   return until(async () => {
@@ -79,7 +85,7 @@ export async function assertChatGptAstraProReady(control: Locator, signal?: Abor
     if (evidence.astra) return;
     if (!page || !/^Pro$/i.test(evidence.label)) throw unavailable("GPT-6 Pro", evidence.label);
     const { menu } = await activateChatGptEffortMenu(page, control, { signal });
-    if (await menu.locator('[role="menuitem"][aria-expanded="true"]').isVisible()) {
+    if (await modelListVisible(menu)) {
       const selected = menu.locator('[role="menuitemradio"][aria-checked="true"]');
       if (await selected.count() !== 1) throw unavailable("the current model choice");
       signal?.throwIfAborted();
@@ -107,12 +113,16 @@ export async function selectChatGptAstraPro(page: Page, control: Locator, signal
   try {
     const { menu } = await checked(() => activateChatGptEffortMenu(page, control, { signal }));
     const latest = menu.getByRole("menuitemradio", { name: "Latest", exact: true });
-    const expanded = menu.locator('[role="menuitem"][aria-expanded="true"]');
     phase = "the model list";
-    if (!await checked(() => expanded.isVisible())) {
+    const opening = await until(async () => {
+      if (await modelListVisible(menu)) return "list";
+      if (await menu.getByRole("menuitem", { name: "Select model", exact: true }).isVisible()) return "toggle";
+      return undefined;
+    }, phase, signal);
+    if (opening === "toggle") {
       await checked(() => menu.getByRole("menuitem", { name: "Select model", exact: true }).press("Enter", { timeout: 5_000 }));
     }
-    await until(async () => await expanded.isVisible() && await latest.isVisible() ? true : undefined, phase, signal);
+    await until(async () => await modelListVisible(menu) ? true : undefined, phase, signal);
     if (await checked(() => latest.getAttribute("aria-disabled")) === "true") throw unavailable("Latest access");
     await checked(() => latest.press("Enter", { timeout: 5_000 }));
     phase = "Latest selection";
