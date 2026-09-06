@@ -70,6 +70,8 @@ jobs:
         if: runner.os == 'Linux'
         run: command -v xvfb-run || (sudo apt-get update && sudo apt-get install -y xvfb)
       - run: bun run app:smoke
+      - name: Verify Astra picker in real Electron
+        run: bun run smoke:astra-picker
 
   actionlint:
     runs-on: ubuntu-latest

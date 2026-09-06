@@ -583,6 +583,14 @@ export async function responseRequest(
       headers: { "content-type": "application/json" },
     });
   }
+  const selectionError = traceId ? chatGptTurnSessions.modelSelectionError(traceId) : undefined;
+  if (selectionError) {
+    // Native Codex retries unfamiliar SSE failure codes. The same failed selection
+    // must return a terminal HTTP response rather than another disconnected stream.
+    return new Response(JSON.stringify({ error: { type: selectionError.errorType, code: selectionError.code, message: selectionError.message } }), {
+      status: 400, headers: { "content-type": "application/json" },
+    });
+  }
   const adapter = adapterFactory(provider);
   const queue = new AsyncEventQueue<AdapterEvent>();
   const abort = new AbortController();

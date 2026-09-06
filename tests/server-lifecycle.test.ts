@@ -4,6 +4,7 @@ import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chatGptWebTraceId } from "../src/adapters/chatgpt-web";
+import { ChatGptWebAdapterError } from "../src/adapters/chatgpt-web/adapter-error";
 import { runStructuredCompactionOnce } from "../src/adapters/chatgpt-web/compaction-handoff";
 import { ChatGptTextFeed, ChatGptTraceFeed, chatGptTurnSessions } from "../src/adapters/chatgpt-web/turn-execution";
 import { callTurnBroker, closeTurnBrokers, RemoteTurnBroker, TurnBroker } from "../src/adapters/chatgpt-web/turn-broker";
@@ -14,6 +15,38 @@ import { compactRequest, HttpTurnCounter, responseRequest, routeChatGptWebReques
 test("DEV harness configuration cannot bind a Responses listener", () => {
   const config = { ...defaultConfig("browser-only"), purpose: "dev-harness" as const, port: 0 };
   expect(() => startServer(config)).toThrow("cannot start a Responses listener");
+});
+
+test("an exact retry of failed Astra selection returns HTTP 400 without another adapter or stream", async () => {
+  const config = defaultConfig("browser-only"); config.proAvailable = true;
+  const body = {
+    model: "chatgpt-web/astra-pro", stream: true,
+    client_metadata: { "x-codex-turn-metadata": JSON.stringify({ thread_id: "thread_astra_failure", turn_id: "turn_astra_failure" }) },
+    input: [{ type: "message", role: "user", content: "Check this project", internal_chat_message_metadata_passthrough: { turn_id: "turn_astra_failure" } }],
+  };
+  const parsed = parseRequest(body); routeChatGptWebRequest(parsed, config);
+  const trace = chatGptWebTraceId(providerConfig(config), parsed);
+  const failure = new ChatGptWebAdapterError("Astra picker could not confirm GPT-6 Pro (picker: Pro)", {
+    status: 400, errorType: "invalid_request_error", code: "astra_pro_unavailable", retryable: false,
+  });
+  chatGptTurnSessions.clear();
+  const browser = Promise.reject(failure);
+  const session = chatGptTurnSessions.getOrCreate("astra-picker-failure", () => ({
+    mode: "read-only", browser, physicalSettlement: browser.then(() => {}, () => {}),
+    trace: new ChatGptTraceFeed(), text: new ChatGptTextFeed(), cancel() {},
+  }), trace);
+  try {
+    await session.browserOutcome;
+    const response = await responseRequest(new Request("http://127.0.0.1/v1/responses", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    }), config, () => { throw new Error("must not create another adapter"); });
+    expect(response.status).toBe(400);
+    expect(response.headers.get("content-type")).toBe("application/json");
+    expect(await response.json()).toMatchObject({ error: { code: "astra_pro_unavailable", message: failure.message } });
+    const changed = parseRequest({ ...body, input: [{ ...body.input[0], content: "Retry after changing the picker" }] });
+    routeChatGptWebRequest(changed, config);
+    expect(chatGptTurnSessions.modelSelectionError(chatGptWebTraceId(providerConfig(config), changed))).toBeUndefined();
+  } finally { chatGptTurnSessions.clear(); }
 });
 
 async function waitForTurnCount(turns: HttpTurnCounter, expected: number): Promise<void> {

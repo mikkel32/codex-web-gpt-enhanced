@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AdapterEvent, CodexParsedRequest } from "../../types";
 import type { BrokerToolRequest } from "./turn-broker";
-import { chatGptBrowserTabClosedError } from "./adapter-error";
+import { ChatGptWebAdapterError, chatGptBrowserTabClosedError } from "./adapter-error";
 import {
   extractChatGptCompactionSourceRevision,
   extractChatGptTurnIdentity,
@@ -749,6 +749,17 @@ export class ChatGptTurnSessions {
       const outcome = session.settledOutcome();
       if (outcome?.type !== "error") continue;
       if ("code" in outcome.error && outcome.error.code === "client_cancelled") return outcome.error;
+    }
+    return undefined;
+  }
+
+  modelSelectionError(traceId: string): ChatGptWebAdapterError | undefined {
+    this.prune();
+    for (const session of this.entries.values()) {
+      if (session.traceId !== traceId) continue;
+      const outcome = session.settledOutcome();
+      if (outcome?.type === "error" && outcome.error instanceof ChatGptWebAdapterError
+        && outcome.error.code === "astra_pro_unavailable" && !outcome.error.retryable) return outcome.error;
     }
     return undefined;
   }

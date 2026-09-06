@@ -1,0 +1,20 @@
+<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'"><title>Astra picker regression fixture</title>
+<style>body{font:16px sans-serif}button,[role=menuitem]{padding:12px}#picker{border:1px solid #aaa;width:300px}</style>
+<button id="trigger" data-testid="model-switcher-dropdown-button" data-tone="neutral" aria-haspopup="menu" aria-controls="picker" aria-expanded="false">High</button>
+<div id="picker" role="menu" data-testid="composer-intelligence-picker-content" hidden><div id="model" role="menuitem" tabindex="0" aria-label="Select model" aria-expanded="false">5.6 High</div><div id="power" role="menuitem" tabindex="0" aria-label="Power"><div data-model-reasoning-effort-slider><span role="slider" aria-valuemin="0" aria-valuemax="4" aria-valuenow="2"></span></div></div><div id="choices"></div></div>
+<script>
+let options={}, position=2, latest=false, menuOpen=false, submenu=false, transitioning=false, first=true, generation=0;
+const trigger=document.querySelector('#trigger'), menu=document.querySelector('#picker'), model=document.querySelector('#model'), power=document.querySelector('#power'), slider=document.querySelector('[role=slider]'), choices=document.querySelector('#choices');
+const names=['Instant','Medium','High','Extra High','Pro'];
+window.events=[];
+const modelLabel=()=>`${latest ? options.generation || '6' : '5.6'} ${names[position]}`;
+function label(){ trigger.innerHTML=''; trigger.removeAttribute('aria-label'); if(options.compact){trigger.textContent=names[position];}else if(options.hiddenGeneration){const span=document.createElement('span');span.hidden=true;span.textContent=(latest?'6':'5.6')+' ';trigger.append(span,document.createTextNode(names[position]));trigger.setAttribute('aria-label',modelLabel());}else trigger.textContent=modelLabel(); }
+function render(){menu.hidden=!menuOpen;trigger.setAttribute('aria-expanded',String(menuOpen));model.textContent=modelLabel();model.setAttribute('aria-expanded',String(submenu));if(submenu)model.removeAttribute('aria-label');else model.setAttribute('aria-label','Select model');power.setAttribute('aria-disabled',String(submenu||transitioning));slider.setAttribute('aria-valuenow',position);}
+function showModels(){submenu=true;choices.innerHTML='';for(const name of ['Latest','GPT-5.6 Sol']){const button=document.createElement('button');button.setAttribute('role','menuitemradio');button.textContent=name;button.setAttribute('aria-checked',String(name==='Latest'?latest:!latest));button.onclick=()=>{window.events.push(name);latest=name==='Latest';transitioning=true;choices.innerHTML='';render();const epoch=generation;setTimeout(()=>{if(epoch!==generation)return;submenu=false;transitioning=false;render();},options.delay||140);};choices.append(button);}render();}
+trigger.onclick=()=>{menuOpen=!menuOpen;if(menuOpen&&first&&options.expanded){first=false;showModels();}else render();};
+model.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();showModels();}};
+power.onkeydown=e=>{if(!['ArrowLeft','ArrowRight'].includes(e.key))return;e.preventDefault();if(submenu||transitioning){window.events.push('disabled-power');return;}position=Math.max(0,Math.min(4,position+(e.key==='ArrowRight'?1:-1)));window.events.push(e.key);render();};
+document.onkeydown=e=>{if(e.key==='Escape'&&menuOpen){menuOpen=false;render();trigger.textContent='Thinking effort';const epoch=generation;setTimeout(()=>{if(epoch===generation)label();},options.delay||140);}};
+window.setCase=value=>{generation++;options=value;position=value.position??2;latest=!!value.latest;menuOpen=false;submenu=false;transitioning=false;first=true;choices.innerHTML='';window.events=[];render();label();};
+window.setCase({});
+</script>

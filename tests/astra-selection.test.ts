@@ -7,19 +7,23 @@ import { resolveChatGptWebModelMode } from "../src/adapters/chatgpt-web/model";
 import { availableChatGptWebModelRoutes, CHATGPT_WEB_ASTRA_BACKEND_MODEL, requireChatGptWebModelRoute } from "../src/chatgpt-web-models";
 
 function picker(options: { badge?: string; closedBadge?: string; maximum?: number; jump?: number; powerDisabled?: boolean; onLatest?: () => void } = {}) {
-  let position = 2, selected = false, submenu = false;
+  let position = 2, selected = false, submenu = false, open = true;
   const actions: string[] = [];
+  const raw = (visible: string) => ({ visible, content: visible, label: null, title: null, expanded: "false" });
   const slider = { getAttribute: async (name: string) => String(name === "aria-valuemin" ? 0 : name === "aria-valuemax" ? options.maximum ?? 4 : position) };
-  const model = { press: async () => { submenu = true; }, innerText: async () => selected ? options.badge ?? "6\nPro" : "5.6 Pro" };
-  const latest = { waitFor: async () => { expect(submenu).toBe(true); }, getAttribute: async () => "false",
+  const model = { press: async () => { submenu = true; }, isVisible: async () => !submenu,
+    evaluate: async () => raw(selected ? options.badge ?? "6 Pro" : "5.6 Pro") };
+  const latest = { isVisible: async () => submenu, getAttribute: async () => "false",
     press: async () => { selected = true; submenu = false; actions.push("Latest"); options.onLatest?.(); } };
-  const power = { waitFor: async () => { expect(submenu).toBe(false); }, locator: () => slider,
-    getAttribute: async () => options.powerDisabled ? "true" : "false",
+  const power = { isVisible: async () => true, locator: () => slider,
+    getAttribute: async () => options.powerDisabled || submenu ? "true" : "false",
     press: async (key: string) => { actions.push(key); position += options.jump ?? 1; } };
-  const menu = { isVisible: async () => true, filter() { return this; }, last() { return this; },
+  const menu = { isVisible: async () => open, filter() { return this; }, last() { return this; },
+    locator: () => ({ isVisible: async () => submenu }),
     getByRole: (_role: string, query: { name: string }) => query.name === "Select model" ? model : query.name === "Latest" ? latest : power };
-  const control = { getAttribute: async () => "owned-menu", innerText: async () => options.closedBadge ?? options.badge ?? "6 Pro" };
-  const page = { locator: () => menu, keyboard: { press: async (key: string) => { actions.push(key); } } };
+  const control = { getAttribute: async (name: string) => name === "aria-controls" ? "owned-menu" : "false",
+    evaluate: async () => raw(options.closedBadge ?? options.badge ?? "6 Pro"), click: async () => { open = true; } };
+  const page = { locator: () => menu, keyboard: { press: async (key: string) => { actions.push(key); open = false; } } };
   return { page: page as unknown as Page, control: control as unknown as Locator, actions };
 }
 
@@ -29,8 +33,21 @@ test("Astra Pro selects Latest, reaches Pro in verified steps, and confirms the 
   expect(fixture.actions).toEqual(["Latest", "ArrowRight", "ArrowRight", "Escape"]);
 });
 
+test("compact Pro labels require fresh model-menu proof and never accept another generation", async () => {
+  const fixture = picker({ closedBadge: "Pro" });
+  await selectChatGptAstraPro(fixture.page, fixture.control);
+  await assertChatGptAstraProReady(fixture.control, undefined, fixture.page);
+  const wrong = picker({ badge: "5.6 Pro", closedBadge: "Pro" });
+  await expect(selectChatGptAstraPro(wrong.page, wrong.control)).rejects.toMatchObject({ code: "astra_pro_unavailable" });
+});
+
+test("a visible wrong generation is not overruled by a stale hidden Astra label", async () => {
+  const control = { evaluate: async () => ({ visible: "5.6 Pro", content: "6 Pro", label: "6 Pro", expanded: "false" }) } as unknown as Locator;
+  await expect(assertChatGptAstraProReady(control)).rejects.toMatchObject({ code: "astra_pro_unavailable" });
+});
+
 test("old Pro generations, changed badges, missing Pro, and unexpected power movement fail terminally", async () => {
-  for (const options of [{ badge: "5.6 Pro" }, { badge: "Latest" }, { closedBadge: "5.6 Pro" }, { maximum: 3 }, { jump: 2 }, { powerDisabled: true }]) {
+  for (const options of [{ badge: "5.6 Pro" }, { badge: "Latest" }, { closedBadge: "5.6 Pro" }, { maximum: 3 }, { jump: 2 }]) {
     const fixture = picker(options);
     await expect(selectChatGptAstraPro(fixture.page, fixture.control)).rejects.toMatchObject({ code: "astra_pro_unavailable", retryable: false });
   }
@@ -65,7 +82,7 @@ test("cancellation during menu activation prevents pointer fallback", async () =
 
 test("a cancelled final badge read cannot authorize submission", async () => {
   const controller = new AbortController();
-  const control = { innerText: async () => { controller.abort(); return "6 Pro"; } } as unknown as Locator;
+  const control = { evaluate: async () => { controller.abort(); return { visible: "6 Pro", content: "6 Pro", expanded: "false" }; } } as unknown as Locator;
   await expect(assertChatGptAstraProReady(control, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
 });
 
@@ -78,9 +95,9 @@ test("the real Send boundary rechecks Astra after preparation, including reused 
     let badge = "6 Pro", sends = 0, activated = 0;
     const hidden = { filter() { return this; }, last() { return this; }, isVisible: async () => false };
     const page = { isClosed: () => false, locator: () => hidden } as unknown as Page;
-    const control = { filter() { return this; }, last() { return this; }, innerText: async () => {
+    const control = { filter() { return this; }, last() { return this; }, evaluate: async () => {
       if (badge === "missing") throw new Error("Control detached");
-      return badge;
+      return { visible: badge, content: badge, expanded: "false" };
     } };
     const button = { waitFor: async () => {}, isEnabled: async () => true, press: async () => { sends++; } };
     const worker = { activeComposer: async () => ({ locator: () => ({ getByTestId: () => button, locator: () => control }) }),

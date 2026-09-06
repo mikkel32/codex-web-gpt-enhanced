@@ -3282,7 +3282,7 @@ export class ChatGptBrowserWorker {
     if (submissionLifecycle?.modelId === CHATGPT_WEB_ASTRA_MODEL_ID) {
       const control = composer.locator("xpath=ancestor::form[1]")
         .locator(CHATGPT_EFFORT_CONTROL_SELECTOR).filter({ visible: true }).last();
-      await assertChatGptAstraProReady(control, abortSignal);
+      await assertChatGptAstraProReady(control, abortSignal, page);
     }
     const initialToolBatchRevision = externalProgress?.snapshot().lastToolBatchRevision ?? 0;
     await submissionLifecycle?.onSendActivated?.();
