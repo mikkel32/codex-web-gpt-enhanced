@@ -73,7 +73,7 @@ import {
 } from "../../chatgpt-web-models";
 import { LauncherBrowserHelperClient } from "./launcher-helper-client";
 import { MAX_CHATGPT_BROWSER_TABS } from "./concurrency";
-import { selectChatGptAstraPro } from "./astra-selection";
+import { assertChatGptAstraProReady, selectChatGptAstraPro } from "./astra-selection";
 import {
   ChatGptWebAdapterError,
   chatGptBrowserTabClosedError,
@@ -2203,6 +2203,7 @@ export class ChatGptBrowserWorker {
     reasoning: string | undefined,
     capabilities: ChatGptWebCapabilities,
     captureDiagnostic?: (checkpoint: string) => Promise<void>,
+    abortSignal?: AbortSignal,
   ): Promise<ChatGptWebModelMode> {
     const mode = resolveChatGptWebModelMode(modelId, reasoning, capabilities);
     const composer = await this.activeComposer(page);
@@ -2242,7 +2243,7 @@ export class ChatGptBrowserWorker {
     await captureDiagnostic?.("effort-control-ready");
     await throwIfChatGptRateLimitDialog(page);
     if (modelId === CHATGPT_WEB_ASTRA_MODEL_ID) {
-      await selectChatGptAstraPro(page, currentEffort);
+      await selectChatGptAstraPro(page, currentEffort, abortSignal);
       await captureDiagnostic?.("astra-pro-confirmed");
       return mode;
     }
@@ -3254,7 +3255,7 @@ export class ChatGptBrowserWorker {
     captureDiagnostic?: (checkpoint: string) => Promise<void>,
     abortSignal?: AbortSignal,
     externalProgress?: ChatGptTurnProgressReader,
-    submissionLifecycle?: Pick<BrowserTurn, "onSendActivated" | "onSubmitted">,
+    submissionLifecycle?: Pick<BrowserTurn, "onSendActivated" | "onSubmitted"> & Partial<Pick<BrowserTurn, "modelId">>,
     completionTracker?: ChatGptCompletionTracker,
     recoverObservation?: ChatGptObservationRecovery,
   ): Promise<ChatGptSubmissionEvidence> {
@@ -3278,6 +3279,11 @@ export class ChatGptBrowserWorker {
       await settleChatGptUi();
     }
     await captureDiagnostic?.("send-ready");
+    if (submissionLifecycle?.modelId === CHATGPT_WEB_ASTRA_MODEL_ID) {
+      const control = composer.locator("xpath=ancestor::form[1]")
+        .locator(CHATGPT_EFFORT_CONTROL_SELECTOR).filter({ visible: true }).last();
+      await assertChatGptAstraProReady(control, abortSignal);
+    }
     const initialToolBatchRevision = externalProgress?.snapshot().lastToolBatchRevision ?? 0;
     await submissionLifecycle?.onSendActivated?.();
     await sendButton.press("Enter", {
@@ -4186,13 +4192,14 @@ export class ChatGptBrowserWorker {
         requestedMode.effort,
         stagingMode.effort,
       )) {
-        mode = await this.runStage(turn.traceId, "effort_selection", browserStageTimeouts.effortSelection, () => (
+        mode = await this.runStage(turn.traceId, "effort_selection", browserStageTimeouts.effortSelection, (stageSignal) => (
           this.selectModelAndEffort(
             page,
             turn.modelId,
             stagingMode.effort,
             browserCapabilities,
             checkpoint => diagnostics.capture(page, checkpoint),
+            turn.abortSignal ? AbortSignal.any([stageSignal, turn.abortSignal]) : stageSignal,
           )
         ));
       }
@@ -4239,7 +4246,7 @@ export class ChatGptBrowserWorker {
             turn.traceId,
             "connector_catalog_refresh",
             browserStageTimeouts.temporaryChatPreparation,
-            async () => {
+            async (stageSignal) => {
               await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 });
               await this.prepareTemporaryChatSurface(
                 page,
@@ -4252,6 +4259,7 @@ export class ChatGptBrowserWorker {
                 turn.reasoning,
                 turn.capabilities,
                 checkpoint => diagnostics.capture(page, checkpoint),
+                turn.abortSignal ? AbortSignal.any([stageSignal, turn.abortSignal]) : stageSignal,
               );
               submissionBaseline = await this.captureSubmissionBaseline(page);
             },

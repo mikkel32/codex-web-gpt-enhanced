@@ -11,40 +11,64 @@ const unavailable = () => new ChatGptWebAdapterError(
   { status: 400, errorType: "invalid_request_error", code: "astra_pro_unavailable", retryable: false },
 );
 
-/** Resolve Latest through its visible generation badge, never through a guessed backend alias. */
-export async function selectChatGptAstraPro(page: Page, control: Locator): Promise<void> {
+/** Read-only last admission check, including retained conversations that skip the picker. */
+export async function assertChatGptAstraProReady(control: Locator, signal?: AbortSignal): Promise<void> {
   try {
-    const { menu } = await activateChatGptEffortMenu(page, control);
+    signal?.throwIfAborted();
+    const badge = await control.innerText({ timeout: 5_000 });
+    signal?.throwIfAborted();
+    if (!isChatGptAstraProBadge(badge)) throw unavailable();
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (error instanceof Error && error.name === "AbortError") throw error;
+    if (error instanceof ChatGptWebAdapterError) throw error;
+    throw unavailable();
+  }
+}
+
+/** Resolve Latest through its visible generation badge, never through a guessed backend alias. */
+export async function selectChatGptAstraPro(page: Page, control: Locator, signal?: AbortSignal): Promise<void> {
+  const checked = async <T>(operation: () => Promise<T>): Promise<T> => {
+    signal?.throwIfAborted();
+    const result = await operation();
+    signal?.throwIfAborted();
+    return result;
+  };
+  try {
+    const { menu } = await checked(() => activateChatGptEffortMenu(page, control, { signal }));
     const model = menu.getByRole("menuitem", { name: "Select model", exact: true });
-    await model.press("Enter", { timeout: 5_000 });
+    await checked(() => model.press("Enter", { timeout: 5_000 }));
     const latest = menu.getByRole("menuitemradio", { name: "Latest", exact: true });
-    await latest.waitFor({ state: "visible", timeout: 5_000 });
-    if (await latest.getAttribute("aria-disabled") === "true") throw unavailable();
-    await latest.press("Enter", { timeout: 5_000 });
+    await checked(() => latest.waitFor({ state: "visible", timeout: 5_000 }));
+    if (await checked(() => latest.getAttribute("aria-disabled")) === "true") throw unavailable();
+    await checked(() => latest.press("Enter", { timeout: 5_000 }));
     const power = menu.getByRole("menuitem", { name: "Power", exact: true });
-    await power.waitFor({ state: "visible", timeout: 5_000 });
+    await checked(() => power.waitFor({ state: "visible", timeout: 5_000 }));
+    if (await checked(() => power.getAttribute("aria-disabled")) === "true") throw unavailable();
     const slider = power.locator('[role="slider"]');
-    const read = async () => parseChatGptEffortSliderState(
+    const read = async () => checked(async () => parseChatGptEffortSliderState(
       await slider.getAttribute("aria-valuemin"), await slider.getAttribute("aria-valuemax"), await slider.getAttribute("aria-valuenow"),
-    );
+    ));
     let state = await read();
     if (!state || state.min !== 0 || state.max !== 4) throw unavailable();
     while (state.value < 4) {
       const before = state.value;
-      await power.press("ArrowRight");
+      await checked(() => power.press("ArrowRight"));
       const deadline = Date.now() + 3_000;
       do {
         state = await read();
         if (!state || state.min !== 0 || state.max !== 4) throw unavailable();
         if (state.value !== before) break;
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await checked(() => new Promise(resolve => setTimeout(resolve, 50)));
       } while (Date.now() < deadline);
       if (state.value !== before + 1) throw unavailable();
     }
-    if (!isChatGptAstraProBadge(await model.innerText())) throw unavailable();
-    await page.keyboard.press("Escape");
-    if (!isChatGptAstraProBadge(await control.innerText())) throw unavailable();
+    if (!isChatGptAstraProBadge(await checked(() => model.innerText()))) throw unavailable();
+    await checked(() => page.keyboard.press("Escape"));
+    await assertChatGptAstraProReady(control, signal);
   } catch (error) {
+    signal?.throwIfAborted();
+    if (error instanceof Error && error.name === "AbortError") throw error;
     if (error instanceof ChatGptWebAdapterError) throw error;
     throw unavailable();
   }

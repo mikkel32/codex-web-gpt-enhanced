@@ -70,19 +70,24 @@ async function waitForEffortSurface(
   page: Page,
   control: Locator,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<{ menu: Locator; slider: Locator } | undefined> {
   const deadline = Date.now() + timeoutMs;
   do {
+    signal?.throwIfAborted();
     const surface = await visibleEffortSurface(page, control);
+    signal?.throwIfAborted();
     if (surface) return surface;
     if (Date.now() >= deadline) return undefined;
     await new Promise(resolveSleep => setTimeout(resolveSleep, 50));
   } while (true);
 }
 
-async function clearGhostEffortState(page: Page, control: Locator): Promise<void> {
+async function clearGhostEffortState(page: Page, control: Locator, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
   const expanded = await control.getAttribute("aria-expanded").catch(() => null);
   const state = await control.getAttribute("data-state").catch(() => null);
+  signal?.throwIfAborted();
   if (expanded === "true" || state === "open") {
     await page.keyboard.press("Escape").catch(() => {});
   }
@@ -91,25 +96,29 @@ async function clearGhostEffortState(page: Page, control: Locator): Promise<void
 export async function activateChatGptEffortMenu(
   page: Page,
   control: Locator,
-  options: { settleMs?: number } = {},
+  options: { settleMs?: number; signal?: AbortSignal } = {},
 ): Promise<ChatGptEffortActivation> {
+  options.signal?.throwIfAborted();
   const openSurface = await visibleEffortSurface(page, control);
+  options.signal?.throwIfAborted();
   if (openSurface) return { method: "already-open", ...openSurface };
 
   const settleMs = options.settleMs ?? 3_000;
-  await clearGhostEffortState(page, control);
+  await clearGhostEffortState(page, control, options.signal);
+  options.signal?.throwIfAborted();
   await control.click({ force: true, timeout: Math.max(1, settleMs) });
-  const clickedSurface = await waitForEffortSurface(page, control, settleMs);
+  const clickedSurface = await waitForEffortSurface(page, control, settleMs, options.signal);
   if (clickedSurface) return { method: "click", ...clickedSurface };
 
-  await clearGhostEffortState(page, control);
+  await clearGhostEffortState(page, control, options.signal);
+  options.signal?.throwIfAborted();
   await control.dispatchEvent("pointerdown", {
     button: 0,
     buttons: 1,
     pointerType: "mouse",
     isPrimary: true,
   });
-  const pointerSurface = await waitForEffortSurface(page, control, settleMs);
+  const pointerSurface = await waitForEffortSurface(page, control, settleMs, options.signal);
   if (pointerSurface) return { method: "pointerdown", ...pointerSurface };
   throw new Error(
     "ChatGPT effort control did not expose its owned menu or structural slider after click and primary pointerdown",

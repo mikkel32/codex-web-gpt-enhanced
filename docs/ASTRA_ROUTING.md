@@ -19,3 +19,9 @@ The route advertises the existing fixed Codex `ultra` protocol value and maps it
 The separate Work picker explicitly retained `GPT-6 Astra` while visiting all six displayed levels: Light, Medium, High, Extra High, Max, and Ultra. That establishes UI selection availability, not a verified integration of Work with Maria's regular-Chat transport. The [official API model page](https://developers.openai.com/api/docs/models/gpt-6-astra) documents API reasoning levels separately; product labels should not be silently treated as identical API parameters.
 
 Only the owned blank inspection tab was changed. The user's working conversation was preserved, and the inspected preferences were restored to Astra Light on Work and Latest Pro on Chat. Tests cover generation mismatches, missing Pro, unexpected slider movement, route gating, and a complete native MCP tool round with completed-response replay.
+
+## Submission and cancellation audit
+
+The initial selection check was insufficient for retained conversations: those can skip the picker, and prompt/file preparation happens after selection. Every Astra submission now reads the visible badge again after Send becomes enabled and before marking Send activated. A changed generation, lower effort, or missing control stops submission. The check is read-only and also runs on reused conversations.
+
+Picker operations carry the turn/stage cancellation signal. Cancelling during a model change prevents subsequent power adjustments; cancelling while the menu opens prevents the pointer fallback. Cancellation retains its original reason instead of becoming an Astra-availability error. Explicitly disabled power controls are rejected. Fault-injection tests call the real submission method and assert zero Send presses and zero activation callbacks when the final badge cannot authorize Astra.
