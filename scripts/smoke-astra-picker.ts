@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createRequire } from "node:module";
@@ -12,8 +12,9 @@ const args = [electron, join(root, "launcher/scripts/astra-picker-electron.cjs")
 if (process.platform === "linux") { args.push("--no-sandbox"); args.unshift("xvfb-run", "-a"); }
 const environment: NodeJS.ProcessEnv = { ...process.env, ASTRA_PICKER_TEST_HOME: home };
 delete environment.ELECTRON_RUN_AS_NODE;
-const child = Bun.spawn(args, { cwd: root, env: environment, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+const child = Bun.spawn(args, { cwd: root, env: environment, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
 const stderr = new Response(child.stderr).text();
+let completed = false;
 try {
   const portFile = join(home, "DevToolsActivePort"), deadline = Date.now() + 30_000;
   let exited = false;
@@ -21,23 +22,38 @@ try {
   while (!existsSync(portFile) && !exited && Date.now() < deadline) await Bun.sleep(50);
   assert(existsSync(portFile), "Electron did not publish its CDP port");
   const port = Number(readFileSync(portFile, "utf8").split("\n")[0]);
+  const endpoint = `http://127.0.0.1:${port}`;
+  let ready = false;
+  let websocket = "";
+  while (!exited && Date.now() < deadline) {
+    try {
+      const response = await fetch(`${endpoint}/json/version`, { signal: AbortSignal.timeout(1_000) });
+      if (response.ok) {
+        const metadata = await response.json() as { webSocketDebuggerUrl?: unknown };
+        if (typeof metadata.webSocketDebuggerUrl === "string") { websocket = metadata.webSocketDebuggerUrl; ready = true; break; }
+      }
+    } catch { /* A port file can precede debugger readiness. */ }
+    await Bun.sleep(50);
+  }
+  assert(ready, `Electron debugger did not become ready (exit=${child.exitCode})`);
   const driverPath = join(home, "driver.mjs");
   const build = await Bun.build({ entrypoints: [join(root, "scripts/astra-picker-driver.ts")], target: "node", format: "esm", outdir: home, naming: "driver.mjs" });
   assert(build.success, `Picker driver build failed: ${build.logs.join("\n")}`);
   // Match production: the selector and Playwright execute in Electron's Node runtime.
-  const driver = Bun.spawn([electron, driverPath, `http://127.0.0.1:${port}`], {
+  const driver = Bun.spawn([electron, driverPath, websocket], {
     cwd: root, env: { ...environment, ELECTRON_RUN_AS_NODE: "1" }, stdout: "pipe", stderr: "pipe",
   });
   const [status, stdout, errors] = await Promise.all([driver.exited, new Response(driver.stdout).text(), new Response(driver.stderr).text()]);
   assert.equal(status, 0, `Real Electron selector failed: ${errors}`);
   assert(stdout.includes("ASTRA_ELECTRON_PICKER_OK"), "Picker driver did not finish");
   process.stdout.write(stdout);
+  completed = true;
 } finally {
-  try { child.stdin.end(); } catch { /* The fixture may already have exited. */ }
+  writeFileSync(join(home, "stop"), "stop");
   const stopped = await Promise.race([child.exited.then(() => true), Bun.sleep(5_000).then(() => false)]);
   if (!stopped) child.kill();
   await child.exited;
   const errors = await stderr;
-  if (child.exitCode && !errors.includes("DevTools listening")) process.stderr.write(errors.slice(-4000));
+  if (!completed || child.exitCode) process.stderr.write(errors.slice(-4000));
   rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

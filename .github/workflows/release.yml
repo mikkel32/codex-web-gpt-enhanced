@@ -109,6 +109,11 @@ jobs:
       - name: Prepare owned AppImage toolset
         if: runner.os == 'Linux'
         run: bun run launcher/scripts/prepare-linux-appimage-tools.cjs
+      - name: Ensure virtual display is available
+        if: runner.os == 'Linux'
+        run: command -v xvfb-run || (sudo apt-get update && sudo apt-get install -y xvfb)
+      - name: Verify Astra picker in real Electron
+        run: bun run smoke:astra-picker
       - run: bun run verify
       - run: bun run app:package
       - name: Verify Linux AppImage ABI on current Arch
@@ -118,12 +123,7 @@ jobs:
           test -n "$artifact"
           docker run --rm -v "$PWD:/work:ro" -e APPIMAGE_PATH="/work/$artifact" archlinux:base \
             sh -lc 'pacman -Sy --noconfirm binutils file glibc alsa-lib at-spi2-core cairo cups gtk3 libx11 libxcb libxcomposite libxdamage libxext libxfixes libxkbcommon libxrandr mesa nspr nss pango >/dev/null && /work/launcher/scripts/smoke-linux-appimage-symbols.sh "$APPIMAGE_PATH"'
-      - name: Ensure virtual display is available
-        if: runner.os == 'Linux'
-        run: command -v xvfb-run || (sudo apt-get update && sudo apt-get install -y xvfb)
       - run: bun run app:smoke
-      - name: Verify Astra picker in real Electron
-        run: bun run smoke:astra-picker
       - name: Verify embedded macOS runtime signature
         if: runner.os == 'macOS'
         run: codesign --verify --deep --strict launcher/build/runtime/runtime/bun
