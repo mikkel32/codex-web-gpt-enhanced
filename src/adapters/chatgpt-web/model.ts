@@ -1,9 +1,11 @@
 import {
   CHATGPT_WEB_BACKEND_MODEL,
+  CHATGPT_WEB_ASTRA_BACKEND_MODEL,
   CHATGPT_WEB_LUNA_BACKEND_MODEL,
 } from "../../chatgpt-web-models";
 
 export const CHATGPT_WEB_MODEL_ID = CHATGPT_WEB_BACKEND_MODEL;
+export const CHATGPT_WEB_ASTRA_MODEL_ID = CHATGPT_WEB_ASTRA_BACKEND_MODEL;
 export const CHATGPT_WEB_LUNA_MODEL_ID = CHATGPT_WEB_LUNA_BACKEND_MODEL;
 
 export interface ChatGptWebCapabilities {
@@ -15,7 +17,7 @@ export interface ChatGptWebCapabilities {
 export interface ChatGptWebModelMode {
   modelId: string;
   effort: "low" | "medium" | "high" | "xhigh" | "max";
-  displayLabel: "Luna" | "Think" | "Instant" | "Medium" | "High" | "Extra High" | "Pro";
+  displayLabel: "Luna" | "Think" | "Instant" | "Medium" | "High" | "Extra High" | "Pro" | "Astra Pro";
   uiEffortIndex: 0 | 1 | 2 | 3 | 4 | null;
   thinkEnabled: boolean;
   localTools: boolean;
@@ -26,6 +28,12 @@ export function resolveChatGptWebModelMode(
   reasoning: string | undefined,
   capabilities: ChatGptWebCapabilities,
 ): ChatGptWebModelMode {
+  if (modelId === CHATGPT_WEB_ASTRA_MODEL_ID) {
+    if (!capabilities.solAvailable || !capabilities.proAvailable) throw new Error("ChatGPT Astra Pro requires an account with the Pro picker");
+    const effort = reasoning ?? "max";
+    if (effort !== "max") throw new Error(`ChatGPT Astra is only verified at Pro effort, not ${effort}`);
+    return { modelId, effort, displayLabel: "Astra Pro", uiEffortIndex: 4, thinkEnabled: false, localTools: capabilities.localToolsEnabled };
+  }
   if (modelId === CHATGPT_WEB_LUNA_MODEL_ID) {
     if (capabilities.solAvailable) {
       throw new Error("ChatGPT Luna is not available while the account exposes the Sol model selector");

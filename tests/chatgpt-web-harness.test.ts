@@ -13,7 +13,7 @@ import { chatGptConversationKey } from "../src/adapters/chatgpt-web/conversation
 import { CHATGPT_TURN_REVISION_CONFLICT_MESSAGE, extractChatGptTurnEnvironment, extractChatGptTurnIdentity, extractChatGptTurnUserRevision, priorChatGptAbortedTurnIds } from "../src/adapters/chatgpt-web/environment";
 import { CHATGPT_WEB_ADAPTER_HEARTBEAT_MS, chatGptWebExecutionNamespace, chatGptWebTraceId, createChatGptWebAdapter, recordChatGptWebResponseReceipt } from "../src/adapters/chatgpt-web/index";
 import { chatGptHtmlToMarkdown, ChatGptMarkdownBuffer } from "../src/adapters/chatgpt-web/markdown";
-import { CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
+import { CHATGPT_WEB_MODEL_ID, CHATGPT_WEB_ASTRA_MODEL_ID } from "../src/adapters/chatgpt-web/model";
 import {
   CODEX_ACTIVE_COMPACTION_REQUEST_MARKER,
 } from "../src/adapters/chatgpt-web/native-compaction-control";
@@ -2369,11 +2369,12 @@ describe("ChatGPT outer-native harness v4", () => {
     }
   });
 
-  test("runs Pro through the same turn-bound MCP tool loop as other Full-mode efforts", async () => {
+  for (const backend of [CHATGPT_WEB_MODEL_ID, CHATGPT_WEB_ASTRA_MODEL_ID]) {
+  test(`runs ${backend} Pro through the same turn-bound MCP tool loop as other Full-mode efforts`, async () => {
     const socketPath = brokerTestEndpoint(`cgw-h3-pro-${process.pid}-${Date.now()}`);
     const provider: CodexProviderConfig = {
       adapter: "chatgpt-web",
-      baseUrl: "browser://chatgpt-pro-test",
+      baseUrl: `browser://chatgpt-pro-test-${backend}`,
       contextWindow: 256_000,
       chatgptWeb: { brokerSocketPath: socketPath, turnTimeoutMs: 30_000, localToolsEnabled: true, solAvailable: true, proAvailable: true },
     };
@@ -2382,7 +2383,7 @@ describe("ChatGPT outer-native harness v4", () => {
     let browserStarts = 0;
     (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = async turn => {
       browserStarts += 1;
-      expect(turn.modelId).toBe(CHATGPT_WEB_MODEL_ID);
+      expect(turn.modelId).toBe(backend);
       expect(turn.reasoning).toBe("max");
       expect(turn.capabilities.localToolsEnabled).toBe(true);
       const prepared = await turn.prepare();
@@ -2411,6 +2412,7 @@ describe("ChatGPT outer-native harness v4", () => {
     };
 
     const request = proRequest();
+    request.modelId = backend;
     const adapter = createChatGptWebAdapter(provider);
     const firstEvents: AdapterEvent[] = [];
     try {
@@ -2479,6 +2481,8 @@ describe("ChatGPT outer-native harness v4", () => {
       await TurnBroker.forSocket(socketPath).close();
     }
   });
+
+  }
 
   test("serves the complete outer-native bridge contract over MCP stdio", async () => {
     const socketPath = brokerTestEndpoint(`cgw-h3-mcp-${process.pid}-${Date.now()}`);

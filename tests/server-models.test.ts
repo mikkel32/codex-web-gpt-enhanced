@@ -97,6 +97,7 @@ test("proxies official /models auth and query, then appends the fixed ChatGPT We
     "chatgpt-web/high",
     "chatgpt-web/extra-high",
     "chatgpt-web/pro",
+    "chatgpt-web/astra-pro",
   ]);
   expect(body.models[0]!.context_window).toBe(300_000);
   expect(body.models[0]!.max_context_window).toBe(371_851);

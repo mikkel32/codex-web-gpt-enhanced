@@ -115,8 +115,9 @@ describe("native /models augmentation", () => {
 
     expect(spawnOverrides).toEqual([
       "gpt-5.6-sol",
-      ...CHATGPT_WEB_MODEL_ROUTES.slice(1).map(route => route.slug),
+      ...CHATGPT_WEB_MODEL_ROUTES.slice(1, 5).map(route => route.slug),
     ]);
+    expect(models.some(model => model.slug === "chatgpt-web/astra-pro")).toBe(true);
     expect(models.find(model => model.slug === "chatgpt-web/light")?.priority).toBe(3);
   });
 

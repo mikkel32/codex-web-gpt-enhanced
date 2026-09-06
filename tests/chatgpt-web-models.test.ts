@@ -43,6 +43,7 @@ describe("fixed ChatGPT Web model routes", () => {
       ["chatgpt-web/high", "high", "high"],
       ["chatgpt-web/extra-high", "xhigh", "xhigh"],
       ["chatgpt-web/pro", "ultra", "max"],
+      ["chatgpt-web/astra-pro", "ultra", "max"],
     ]);
     expect(CHATGPT_WEB_MODEL_ROUTES[0]?.displayName).toBe("Maria Web — Instant");
   });
