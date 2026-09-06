@@ -958,6 +958,18 @@ export function createChatGptWebAdapter(
                       && source?.settledOutcome()?.type === "final";
                     const retainedKey = source?.conversationKey();
                     if (!source || !retainedKey) {
+                      if (!manualRequest && sourceConversationKey
+                        && conversationCursors.hasCompletedConversation(sourceConversationKey)) {
+                        // Losing the process-local head (restart/expiry) does not lose the
+                        // server conversation. The launcher must restore its exact saved URL;
+                        // a failed restore must not silently open a replacement conversation.
+                        const rawSummary = await requestRetainedCompactionHandoff(
+                          worker, parsed, { conversationKey: () => sourceConversationKey },
+                          structuredBroker!, configuredCapabilities, handoffTraceId,
+                          operationSignal, handoffTimeoutMs,
+                        );
+                        return canonicalizeCompactionHandoff(parsed, rawSummary);
+                      }
                       return await runFreshCompactionFallback("source_unavailable_before_handoff");
                     }
                     let rawSummary: string;
@@ -1043,17 +1055,14 @@ export function createChatGptWebAdapter(
                           retainedKey,
                           source!,
                           compactedSourceExecutionKey,
+                          true,
                         )
-                        : chatGptTurnSessions.retireConversationAndWait(retainedKey));
+                        : chatGptTurnSessions.checkpointConversationAndWait(retainedKey));
                     } catch (retirementError) {
                       handoffError = new AggregateError(
                         [handoffError, retirementError instanceof Error ? retirementError : new Error(String(retirementError))],
                         "Structured compaction failed and its retained conversation could not be retired",
                       );
-                    }
-                    if (handoffError instanceof ChatGptWebAdapterError
-                      && handoffError.code === "compaction_source_unavailable") {
-                      return await runFreshCompactionFallback("source_disappeared_before_handoff");
                     }
                     throw handoffError;
                   } finally {
@@ -1075,13 +1084,17 @@ export function createChatGptWebAdapter(
                 throw error;
               }
               const handoffError = error instanceof Error ? error : new Error(String(error));
+              const retainedUnavailable = handoffError instanceof ChatGptWebAdapterError
+                && handoffError.code === "compaction_source_unavailable";
               console.error("[chatgpt-web] structured context handoff failed:", handoffError);
               emit({
                 type: "error",
-                message: "ChatGPT did not complete the context handoff. Retry the task.",
+                message: retainedUnavailable
+                  ? "Maria could not restore the saved ChatGPT conversation. Inspect the original chat before continuing; no replacement chat was opened."
+                  : "ChatGPT did not complete the context handoff. Retry the task.",
                 status: 409,
                 errorType: "invalid_request_error",
-                code: "compaction_handoff_failed",
+                code: retainedUnavailable ? "compaction_source_unavailable" : "compaction_handoff_failed",
                 retryable: false,
               });
               return;

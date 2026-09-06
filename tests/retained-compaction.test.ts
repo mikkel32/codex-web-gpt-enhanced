@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +20,7 @@ import {
 import { CompactionTransactionStore } from "../src/adapters/chatgpt-web/compaction-transaction";
 import {
   chatGptConversationKey,
+  ChatGptConversationCursors,
   retainedConversationResumeRequest,
 } from "../src/adapters/chatgpt-web/conversation-key";
 import {
@@ -92,6 +94,50 @@ function controlBinding(instruction: string): { token: string; handoffId: string
   const handoffId = instruction.match(/handoff_id (handoff_[a-f0-9]{32})/)?.[1];
   if (!token || !handoffId) throw new Error(`Missing compaction control binding: ${instruction}`);
   return { token, handoffId };
+}
+
+for (const unavailable of [false, true]) {
+  test(`compaction after process-local history loss ${unavailable ? "fails without a replacement chat" : "uses the durable Web conversation with a small request"}`, async () => {
+    const root = mkdtempSync(join(shortSocketTempRoot(), "cgw-durable-compact-"));
+    const provider: CodexProviderConfig = { adapter: "chatgpt-web", baseUrl: `browser://durable-${root}`,
+      chatgptWeb: { browserHost: "launcher", browserHostDescriptorPath: join(root, "launcher.json"),
+        brokerSocketPath: defaultBrokerEndpoint(root), appName: "Codex Native DEV",
+        localToolsEnabled: true, solAvailable: true, proAvailable: true } };
+    const namespace = chatGptWebExecutionNamespace(provider);
+    const source = request(false);
+    source.context.messages.unshift({ role: "assistant", content: [{ type: "text", text: "HISTORY_ONLY_" + "x".repeat(300000) }], timestamp: 0 });
+    const key = chatGptConversationKey(source, namespace)!;
+    const cursor = new ChatGptConversationCursors(join(root, `conversation-cursors-${createHash("sha256").update(namespace).digest("hex").slice(0, 16)}.json`));
+    cursor.commit(key, source, "Prior completed work");
+    const worker = ChatGptBrowserWorker.forProvider(provider);
+    const original = worker.run.bind(worker);
+    let starts = 0;
+    (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = async turn => {
+      starts++;
+      expect(turn.requireRetainedConversation).toBe(true);
+      expect(turn.conversationKey).toBe(key);
+      if (unavailable) throw chatGptRetainedConversationUnavailableError();
+      const prepared = await turn.prepareResume!();
+      expect(prepared.text).not.toContain("HISTORY_ONLY_");
+      expect(Buffer.byteLength(prepared.text)).toBeLessThan(16000);
+      const binding = controlBinding(prepared.text);
+      prepared.release();
+      await callTurnBroker(provider.chatgptWeb!.brokerSocketPath!, { method: "submit_compaction_handoff",
+        token: binding.token, handoffId: binding.handoffId, summary: "Continue the existing goal; observe job 42." });
+      return "Checkpoint submitted";
+    };
+    try {
+      const events: AdapterEvent[] = [];
+      await createChatGptWebAdapter(provider).runTurn!(request(true), { headers: new Headers() }, event => events.push(event));
+      expect(starts).toBe(1);
+      expect(events.at(-1)?.type).toBe(unavailable ? "error" : "done");
+      expect(cursor.hasCompletedConversation(key)).toBe(true);
+    } finally {
+      (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = original;
+      await TurnBroker.forSocket(provider.chatgptWeb!.brokerSocketPath!).close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 }
 
 test("one browser conversation spans native turns and compaction", () => {
@@ -1304,7 +1350,7 @@ test("cancel-all waits for physical settlement of a fresh compaction fallback", 
   }
 });
 
-test("structured compact rebuilds canonical context when its retained browser disappeared", async () => {
+test("structured compact does not replace a known conversation when its retained browser disappeared", async () => {
   const root = mkdtempSync(join(shortSocketTempRoot(), "cgw-stale-retained-compact-"));
   const provider: CodexProviderConfig = {
     adapter: "chatgpt-web",
@@ -1351,10 +1397,10 @@ test("structured compact rebuilds canonical context when its retained browser di
       { headers: new Headers() },
       event => events.push(event),
     );
-    expect(browserStarts).toBe(2);
+    expect(browserStarts).toBe(1);
     expect(events.some(event => event.type === "text_delta"
-      && event.text.includes("Fallback checkpoint after retained browser loss"))).toBeTrue();
-    expect(events.at(-1)).toMatchObject({ type: "done", stopReason: "stop", endTurn: true });
+      && event.text.includes("Fallback checkpoint after retained browser loss"))).toBeFalse();
+    expect(events.at(-1)).toMatchObject({ type: "error", code: "compaction_source_unavailable", retryable: false });
   } finally {
     (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = originalRun;
     chatGptTurnSessions.clear();
@@ -1363,7 +1409,7 @@ test("structured compact rebuilds canonical context when its retained browser di
   }
 });
 
-test("a disappeared retained source cannot leave its fresh compaction rebuild past the shared deadline", async () => {
+test("a disappeared retained source fails promptly without deleting its saved conversation or starting a fallback", async () => {
   const root = mkdtempSync(join(shortSocketTempRoot(), "cgw-stale-retained-deadline-"));
   const provider: CodexProviderConfig = {
     adapter: "chatgpt-web",
@@ -1383,6 +1429,7 @@ test("a disappeared retained source cannot leave its fresh compaction rebuild pa
   const sourceRequest = request(false);
   const namespace = chatGptWebExecutionNamespace(provider);
   const sourceKey = `${namespace}:${chatGptTurnExecutionKey(sourceRequest)}`;
+  let deletedConversations = 0;
   chatGptTurnSessions.getOrCreate(sourceKey, () => ({
     mode: "read-only",
     browser: Promise.resolve("source complete"),
@@ -1391,6 +1438,7 @@ test("a disappeared retained source cannot leave its fresh compaction rebuild pa
     text: new ChatGptTextFeed(),
     usageInput: sourceRequest,
     conversationKey: chatGptConversationKey(sourceRequest, namespace)!,
+    releaseRetainedConversation: async () => { deletedConversations++; },
     cancel() {},
   }));
   await chatGptTurnSessions.find(sourceKey)!.browserOutcome;
@@ -1410,12 +1458,13 @@ test("a disappeared retained source cannot leave its fresh compaction rebuild pa
       event => events.push(event),
     );
     expect(performance.now() - startedAt).toBeLessThan(1_000);
-    expect(browserStarts).toBe(2);
+    expect(browserStarts).toBe(1);
+    expect(deletedConversations).toBe(0);
     expect(events.at(-1)).toMatchObject({
       type: "error",
-      code: "compaction_handoff_failed",
+      code: "compaction_source_unavailable",
       retryable: false,
-      message: "ChatGPT did not complete the context handoff. Retry the task.",
+      message: "Maria could not restore the saved ChatGPT conversation. Inspect the original chat before continuing; no replacement chat was opened.",
     });
   } finally {
     (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = originalRun;

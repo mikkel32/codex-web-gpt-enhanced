@@ -12,7 +12,13 @@ models available. Choose a native model for your Codex account, or choose a
 **Maria Web** model to use your ChatGPT session. Your task, files, tools, and results
 stay together in Codex.
 
-## Maria 5.7
+## Maria 5.10
+
+プロセス内の会話キャッシュが失われても、保存した Web 会話を使ってチェックポイントを作成します。
+コンパクションに失敗しても元の会話の対応関係を保持します。大きな Automatic Full コンテキストは、
+添付枠に余裕がある場合に一括送信するファイルへ移します。目標の状態と予算は引き続き Codex が管理します。
+追加の待機中ページを解放しても、元のチャットの URL は保存されます。
+根拠と制約は [継続性の調査](docs/CONTINUITY_RESEARCH.md) を参照してください。
 
 A cinematic motion system brings spring-driven navigation, an interactive depth mark,
 masked heading reveals, and coordinated page transitions. The sidebar folds into an

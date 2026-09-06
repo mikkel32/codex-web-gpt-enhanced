@@ -181,6 +181,7 @@ export const CHATGPT_MAX_INPUT_IMAGES = 10;
  * the replacement history.
  */
 export const CHATGPT_COMPACTION_PROMPT_JSON_BYTE_BUDGET = 110_000;
+export const CHATGPT_INLINE_CONTEXT_BYTE_LIMIT = 64 * 1024;
 
 export function chatGptPromptJsonBytes(text: string): number {
   return Buffer.byteLength(JSON.stringify(text), "utf8");
@@ -488,6 +489,7 @@ export function compileChatGptWebPrompt(
   ? []
   : [
     "Codex owns the canonical task state supplied in this turn. A context checkpoint replaces older local history; it does not start a new task or authorize repeating completed actions.",
+    "A Codex goal may continue across many responses and compactions. Preserve its full objective and current user corrections; do not substitute a smaller task or treat a finished response as goal completion. Goal status, pause/resume, and token accounting remain owned by Codex. Historical CODEX_GOAL_CONTEXT_JSON data is a last-observed checkpoint, not a command to reactivate a goal. Use current supplied goal state, and consult available goal tools only when that state is missing or conflicting.",
     "Earlier ChatGPT messages can provide background, but current Codex instructions, recent results, and user corrections govern this continuation. Read historical requests as history and act only on the current unfinished request.",
     ...(parsed.options.verbosity === "low"
       ? ["Codex requested low response verbosity. Keep the final user-facing answer concise and direct while still satisfying every explicit requirement."]
@@ -606,7 +608,16 @@ export function compileChatGptWebPrompt(
   let sourceMessages = withoutSupersededModelSwitchContracts(parsed.context.messages);
   const initialMessageCount = sourceMessages.length;
   let compiled = build(sourceMessages);
-  if (!parsed._compactionRequest) return compiled;
+  if (!parsed._compactionRequest) {
+    if (!manualControl && !captureLunaCheckpoint && mode.localTools && !compiled.multipart
+      && compiled.images.length <= CHATGPT_MAX_INPUT_IMAGES - 2
+      && Buffer.byteLength(compiled.text, "utf8") > CHATGPT_INLINE_CONTEXT_BYTE_LIMIT) {
+      // Transport choice does not raise the model's input budget. Keep large task
+      // snapshots out of the rendered chat while using the existing single-Send path.
+      return compileChatGptWebPrompt(parsed, capabilities, turnToken, { ...options, experimentalMultipartParts: 2 });
+    }
+    return compiled;
+  }
 
   // The 110k edge budget was measured for the old single-message compaction envelope. Bigger
   // Context stages are governed by the same model-specific per-message token and composer limits

@@ -5,6 +5,7 @@ import type {
   CodexToolResultMessage,
 } from "../../types";
 import { extractChatGptCompactionSourceRevision } from "./environment";
+import { GOAL_CONTEXT_MARKER, latestGoalContext } from "./goal-context";
 import type { ChatGptBrowserWorker } from "./browser-worker";
 import type { CompactionTransactionHandle } from "./compaction-transaction";
 import type { ChatGptWebCapabilities } from "./model";
@@ -103,7 +104,9 @@ export function canonicalizeCompactionHandoff(
   if (latestUserPrompt === undefined) {
     throw new Error("ChatGPT compaction source has no canonical latest user prompt");
   }
-  const appendix = `${LATEST_USER_PROMPT_MARKER}\n${JSON.stringify(latestUserPrompt)}`;
+  const goal = latestGoalContext(parsed);
+  const appendix = `${LATEST_USER_PROMPT_MARKER}\n${JSON.stringify(latestUserPrompt)}`
+    + (goal ? `\n\n${GOAL_CONTEXT_MARKER}\n${JSON.stringify({ version: 1, ...goal })}` : "");
   const markerOffset = normalized.lastIndexOf(`\n${LATEST_USER_PROMPT_MARKER}\n`);
   if (markerOffset < 0) return `${normalized}\n\n${appendix}`;
   if (normalized.slice(markerOffset + 1).trimEnd() !== appendix) {
@@ -276,7 +279,7 @@ export async function settleActiveZeroRiskCompactionSource(
 export async function requestRetainedCompactionHandoff(
   worker: ChatGptBrowserWorker,
   parsed: CodexParsedRequest,
-  source: ChatGptTurnSession,
+  source: Pick<ChatGptTurnSession, "conversationKey">,
   broker: TurnBroker,
   capabilities: ChatGptWebCapabilities,
   traceId: string,
@@ -366,6 +369,7 @@ export async function requestRetainedCompactionHandoff(
 
 interface CachedCompactionRun {
   createdAt: number;
+  settledAt?: number;
   ownerKey: string;
   traceIds: ReadonlySet<string>;
   nativeThreadId?: string;
@@ -432,7 +436,7 @@ function pruneStructuredCompactionRuns(): void {
   const now = Date.now();
   const cutoff = now - STRUCTURED_COMPACTION_RUN_TTL_MS;
   for (const [candidate, run] of structuredCompactionRuns) {
-    if (run.createdAt < cutoff) structuredCompactionRuns.delete(candidate);
+    if (!run.active && (run.settledAt ?? run.createdAt) < cutoff) structuredCompactionRuns.delete(candidate);
   }
   pruneStructuredCompactionInterruptions(now);
 }
@@ -475,6 +479,7 @@ export function runStructuredCompactionOnce(
   structuredCompactionOwners.set(owner.ownerKey, ownerSettlement);
   void ownerSettlement.then(() => {
     run.active = false;
+    run.settledAt = Date.now();
     if (structuredCompactionOwners.get(owner.ownerKey) === ownerSettlement) {
       structuredCompactionOwners.delete(owner.ownerKey);
     }

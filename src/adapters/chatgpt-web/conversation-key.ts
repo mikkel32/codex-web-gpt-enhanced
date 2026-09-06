@@ -64,6 +64,11 @@ export class ChatGptConversationCursors {
     } catch { this.cursors = {}; }
   }
 
+  hasCompletedConversation(key: string): boolean {
+    this.read();
+    return this.cursors[key] !== undefined;
+  }
+
   resume(key: string, parsed: CodexParsedRequest): { parsed: CodexParsedRequest; mode: "delta" | "snapshot"; omitted: number } {
     this.read();
     const resumed = retainedConversationResumeRequest(parsed, this.cursors[key]);

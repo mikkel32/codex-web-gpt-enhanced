@@ -12,7 +12,15 @@ models available. Choose a native model for your Codex account, or choose a
 **Maria Web** model to use your ChatGPT session. Your task, files, tools, and results
 stay together in Codex.
 
-## Maria 5.9
+## Maria 5.10
+
+Continuity now survives loss of the process-local conversation cache, and compaction
+failures preserve the original Web chat mapping. Large Automatic Full-harness
+snapshots use atomic context files when attachment slots permit. Goal context is
+carried through checkpoints as last-observed data; Codex still owns goal status and
+budgets. Extra idle Automatic pages can leave memory while their exact chat links
+remain saved. See [Continuity research](docs/CONTINUITY_RESEARCH.md) for the evidence,
+tradeoffs, and remaining limits.
 
 Overview now offers one next action: sign in, finish the required setup, review
 paused access, or continue your existing task. Connection details expand when

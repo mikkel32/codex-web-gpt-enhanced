@@ -1409,7 +1409,7 @@ describe("ChatGPT outer-native harness v4", () => {
     expect(serialized).toContain("current request");
   });
 
-  test("keeps a large context inline and uploads only its referenced images", () => {
+  test("packs large context and its referenced images into one atomic attachment set", () => {
     const imageUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAE0lEQVR4nGP4z8DwHwwZGP6DAQBJyAn3FGMynQAAAABJRU5ErkJggg==";
     const request = parsed();
     request.context.systemPrompt = ["d".repeat(70_000)];
@@ -1420,10 +1420,13 @@ describe("ChatGPT outer-native harness v4", () => {
     const compiled = compileChatGptWebPrompt(request, toolCapabilities, "turn_123456789012345678901234");
     const files = chatGptPromptFilePayloads(compiled);
 
-    expect(compiled.text).toContain("d".repeat(70_000));
-    expect(compiled.text).toContain("<codex_context_json>");
-    expect(files.map(file => file.name)).toEqual(["codex-input-image-1.png"]);
-    expect(files[0]!.mimeType).toBe("image/png");
+    expect(compiled.text).not.toContain("d".repeat(70_000));
+    expect(compiled.text).not.toContain("<codex_context_json>");
+    expect(files.map(file => file.name)).toEqual(["codex-context-1-of-2.json", "codex-context-2-of-2.json", "codex-input-image-1.png"]);
+    const records = files.slice(0, 2).flatMap(file => JSON.parse(file.buffer.toString("utf8")).records);
+    expect(records.find(record => record.kind === "system").content).toBe("d".repeat(70_000));
+    expect(files[2]!.mimeType).toBe("image/png");
+    expect(files[2]!.buffer.equals(Buffer.from(imageUrl.split(",")[1]!, "base64"))).toBe(true);
   });
 
   test("keeps browser-only Pro context complete without creating a local-tool capability", () => {

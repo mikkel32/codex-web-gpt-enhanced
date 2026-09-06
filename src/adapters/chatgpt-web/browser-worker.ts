@@ -1304,7 +1304,7 @@ export function chatGptReboundTurnIdentity(
 }
 
 export class ChatGptCompletionTracker {
-  private candidate?: { signature: string; since: number };
+  private candidate?: { text: string; markupKey: string; since: number };
   private lastToolBatchRevision = 0;
   private postToolAnswerBaselineText?: string;
   private missingPostToolAnswerSince?: number;
@@ -1335,10 +1335,11 @@ export class ChatGptCompletionTracker {
   update(
     state: Parameters<typeof chatGptTurnIsComplete>[0] & {
       externalToolCallsInFlight?: boolean;
+      currentRevision?: string;
     },
     now = Date.now(),
   ): boolean {
-    const signature = `${state.currentText}\0${state.currentHtml ?? state.currentText}`;
+    const markupKey = state.currentRevision ?? state.currentHtml ?? state.currentText;
     // An outstanding tool call proves the model has more to say, whatever the rendered message
     // currently looks like. Completing here would return a truncated answer and retire the turn
     // while its own tool calls were still in flight.
@@ -1364,8 +1365,8 @@ export class ChatGptCompletionTracker {
       this.candidate = undefined;
       return false;
     }
-    if (this.candidate?.signature !== signature) {
-      this.candidate = { signature, since: now };
+    if (this.candidate?.text !== state.currentText || this.candidate.markupKey !== markupKey) {
+      this.candidate = { text: state.currentText, markupKey, since: now };
       return false;
     }
     return now - this.candidate.since >= this.stableMs;
@@ -3804,7 +3805,9 @@ export class ChatGptBrowserWorker {
         snapshot: {
           responsePresent: true,
           visibleText: renderedRoots.map(candidate => candidate.innerText.trim()).filter(Boolean).join("\n\n"),
-          fullHtml: renderedRoots.map(candidate => candidate.innerHTML).join(""),
+          // The mutation revision already identifies DOM changes. Do not copy the
+          // complete response markup across the browser/helper boundary each tick.
+          fullHtml: "",
           markdownSegments,
           completionActionVisible: completionAction !== undefined,
           stoppedThinkingVisible,
@@ -4475,6 +4478,7 @@ export class ChatGptBrowserWorker {
             running,
             currentText: snapshot.visibleText,
             currentHtml: snapshot.fullHtml,
+            currentRevision: responseDomCache.key,
             completionActionVisible: snapshot.completionActionVisible,
             externalToolCallsInFlight,
           });

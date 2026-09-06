@@ -3051,7 +3051,8 @@ test("response DOM separates streaming commentary from the final Markdown answer
   expect(workerSource).toContain("candidate.compareDocumentPosition(firstStatusContainer)");
   expect(workerSource).toContain("const renderedRoots = classified.answerRoots;");
   expect(workerSource).toContain("markdownRoots.filter(candidate => !commentary.includes(candidate))");
-  expect(workerSource).toContain('fullHtml: renderedRoots.map(candidate => candidate.innerHTML).join("")');
+  expect(workerSource).not.toContain('fullHtml: renderedRoots.map(candidate => candidate.innerHTML).join("")');
+  expect(workerSource).toContain('currentRevision: responseDomCache.key');
   expect(workerSource).toContain("const flattenedMarkdownSegments:");
   expect(workerSource).toContain("Root boundaries and visible indices therefore are not identity");
   expect(workerSource).toContain("const blockMarkdownTags = new Set([");

@@ -7,6 +7,7 @@ import {
   compileChatGptWebPrompt,
   formatChatGptWebMultipartCommit,
   formatChatGptWebMultipartStage,
+  formatChatGptWebMultipartFileCommit,
 } from "../src/adapters/chatgpt-web/prompt";
 import { CHATGPT_WEB_LUNA_MODEL_ID, CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
 import { biggerContextPartCount } from "../src/adapters/chatgpt-web/usage";
@@ -26,6 +27,37 @@ function request(reasoning: "low" | "medium" | "high" | "xhigh" | "max"): CodexP
     options: { reasoning },
   };
 }
+
+test("large Automatic Full context uses two atomic files without enabling a larger context window", () => {
+  const parsed = request("high");
+  const history = "HISTORICAL_CONTEXT_" + "x".repeat(90000);
+  parsed.context.messages.unshift({ role: "assistant", content: [{ type: "text", text: history }], timestamp: 0 });
+  const capabilities = { localToolsEnabled: true, solAvailable: true, proAvailable: true, experimentalBiggerContext: false };
+  const compiled = compileChatGptWebPrompt(parsed, capabilities, "turn_12345678901234567890123456789012");
+  expect(compiled.multipart?.parts).toHaveLength(2);
+  expect(capabilities.experimentalBiggerContext).toBe(false);
+  const records = compiled.multipart!.parts.flatMap(part => JSON.parse(part).records);
+  expect(records.filter(record => record.kind === "message").map(record => record.message.role)).toEqual(["assistant", "developer", "user"]);
+  expect(JSON.stringify(records)).toContain(history);
+  const visible = formatChatGptWebMultipartFileCommit(compiled.multipart!);
+  expect(Buffer.byteLength(visible)).toBeLessThan(16000);
+  expect(visible).not.toContain(history);
+  expect(visible).toContain("no acknowledgement turns are needed");
+});
+
+test("small follow-ups stay inline and automatic files do not displace image attachments", () => {
+  const parsed = request("high");
+  const capabilities = { localToolsEnabled: true, solAvailable: true, proAvailable: true };
+  const token = "turn_12345678901234567890123456789012";
+  expect(compileChatGptWebPrompt(parsed, capabilities, token).multipart).toBeUndefined();
+  parsed.context.messages.push({ role: "user", timestamp: 3, content: [
+    { type: "text", text: "x".repeat(90000) },
+    ...Array.from({length: 9}, (_, index) => ({ type: "image" as const, imageUrl: `data:image/jpeg;base64,${Buffer.from(String(index)).toString("base64")}` })),
+  ] });
+  const compiled = compileChatGptWebPrompt(parsed, capabilities, token);
+  expect(compiled.images).toHaveLength(9);
+  expect(compiled.multipart).toBeUndefined();
+});
 
 test("Full-mode Pro prompts pass one stable turn token directly to native actions", () => {
   const token = "turn_12345678901234567890123456789012";
@@ -524,7 +556,7 @@ test("uses the public Instant name without leaking the browser menu alias into t
   expect(compiled.text).not.toContain("Instant 5.5");
 });
 
-test("keeps large contexts intact in the inline text envelope", () => {
+test("keeps large tool results intact in atomic context files instead of the visible envelope", () => {
   const token = "turn_12345678901234567890123456789012";
   const largeContent = "x".repeat(600_000);
   const large = request("high");
@@ -542,11 +574,10 @@ test("keeps large contexts intact in the inline text envelope", () => {
     token,
   );
 
-  expect(compiled.text.length).toBeGreaterThan(600_000);
-  expect(compiled.text).toContain(largeContent);
+  expect(compiled.text.length).toBeLessThan(16_000);
+  const records = compiled.multipart!.parts.flatMap(part => JSON.parse(part).records);
+  expect(records.find(record => record.message?.tool_call_id === "call_large")?.message.content).toBe(largeContent);
   expect(compiled.text).toContain(token);
-  expect(compiled.text).toContain(`<codex_context_json>`);
-  expect(compiled.text).not.toContain(`<codex_context_attachment>`);
-  expect(compiled.text).not.toContain("sha256");
-  expect(compiled.text).not.toContain("SHA-256");
+  expect(compiled.text).not.toContain(`<codex_context_json>`);
+  expect(formatChatGptWebMultipartFileCommit(compiled.multipart!)).toContain("codex-context-1-of-2.json");
 });

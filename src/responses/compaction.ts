@@ -17,7 +17,7 @@
 
 export const BRIDGE_COMPACTION_PREFIX = "ocx1:";
 
-/** Mirrors codex-rs core/templates/compact/prompt.md (the local-compaction instruction). */
+/** Native checkpoint framing, extended with explicit durable-task continuity requirements. */
 export const COMPACT_PROMPT = `You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.
 
 Include:
@@ -25,6 +25,14 @@ Include:
 - Important context, constraints, or user preferences
 - What remains to be done (clear next steps)
 - Any critical data, examples, or references needed to continue
+
+Preserve the original objective and success criteria, then distinguish completed work with evidence from pending work. Keep later user corrections and remaining constraints explicit; a brief follow-up or status question does not replace the unfinished objective unless the user actually changed it.
+
+If a Codex goal is present, preserve its objective, last observed status, budget/accounting facts, unresolved blockers, and the next concrete action. Goal status and budgets remain owned by Codex; do not infer completion, reset a budget, or resume a paused goal because compaction occurred. Current goal state and later instructions supersede historical checkpoint facts.
+
+For running work, preserve exact process/session/job handles and their last verified state. Distinguish accepted or completed actions from unsent intentions and uncertain outcomes. Record what must be observed next instead of instructing the next model to restart or repeat it. Keep the existing conversation identity and never equate a checkpoint with a new task.
+
+Include only task state and supporting evidence, not private reasoning, credentials, or capability tokens.
 
 Be concise, structured, and focused on helping the next LLM seamlessly continue the work.`;
 

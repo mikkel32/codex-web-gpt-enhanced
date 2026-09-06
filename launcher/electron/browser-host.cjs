@@ -46,6 +46,7 @@ const TURN_HEARTBEAT_SWEEP_MS = 5_000;
 const TURN_HEARTBEAT_TIMEOUT_MS = 60_000;
 const TURN_TAB_BOOTSTRAP_TIMEOUT_MS = 120_000;
 const RETAINED_TURN_TAB_TTL_MS = 30 * 60 * 1000;
+const EXTRA_RETAINED_PAGE_IDLE_MS = 2 * 60 * 1000;
 const BROWSER_NAVIGATION_TIMEOUT_MS = 60_000;
 const CHATGPT_AUTH_SESSION_TIMEOUT_MS = 5_000;
 const WINDOW_VISIBILITY_EVENTS = ["show", "hide", "minimize", "restore"];
@@ -1342,6 +1343,9 @@ class BrowserHost {
       this.refreshTurnLeases("sweep_gap", now);
       return;
     }
+    const warmAutomatic = [...this.turnTabs.values()]
+      .filter(tab => tab.status === "ready" && tab.interactionMode !== "manual")
+      .sort((a, b) => (b.lastHeartbeatAt ?? 0) - (a.lastHeartbeatAt ?? 0))[0];
     for (const tab of [...this.turnTabs.values()]) {
       if (tab.interactionMode === "manual") {
         if (tab.status === "ready") {
@@ -1363,6 +1367,21 @@ class BrowserHost {
         continue;
       }
       if (tab.status === "ready") {
+        const viewed = this.visible && this.surfaceActive && this.selectedTabId === tab.id;
+        if (tab !== warmAutomatic && !viewed && now - (tab.lastHeartbeatAt ?? now) >= EXTRA_RETAINED_PAGE_IDLE_MS) {
+          let recoverable = false;
+          try {
+            const saved = tab.conversationKey && this.savedConversations?.get(tab.conversationKey);
+            recoverable = saved?.status === "ready" && saved.connectorBound === true
+              && saved.connectorIdentity === (tab.connectorIdentity || "")
+              && Boolean(saved.url) && saved.url === savedConversationUrl(tab.view.webContents.getURL());
+          } catch { /* Unproven recovery state cannot justify early page disposal. */ }
+          if (recoverable) {
+            this.logger.info("browser.idle_page_released", { tabId: tab.id, traceId: tab.traceId, conversationPreserved: true });
+            this.removeTurnTab(tab, false);
+            continue;
+          }
+        }
         if (now - (tab.lastHeartbeatAt ?? 0) < RETAINED_TURN_TAB_TTL_MS) continue;
         this.logger.info("browser.retained_tab_expired", { tabId: tab.id, traceId: tab.traceId });
         this.removeTurnTab(tab, false);
