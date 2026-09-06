@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Page } from "playwright-core";
 import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_STOPPED_THINKING_GRACE_MS, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptPromptAttachmentIntegrityError, ChatGptStoppedThinkingTracker, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, browserDiagnosticIncludesScreenshot, chatGptConnectorAttachmentMode, chatGptEffortSelectionRequired, chatGptNewTurnIdentity, chatGptReboundTurnIdentity, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, dismissChatGptTemporaryChatOnboarding, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, resolveChatGptWebMultipartStagingMode, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
-import { ensureChatGptPersonalizedConnectorAccess } from "../src/adapters/chatgpt-web/browser-worker";
+import { CHATGPT_STOPPED_THINKING_LABEL, ensureChatGptPersonalizedConnectorAccess } from "../src/adapters/chatgpt-web/browser-worker";
 import { chatGptStoppedThinkingError } from "../src/adapters/chatgpt-web/adapter-error";
 import { CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
 import { CHATGPT_CONNECTOR_NAME, DEV_CHATGPT_CONNECTOR_NAME, defaultChromeExecutable, legacyChatGptConnectorMigrationMessage } from "../src/config";
@@ -2111,7 +2111,7 @@ test("Luna-only browser turns verify selector absence instead of opening an effo
   expect(checkpoints).toEqual(["luna-default-confirmed"]);
 });
 
-test("Think mode follows the exact pressed state and normal Luna clears it", async () => {
+test.each(["Think", "Tænk"])("%s mode follows the pressed state and normal Luna clears it", async label => {
   let pressed = false;
   let clicks = 0;
   const control = {
@@ -2123,8 +2123,9 @@ test("Think mode follows the exact pressed state and normal Luna clears it", asy
     first: () => control,
   };
   const composerForm = {
-    getByRole: (role: string, options: { name: string; exact: boolean }) => {
-      expect([role, options]).toEqual(["button", { name: "Think", exact: true }]);
+    getByRole: (role: string, options: { name: RegExp }) => {
+      expect(role).toBe("button");
+      expect(options.name.test(label)).toBeTrue();
       return { filter: () => controls };
     },
   };
@@ -2198,7 +2199,7 @@ test("the one-time Temporary Chat onboarding is accepted with an exact Playwrigh
   } as unknown as Page;
 
   expect(await dismissChatGptTemporaryChatOnboarding(page)).toBeTrue();
-  expect(calls).toContainEqual(["role", "button", { name: "Continue", exact: true }]);
+  expect(calls).toContainEqual(["role", "button", { name: /^(?:Continue|Fortsæt)$/i }]);
   expect(calls).toContainEqual(["click", { force: true }]);
   expect(calls).toContainEqual(["waitFor", { state: "hidden", timeout: 10_000 }]);
 });
@@ -2220,6 +2221,15 @@ test("an unrelated Continue dialog is never auto-accepted", async () => {
   expect(lookedForButton).toBeFalse();
 });
 
+test("Danish onboarding requires all three Temporary Chat headings", async () => {
+  const expected = dialogPage("Ikke i historikken. Ingen modeltræning. Hukommelse slået fra.", "Fortsæt");
+  expect(await dismissChatGptTemporaryChatOnboarding(expected.page)).toBeTrue();
+  expect(expected.pressed).toEqual(["Fortsæt"]);
+  const unrelated = dialogPage("Ingen modeltræning. Fortsæt med kontoændringen.", "Fortsæt");
+  expect(await dismissChatGptTemporaryChatOnboarding(unrelated.page)).toBeFalse();
+  expect(unrelated.pressed).toEqual([]);
+});
+
 function dialogPage(text: string, buttonText = "Got it"): { page: Page; pressed: string[] } {
   const pressed: string[] = [];
   const createDialog = () => {
@@ -2229,6 +2239,7 @@ function dialogPage(text: string, buttonText = "Got it"): { page: Page; pressed:
       last: () => button,
       isVisible: async () => matches && buttonMatches,
       press: async (key: string) => { pressed.push(key); },
+      click: async () => { if (!matches || !buttonMatches) throw new Error("Wrong dialog action"); pressed.push(buttonText); },
     };
     const dialog = {
       filter: ({ hasText }: { hasText: string | RegExp }) => {
@@ -2237,6 +2248,7 @@ function dialogPage(text: string, buttonText = "Got it"): { page: Page; pressed:
       },
       last: () => dialog,
       isVisible: async () => matches,
+      waitFor: async () => {},
       getByRole: (_role: string, options?: { name?: string | RegExp }) => {
         const name = options?.name;
         buttonMatches = name === undefined
@@ -2338,6 +2350,15 @@ test("unrelated ChatGPT dialogs are left untouched", async () => {
   expect(fixture.pressed).toEqual([]);
 });
 
+test("Danish rate-limit, subscription, and terminal errors retain their distinct recovery behavior", async () => {
+  await expect(throwIfChatGptRateLimitDialog(dialogPage("For mange anmodninger. Du sender anmodninger for hurtigt.").page))
+    .rejects.toMatchObject({ status: 429, retryable: false });
+  await expect(throwIfChatGptSessionFailureAlert(dialogPage("Kunne ikke indlæse abonnementet.").page))
+    .rejects.toMatchObject({ code: "chatgpt_subscription_unavailable", status: 503, retryable: true });
+  await expect(throwIfChatGptTerminalErrorAlert(dialogPage("Noget gik galt. Besøg help.openai.com.").page))
+    .rejects.toMatchObject({ code: "upstream_server_error", status: 502 });
+});
+
 test("the known terminal ChatGPT error alert returns a structured retryable failure", async () => {
   const fixture = dialogPage(
     "Something went wrong. If this issue persists please contact us through our help center at help.openai.com.",
@@ -2369,6 +2390,7 @@ test("a failed subscription fetch is retryable and does not falsely invalidate C
 
 test.each([
   "Your session has expired. Please log in again to continue using the app. Log in",
+  "Din session er udløbet. Log ind igen for at fortsætte.",
   "你的工作階段已過期 請重新登入以繼續使用應用程式。 登入",
   "您的会话已过期 请重新登录以继续使用该应用。 登录",
 ])("an expired ChatGPT session returns a non-retryable authentication failure: %s", async alertText => {
@@ -2580,7 +2602,9 @@ test("unrelated ChatGPT alerts are not terminal", async () => {
 function toolConfirmationPage(options: {
   disappearAfterReads?: number;
   surface?: "dialog" | "card";
-  allowLabel?: "Allow once" | "Allow";
+  allowLabel?: string;
+  question?: string;
+  denyLabel?: string;
 } = {}): {
   page: Page;
   pressed: string[];
@@ -2588,7 +2612,8 @@ function toolConfirmationPage(options: {
   let reads = 0;
   let visible = true;
   const pressed: string[] = [];
-  const availableButtons = [options.allowLabel ?? "Allow once", "Deny"] as const;
+  const availableButtons = [options.allowLabel ?? "Allow once", options.denyLabel ?? "Deny"] as const;
+  let matches = true;
   const button = (name: string | RegExp) => {
     const actualName = availableButtons.find(candidate => (
       typeof name === "string" ? candidate === name : name.test(candidate)
@@ -2606,15 +2631,15 @@ function toolConfirmationPage(options: {
     };
   };
   const dialog = {
-    filter: ({ hasText }: { hasText: string }) => {
-      expect(hasText).toBe("Allow ChatGPT to use Codex Native?");
+    filter: ({ hasText }: { hasText: RegExp }) => {
+      matches &&= hasText.test(options.question ?? "Allow ChatGPT to use Codex Native?");
       return dialog;
     },
     last: () => dialog,
     isVisible: async () => {
       reads += 1;
       if (options.disappearAfterReads !== undefined && reads >= options.disappearAfterReads) visible = false;
-      return visible;
+      return visible && matches;
     },
     getByRole: (_role: string, input: { name: string | RegExp }) => button(input.name),
     waitFor: async ({ state }: { state: string }) => {
@@ -2673,6 +2698,28 @@ test("auto-approval recognizes the observed non-dialog approval card", async () 
 
   expect(await resolveChatGptToolConfirmation(fixture.page, "Codex Native", true)).toBeTrue();
   expect(fixture.pressed).toEqual(["Allow once:Enter"]);
+});
+
+test("Danish connector confirmation preserves one-shot approval and manual denial", async () => {
+  for (const allowLabel of ["Tillad", "Tillad en gang", "Tillad én gang"]) {
+    const fixture = toolConfirmationPage({ question: "Tillad ChatGPT at bruge Codex Native?", allowLabel, denyLabel: "Afvis" });
+    expect(await resolveChatGptToolConfirmation(fixture.page, "Codex Native", true)).toBeTrue();
+    expect(fixture.pressed).toEqual([`${allowLabel}:Enter`]);
+  }
+  const manual = toolConfirmationPage({ question: "Vil du tillade, at ChatGPT bruger Codex Native?", denyLabel: "Afvis" });
+  expect(await resolveChatGptToolConfirmation(manual.page, "Codex Native", false, undefined, 2)).toBeTrue();
+  expect(manual.pressed).toEqual(["Afvis:Enter"]);
+});
+
+test("localized confirmation cannot authorize another app or persistent access", async () => {
+  const other = toolConfirmationPage({ question: "Tillad ChatGPT at bruge Another App?", allowLabel: "Tillad" });
+  expect(await resolveChatGptToolConfirmation(other.page, "Codex Native", true)).toBeFalse();
+  expect(other.pressed).toEqual([]);
+  const persistent = toolConfirmationPage({ question: "Tillad ChatGPT at bruge Codex Native?", allowLabel: "Tillad altid" });
+  await expect(resolveChatGptToolConfirmation(persistent.page, "Codex Native", true)).rejects.toThrow("Approval button not found");
+  expect(persistent.pressed).toEqual([]);
+  const metacharacters = toolConfirmationPage({ question: "Tillad ChatGPT at bruge Codex NativeX?", allowLabel: "Tillad" });
+  expect(await resolveChatGptToolConfirmation(metacharacters.page, "Codex Native.", true)).toBeFalse();
 });
 
 test("browser preflight separates model context from one-message transport limits", () => {
@@ -3114,6 +3161,15 @@ test("submission observation is mutation-driven and diagnostics avoid full-page 
   expect(submissionSource).not.toContain("setTimeout(resolveSleep, 50)");
   expect(workerSource).toContain("document.body?.textContent?.length");
   expect(workerSource).not.toContain("document.body?.innerText.length");
+});
+
+test("localized stopped-thinking status does not match ordinary prose", () => {
+  for (const label of ["Stopped thinking", "Stoppede med at tænke", "Tænkning stoppet"]) {
+    expect(CHATGPT_STOPPED_THINKING_LABEL.test(label)).toBeTrue();
+  }
+  for (const text of ["Thinking", "Tænker", "Jeg stoppede med at tænke på det.", "Stopped thinking about the first approach"]) {
+    expect(CHATGPT_STOPPED_THINKING_LABEL.test(text)).toBeFalse();
+  }
 });
 
 test("persistent Stopped thinking is a terminal cancelled turn", () => {

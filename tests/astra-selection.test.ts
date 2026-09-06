@@ -6,12 +6,12 @@ import { ChatGptBrowserWorker } from "../src/adapters/chatgpt-web/browser-worker
 import { resolveChatGptWebModelMode } from "../src/adapters/chatgpt-web/model";
 import { availableChatGptWebModelRoutes, CHATGPT_WEB_ASTRA_BACKEND_MODEL, requireChatGptWebModelRoute } from "../src/chatgpt-web-models";
 
-function picker(options: { badge?: string; closedBadge?: string; maximum?: number; jump?: number; powerDisabled?: boolean; onLatest?: () => void; initialLatest?: boolean; initialPosition?: number; ignoreLatest?: boolean } = {}) {
+function picker(options: { badge?: string; closedBadge?: string; maximum?: number; jump?: number; powerDisabled?: boolean; onLatest?: () => void; initialLatest?: boolean; initialPosition?: number; ignoreLatest?: boolean; latestLabel?: string } = {}) {
   let position = options.initialPosition ?? 2, selected = options.initialLatest ?? false, submenu = false, open = true;
   const actions: string[] = [];
   const raw = (visible: string) => ({ visible, content: visible, label: null, title: null, expanded: "false" });
   const slider = { getAttribute: async (name: string) => String(name === "aria-valuemin" ? 0 : name === "aria-valuemax" ? options.maximum ?? 4 : position) };
-  const model = { press: async () => { submenu = true; }, isVisible: async () => !submenu,
+  const model = { filter() { return this; }, press: async () => { submenu = true; }, isVisible: async () => !submenu,
     evaluate: async () => raw(selected ? options.badge ?? "6 Pro" : "5.6 Pro") };
   const latest = { isVisible: async () => submenu, getAttribute: async (name: string) => name === "aria-checked" ? String(selected) : "false",
     press: async () => { if (!options.ignoreLatest) selected = true; submenu = false; actions.push("Latest"); options.onLatest?.(); } };
@@ -19,8 +19,8 @@ function picker(options: { badge?: string; closedBadge?: string; maximum?: numbe
     getAttribute: async () => options.powerDisabled || submenu ? "true" : "false",
     press: async (key: string) => { actions.push(key); position += options.jump ?? 1; } };
   const menu = { isVisible: async () => open, filter() { return this; }, last() { return this; },
-    locator: () => ({ isVisible: async () => submenu }),
-    getByRole: (_role: string, query: { name: string }) => query.name === "Select model" ? model : query.name === "Latest" ? latest : power };
+    locator: (selector: string) => selector.includes("data-model-reasoning-effort-slider") ? power : selector.includes(":not(:has") ? model : ({ isVisible: async () => submenu }),
+    getByRole: (_role: string, query: { name: RegExp }) => query.name.test(options.latestLabel ?? "Latest") ? latest : ({ isVisible: async () => false }) };
   const control = { getAttribute: async (name: string) => name === "aria-controls" ? "owned-menu" : "false",
     evaluate: async () => raw(options.closedBadge ?? options.badge ?? "6 Pro"), click: async () => { open = true; } };
   const page = { locator: () => menu, keyboard: { press: async (key: string) => { actions.push(key); open = false; } } };
@@ -41,6 +41,16 @@ test("Latest plus Pro is accepted without a numeric label, including already-sel
     expect(fixture.actions).toEqual(["Latest", "Escape"]);
     await selectChatGptAstraPro(fixture.page, fixture.control);
     expect(fixture.actions).not.toContain("ArrowRight");
+  }
+});
+
+test("Danish Seneste and Nyeste use the same selected-state verification", async () => {
+  for (const latestLabel of ["Seneste", "Nyeste"]) {
+    const fixture = picker({ latestLabel, closedBadge: "Thinking-indsats" });
+    await selectChatGptAstraPro(fixture.page, fixture.control);
+    await assertChatGptAstraProReady(fixture.control, undefined, fixture.page);
+    const wrong = picker({ latestLabel, initialPosition: 4, initialLatest: false });
+    await expect(assertChatGptAstraProReady(wrong.control, undefined, wrong.page)).rejects.toMatchObject({ code: "astra_pro_unavailable" });
   }
 });
 
@@ -92,9 +102,9 @@ test("the real Send boundary rechecks Astra after preparation, including reused 
     sendAttachedPrompt(page: Page, baseline: unknown, capture: (checkpoint: string) => Promise<void>, signal: AbortSignal,
       progress: undefined, lifecycle: { modelId: string; onSendActivated(): Promise<void> }): Promise<string>;
   }).sendAttachedPrompt;
-  for (const state of [{ initialLatest: true, initialPosition: 4 }, { initialLatest: false, initialPosition: 4 }, { initialLatest: true, initialPosition: 2 }]) {
+  for (const latestLabel of ["Latest", "Seneste"]) for (const state of [{ initialLatest: true, initialPosition: 4 }, { initialLatest: false, initialPosition: 4 }, { initialLatest: true, initialPosition: 2 }]) {
     let sends = 0, activated = 0;
-    const fixture = picker({ initialLatest: true, initialPosition: 4, badge: "Pro", closedBadge: "Pro" });
+    const fixture = picker({ latestLabel, initialLatest: true, initialPosition: 4, badge: "Pro", closedBadge: "Pro" });
     const hidden = { filter() { return this; }, last() { return this; }, isVisible: async () => false };
     const page = { ...fixture.page, isClosed: () => false, locator: (selector: string) => selector === '[id="owned-menu"]' ? fixture.page.locator(selector) : hidden } as unknown as Page;
     const control = { ...fixture.control, filter() { return this; }, last() { return this; } };

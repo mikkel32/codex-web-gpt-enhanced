@@ -121,6 +121,7 @@ export const CHATGPT_EMPTY_RESPONSE_GRACE_MS = 10_000;
 export const CHATGPT_COMPLETION_ACTION_GRACE_MS = 60_000;
 export const CHATGPT_COMPLETION_SETTLE_MS = 2_000;
 export const CHATGPT_TOOL_CONFIRMATION_TIMEOUT_MS = 60_000;
+export const CHATGPT_STOPPED_THINKING_LABEL = /^(?:Stopped thinking|Stoppede med at tænke|Tænkning stoppet)$/i;
 export const MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS = 3;
 const CHATGPT_CONNECTOR_MENTION_QUERY = "@codex";
 const CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS = 10_000;
@@ -684,8 +685,8 @@ export class ChatGptPromptAttachmentIntegrityError extends ChatGptWebAdapterErro
 }
 
 const chatGptRateLimitDialog = (page: Page): Locator => page.locator('[role="dialog"]')
-  .filter({ hasText: /Too many requests|太多要求|太多请求|リクエストが多すぎます/i })
-  .filter({ hasText: /making requests too quickly|過於頻繁|过于频繁|リクエストの頻度が高すぎます/i })
+  .filter({ hasText: /Too many requests|For mange (?:anmodninger|forespørgsler)|太多要求|太多请求|リクエストが多すぎます/i })
+  .filter({ hasText: /making requests too quickly|for (?:hurtigt|hyppigt|ofte)|過於頻繁|过于频繁|リクエストの頻度が高すぎます/i })
   .last();
 
 export async function throwIfChatGptRateLimitDialog(page: Page): Promise<void> {
@@ -700,15 +701,15 @@ export async function throwIfChatGptRateLimitDialog(page: Page): Promise<void> {
 
 const chatGptTemporaryChatOnboardingDialog = (page: Page): Locator => page
   .locator('[role="dialog"]')
-  .filter({ hasText: "Not in history" })
-  .filter({ hasText: "No model training" })
-  .filter({ hasText: "Memory off" })
+  .filter({ hasText: /Not in history|Ikke i historikken/i })
+  .filter({ hasText: /No model training|Ingen modeltræning/i })
+  .filter({ hasText: /Memory off|Hukommelse(?: er)?(?: slået)? fra/i })
   .last();
 
 export async function dismissChatGptTemporaryChatOnboarding(page: Page): Promise<boolean> {
   const dialog = chatGptTemporaryChatOnboardingDialog(page);
   if (!await dialog.isVisible().catch(() => false)) return false;
-  const continueButton = dialog.getByRole("button", { name: "Continue", exact: true }).last();
+  const continueButton = dialog.getByRole("button", { name: /^(?:Continue|Fortsæt)$/i }).last();
   if (!await continueButton.isVisible().catch(() => false)) {
     throw new Error("ChatGPT Temporary Chat onboarding is visible without its Continue action");
   }
@@ -721,12 +722,12 @@ type ChatGptTextScope = Pick<Locator, "getByText">;
 
 const chatGptSubscriptionFailureAlert = (page: Page): Locator => page
   .locator('[role="alert"]')
-  .filter({ hasText: /Failed to load subscription/i })
+  .filter({ hasText: /Failed to load subscription|Kunne ikke (?:indlæse|hente) abonnement(?:et)?/i })
   .last();
 
 const chatGptExpiredSessionAlert = (page: Page): Locator => page
   .locator('[role="alert"], [role="dialog"]')
-  .filter({ hasText: /Your session has expired|你的工作階段已過期|您的工作階段已過期|你的会话已过期|您的会话已过期/i })
+  .filter({ hasText: /Your session has expired|Din session er udløbet|你的工作階段已過期|您的工作階段已過期|你的会话已过期|您的会话已过期/i })
   .last();
 
 export async function throwIfChatGptSessionFailureAlert(page: Page): Promise<void> {
@@ -744,7 +745,7 @@ export async function throwIfChatGptSessionFailureAlert(page: Page): Promise<voi
 }
 
 const chatGptTerminalErrorAlert = (scope: ChatGptTextScope): Locator => scope
-  .getByText(/Something went wrong[\s\S]*help\.openai\.com/i)
+  .getByText(/(?:Something went wrong|Noget gik galt|Der (?:gik noget galt|opstod en fejl))[\s\S]*help\.openai\.com/i)
   .last();
 
 export async function throwIfChatGptTerminalErrorAlert(scope: ChatGptTextScope): Promise<void> {
@@ -763,8 +764,10 @@ export async function resolveChatGptToolConfirmation(
   timeoutMs = CHATGPT_TOOL_CONFIRMATION_TIMEOUT_MS,
   onVisible?: () => Promise<void>,
 ): Promise<boolean> {
+  const escapedAppName = appName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const question = new RegExp(`(?:(?:Allow ChatGPT to use|Tillad ChatGPT at bruge|Vil du tillade ChatGPT at bruge) ${escapedAppName}\\?|Vil du tillade, at ChatGPT bruger ${escapedAppName}\\?)`, "i");
   const dialog = page.locator('[role="dialog"], [data-testid="tool-approval-card"]')
-    .filter({ hasText: `Allow ChatGPT to use ${appName}?` })
+    .filter({ hasText: question })
     .last();
   if (!await dialog.isVisible().catch(() => false)) return false;
   await onVisible?.();
@@ -774,7 +777,7 @@ export async function resolveChatGptToolConfirmation(
     // current one-shot approval. Keep the matcher anchored so persistent
     // actions such as "Always allow" cannot match.
     const allowCurrentAction = dialog
-      .getByRole("button", { name: /^Allow(?: once)?$/ })
+      .getByRole("button", { name: /^(?:Allow(?: once)?|Tillad(?: (?:en|én) gang)?)$/i })
       .last();
     await allowCurrentAction.waitFor({ state: "visible", timeout: 10_000 });
     await allowCurrentAction.press("Enter");
@@ -789,7 +792,7 @@ export async function resolveChatGptToolConfirmation(
   }
 
   if (!await dialog.isVisible().catch(() => false)) return true;
-  const deny = dialog.getByRole("button", { name: "Deny", exact: true }).last();
+  const deny = dialog.getByRole("button", { name: /^(?:Deny|Afvis)$/i }).last();
   await deny.waitFor({ state: "visible", timeout: 5_000 });
   await deny.press("Enter");
   await dialog.waitFor({ state: "hidden", timeout: 10_000 });
@@ -1251,7 +1254,7 @@ export async function setChatGptThinkMode(
   captureDiagnostic?: (checkpoint: string) => Promise<void>,
 ): Promise<void> {
   const controls = composerForm
-    .getByRole("button", { name: "Think", exact: true })
+    .getByRole("button", { name: /^(?:Think|Tænk)$/i })
     .filter({ visible: true });
   const count = await controls.count();
   if (count === 0) {
@@ -3802,12 +3805,13 @@ export class ChatGptBrowserWorker {
         } : {}),
       }));
       const stoppedThinkingVisible = (() => {
-        const ariaMatch = [...root.querySelectorAll<HTMLElement>('[aria-label="Stopped thinking"]')]
-          .some(renderedInDom);
+        const stoppedLabel = new RegExp(options.stoppedThinkingLabelSource, "i");
+        const ariaMatch = [...root.querySelectorAll<HTMLElement>("[aria-label]")]
+          .some(candidate => stoppedLabel.test(candidate.getAttribute("aria-label")?.trim() ?? "") && renderedInDom(candidate));
         if (ariaMatch) return true;
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
         for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-          if (node.textContent?.replace(/\s+/g, " ").trim() !== "Stopped thinking") continue;
+          if (!stoppedLabel.test(node.textContent?.replace(/\s+/g, " ").trim() ?? "")) continue;
           const parent = node.parentElement;
           if (parent && renderedInDom(parent)) return true;
         }
@@ -3830,6 +3834,7 @@ export class ChatGptBrowserWorker {
     }, {
       completionActionSelector: CHATGPT_COMPLETION_ACTION_SELECTOR,
       knownKey: cache?.key,
+      stoppedThinkingLabelSource: CHATGPT_STOPPED_THINKING_LABEL.source,
       attributeFilter: [...CHATGPT_DOM_REVISION_ATTRIBUTES],
     }, { timeout: 2_000 }).catch(() => undefined);
     if (!observed) {

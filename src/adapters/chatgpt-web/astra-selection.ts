@@ -7,7 +7,7 @@ function unavailable(phase: string, observed = ""): ChatGptWebAdapterError {
   // Only picker labels are included, never a page dump or conversation text.
   const label = normalize(observed).replace(/[^a-zA-Z0-9 ._-]/g, "").slice(0, 80);
   return new ChatGptWebAdapterError(
-    `Astra selection could not confirm ${phase}${label ? ` (picker: ${label})` : ""}. Select Latest and set Power to Pro in regular Chat.`,
+    `Astra selection could not confirm ${phase}${label ? ` (picker: ${label})` : ""}. Select Latest / Seneste and set Power / Styrke to Pro in regular Chat.`,
     { status: 400, errorType: "invalid_request_error", code: "astra_pro_unavailable", retryable: false },
   );
 }
@@ -26,35 +26,19 @@ async function until<T>(read: () => Promise<T | undefined>, phase: string, signa
   } while (Date.now() < deadline);
   throw unavailable(phase);
 }
-async function badge(control: Locator): Promise<{ label: string; expanded: boolean }> {
-  // Read one DOM revision, rather than mixing labels from successive transitions.
-  const raw = await control.evaluate(element => ({
-    visible: (element as HTMLElement).innerText ?? element.textContent ?? "",
-    content: element.textContent,
-    label: element.getAttribute("aria-label"),
-    title: element.getAttribute("title"),
-    expanded: element.getAttribute("aria-expanded"),
-  }), undefined, { timeout: 2_000 });
-  const visible = normalize(raw.visible);
-  const candidates = [visible, raw.label, raw.title, raw.content]
-    .filter((value): value is string => typeof value === "string").map(normalize);
-  return { label: visible || candidates.find(Boolean) || "", expanded: raw.expanded === "true" };
-}
-const placeholder = (label: string) => !label || /^(?:Thinking effort|Select effort|Select model)$/i.test(label);
-const closedBadge = (control: Locator, signal?: AbortSignal) => until(async () => {
-  const value = await badge(control);
-  return value.expanded || placeholder(value.label) ? undefined : value;
-}, "the closed model control", signal);
 async function closePicker(page: Page, menu: Locator, control: Locator, signal?: AbortSignal): Promise<void> {
   signal?.throwIfAborted();
   await page.keyboard.press("Escape");
   // Wait for the exiting menu to release its focus trap before the Send boundary.
   await until(async () => !await menu.isVisible() ? true : undefined, "the closed picker", signal);
-  await closedBadge(control, signal);
+  await until(async () => await control.getAttribute("aria-expanded") !== "true" ? true : undefined, "the closed model control", signal);
 }
-const powerControl = (menu: Locator) => menu.getByRole("menuitem", { name: "Power", exact: true });
+// These controls retain their ARIA structure when their visible names are translated.
+const powerControl = (menu: Locator) => menu.locator('[role="menuitem"]:has([data-model-reasoning-effort-slider] [role="slider"])');
+const modelControl = (menu: Locator) => menu.locator('[role="menuitem"][aria-expanded]:not(:has([role="slider"]))').filter({ visible: true });
+const latestControl = (menu: Locator) => menu.getByRole("menuitemradio", { name: /^(?:Latest|Seneste|Nyeste)$/i });
 async function modelListVisible(menu: Locator): Promise<boolean> {
-  if (!await menu.getByRole("menuitemradio", { name: "Latest", exact: true }).isVisible()) return false;
+  if (!await latestControl(menu).isVisible()) return false;
   const power = powerControl(menu);
   return await menu.locator('[role="menuitem"][aria-expanded="true"]').isVisible()
     || !await power.isVisible() || await power.getAttribute("aria-disabled") === "true";
@@ -73,15 +57,15 @@ async function readyPower(menu: Locator, signal?: AbortSignal) {
 async function latestChoice(menu: Locator, signal?: AbortSignal): Promise<Locator> {
   const opening = await until(async () => {
     if (await modelListVisible(menu)) return "list";
-    if (await menu.getByRole("menuitem", { name: "Select model", exact: true }).isVisible()) return "toggle";
+    if (await modelControl(menu).isVisible()) return "toggle";
     return undefined;
   }, "the model list", signal);
   if (opening === "toggle") {
     signal?.throwIfAborted();
-    await menu.getByRole("menuitem", { name: "Select model", exact: true }).press("Enter", { timeout: 5_000 });
+    await modelControl(menu).press("Enter", { timeout: 5_000 });
   }
   await until(async () => await modelListVisible(menu) ? true : undefined, "the model list", signal);
-  return menu.getByRole("menuitemradio", { name: "Latest", exact: true });
+  return latestControl(menu);
 }
 /** Verify the user's Latest + Pro route, independent of numeric model labels. */
 export async function assertChatGptAstraProReady(control: Locator, signal?: AbortSignal, page?: Page): Promise<void> {
