@@ -609,7 +609,7 @@ export function compileChatGptWebPrompt(
   const initialMessageCount = sourceMessages.length;
   let compiled = build(sourceMessages);
   if (!parsed._compactionRequest) {
-    if (!manualControl && !captureLunaCheckpoint && mode.localTools && !compiled.multipart
+    if (!manualControl && parsed.modelId !== CHATGPT_WEB_LUNA_MODEL_ID && !captureLunaCheckpoint && mode.localTools && !compiled.multipart
       && compiled.images.length <= CHATGPT_MAX_INPUT_IMAGES - 2
       && Buffer.byteLength(compiled.text, "utf8") > CHATGPT_INLINE_CONTEXT_BYTE_LIMIT) {
       // Transport choice does not raise the model's input budget. Keep large task

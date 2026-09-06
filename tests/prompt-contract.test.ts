@@ -59,6 +59,16 @@ test("small follow-ups stay inline and automatic files do not displace image att
   expect(compiled.multipart).toBeUndefined();
 });
 
+test("Luna never opts into automatic context files even without rolling-checkpoint options", () => {
+  const parsed = request("low");
+  parsed.modelId = CHATGPT_WEB_LUNA_MODEL_ID;
+  parsed.context.messages.push({ role: "user", content: "x".repeat(70000), timestamp: 3 });
+  const compiled = compileChatGptWebPrompt(parsed,
+    { localToolsEnabled: true, solAvailable: false, proAvailable: false }, "turn_12345678901234567890123456789012");
+  expect(compiled.multipart).toBeUndefined();
+  expect(compiled.text).toContain("x".repeat(70000));
+});
+
 test("Full-mode Pro prompts pass one stable turn token directly to native actions", () => {
   const token = "turn_12345678901234567890123456789012";
   const parsed = request("max");
