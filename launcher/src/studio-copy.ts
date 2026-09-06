@@ -1,6 +1,10 @@
 import type { Language } from "./types";
 
 const en = {
+  accountStepBody: "Sign in to the ChatGPT account you want to use.", modelStepBody: "Add ChatGPT Web models to the Codex model picker.", toolsStepBody: "Connect tools so ChatGPT can work with your Codex task.",
+  continueTask: "Continue task", reviewBrowser: "Review ChatGPT", connectTools: "Connect tools",
+  connectionDetails: "Connection details", refreshStatus: "Refresh connection status", nextStep: "Up next", setupComplete: "Setup complete",
+  openingGuide: "Opening the guide…", guideUnavailable: "The guide could not be loaded.", guideOnline: "Open guide on GitHub",
   workspace: "Your workspace", greeting: "A good place to keep building.",
   intro: "Your models, conversations, and tools. Together in Maria.",
   connections: "Connections", conversations: "Conversations", openWorkspace: "Open workspace",
@@ -32,6 +36,10 @@ const en = {
 };
 
 const zh: typeof en = {
+  accountStepBody: "登录你想使用的 ChatGPT 账户。", modelStepBody: "将 ChatGPT Web 模型添加到 Codex 模型选择器。", toolsStepBody: "连接工具，让 ChatGPT 处理你的 Codex 任务。",
+  continueTask: "继续任务", reviewBrowser: "查看 ChatGPT", connectTools: "连接工具",
+  connectionDetails: "连接详情", refreshStatus: "刷新连接状态", nextStep: "下一步", setupComplete: "设置完成",
+  openingGuide: "正在打开指南…", guideUnavailable: "无法加载指南。", guideOnline: "在 GitHub 上打开指南",
   workspace: "你的工作空间", greeting: "继续创造的好地方。", intro: "模型、对话与工具，都在 Maria。",
   connections: "连接", conversations: "对话", openWorkspace: "打开工作空间",
   emptyTitle: "下一个想法，从这里开始。", emptyBody: "在 Codex 中选择 ChatGPT Web 模型开始工作。对话会显示在这里。",
@@ -52,6 +60,10 @@ const zh: typeof en = {
 };
 
 const ja: typeof en = {
+  accountStepBody: "使用する ChatGPT アカウントにサインインします。", modelStepBody: "Codex のモデル選択に ChatGPT Web モデルを追加します。", toolsStepBody: "ツールを接続して、ChatGPT が Codex の作業を進められるようにします。",
+  continueTask: "作業を続ける", reviewBrowser: "ChatGPT を確認", connectTools: "ツールを接続",
+  connectionDetails: "接続の詳細", refreshStatus: "接続状態を更新", nextStep: "次のステップ", setupComplete: "設定完了",
+  openingGuide: "ガイドを開いています…", guideUnavailable: "ガイドを読み込めませんでした。", guideOnline: "GitHub でガイドを開く",
   workspace: "ワークスペース", greeting: "次の仕事を、ここから。", intro: "モデル、会話、ツールを Maria に。",
   connections: "接続", conversations: "会話", openWorkspace: "ワークスペースを開く",
   emptyTitle: "次のアイデアは、ここから。", emptyBody: "Codex で ChatGPT Web モデルを選んで始めましょう。作業中の会話がここに表示されます。",

@@ -12,7 +12,12 @@ models available. Choose a native model for your Codex account, or choose a
 **Maria Web** model to use your ChatGPT session. Your task, files, tools, and results
 stay together in Codex.
 
-## Maria 5.7
+## Maria 5.9
+
+Overview now offers one next action: sign in, finish the required setup, review
+paused access, or continue your existing task. Connection details expand when
+needed, and browser-only setups do not require optional MCP tools. The handbook
+loads on demand, while live events take precedence over a delayed startup snapshot.
 
 A cinematic motion system brings spring-driven navigation, an interactive depth mark,
 masked heading reveals, and coordinated page transitions. The sidebar folds into an
@@ -77,7 +82,7 @@ verified against the release's SHA-256 checksums before installation.
 
 - Maria checks at startup, every four hours, and when you return after at least 15 minutes. **Check for updates** retries immediately.
 - The page shows the installed version, latest published version, and last successful check. A local build newer than the published release is labeled **ahead of the release**.
-- Our repository is private. **Release notes & downloads** opens GitHub using your normal browser sign-in. For automatic checks and in-app updates, connect a fine-grained GitHub token restricted to this repository with **Contents: Read-only**. It is stored using operating-system encryption and can be removed in Updates.
+- **Release notes & downloads** opens GitHub. If update checks require repository access, connect a fine-grained GitHub token restricted to this repository with **Contents: Read-only**. It is stored using operating-system encryption and can be removed in Updates.
 - GitHub access failures and offline checks stay visible; Maria never reports them as "up to date."
 - Finish active work before installing. DEV/source installations stay separate and do not replace the installed application.
 
@@ -131,7 +136,7 @@ For a native Codex session that bypasses Maria completely, use this from your pr
 codex -c model_provider=openai -c openai_base_url=https://chatgpt.com/backend-api/codex
 ```
 
-The Overview's **Copy native command** button copies this command. In this source
+Expand **Connection details** in Overview to copy the native launch command. In this source
 repository, `bun run codex:native` provides the same direct route and ignores an
 inherited OPENAI_BASE_URL override.
 
@@ -180,7 +185,7 @@ processed by OpenAI. Account availability and limits still apply.
 
 ## Our project
 
-Source and issues live in our private GitHub repository:
+Source and issues live in our GitHub repository:
 https://github.com/mikkel32/codex-web-gpt-enhanced
 
 There are no social-page requirements in onboarding. The project ships its own
@@ -189,7 +194,7 @@ Third-party license notices are included in LICENSE and LICENSES.
 
 ## Run from source
 
-This source path requires Bun 1.4.0. Use an authenticated clone for this private repository.
+This source path requires Bun 1.4.0. Authenticate the clone if repository access requires it.
 
 ```bash
 git clone https://github.com/mikkel32/codex-web-gpt-enhanced.git

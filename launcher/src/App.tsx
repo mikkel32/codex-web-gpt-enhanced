@@ -11,7 +11,9 @@ import {
 import { createPortal } from "react-dom";
 import { copyFor, type Copy } from "./i18n";
 import { Icon, type IconName } from "./icons";
-import { MariaHome, MariaGuide, MADE_WITH_LOVE } from "./MariaHome";
+import { MariaHome, MADE_WITH_LOVE } from "./MariaHome";
+import { GuideLoader } from "./GuideLoader";
+import { createBootstrapOverlay } from "./bootstrap-overlay";
 import { MariaUpdates } from "./MariaUpdates";
 import { BrowserSignIn } from "./BrowserSignIn";
 import { useActivityLogs } from "./useActivityLogs";
@@ -64,17 +66,9 @@ export function App() {
     if (!api) return;
     let cancelled = false;
     let browserFingerprint = "";
-    void api.snapshot().then((next) => {
-      if (cancelled) return;
-      setSnapshot(next);
-      setBrowser(next.browser);
-      browserFingerprint = JSON.stringify(next.browser);
-      setOperation(next.operation);
-      if (next.operation?.status === "failed" && next.operation.name !== "mcp-verification") {
-        setError(next.operation.message);
-      }
-    }).catch((cause) => { if (!cancelled) setError(messageOf(cause)); });
+    const overlay = createBootstrapOverlay();
     const unsubscribeState = api.onStateChanged((state) => {
+      overlay.record("state", state);
       setSnapshot((current) => current
         ? {
             ...current,
@@ -83,18 +77,30 @@ export function App() {
         : current);
     });
     const unsubscribeBrowser = api.onBrowserState(next => {
+      overlay.record("browser", next);
       const fingerprint = JSON.stringify(next);
       if (fingerprint === browserFingerprint) return;
       browserFingerprint = fingerprint;
       setBrowser(next);
     });
     const unsubscribeOperation = api.onOperation((next) => {
+      overlay.record("operation", next);
       setOperation(next);
       if (next.status === "failed" && next.name !== "mcp-verification") setError(next.message);
     });
     const unsubscribeUpdate = api.onUpdateState((update) => {
+      overlay.record("update", update);
       setSnapshot((current) => current ? { ...current, update } : current);
     });
+    void api.snapshot().then(initial => {
+      if (cancelled) return;
+      const next = overlay.merge(initial);
+      setSnapshot(next);
+      setBrowser(next.browser);
+      browserFingerprint = JSON.stringify(next.browser);
+      setOperation(next.operation);
+      if (next.operation?.status === "failed" && next.operation.name !== "mcp-verification") setError(next.operation.message);
+    }).catch(cause => { if (!cancelled) setError(messageOf(cause)); });
     return () => {
       cancelled = true;
       unsubscribeState();
@@ -516,7 +522,7 @@ function LauncherShell({
           >
             {surface === "home" ? <MariaHome snapshot={{ ...snapshot, browser }} navigate={navigateSurface} /> : null}
             {surface === "updates" ? <MariaUpdates snapshot={{ ...snapshot, browser, operation }} install={installUpdate} /> : null}
-            {surface === "guide" ? <MariaGuide openRepository={() => void api!.openExternal(snapshot.urls.github).catch(cause => setError(messageOf(cause)))} /> : null}
+            {surface === "guide" ? <GuideLoader language={language} openRepository={() => void api!.openExternal(snapshot.urls.github).catch(cause => setError(messageOf(cause)))} /> : null}
             {surface === "browser" ? (
               <BrowserSurface
                 browser={browser}

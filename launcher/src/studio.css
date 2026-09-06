@@ -170,6 +170,21 @@ button:disabled { opacity: .42; }
 .studio-ready-panel h3 { font-size: 14px; font-weight: 520; letter-spacing: -.025em; line-height: 1.4; margin: 0 0 15px; }
 .studio-build-note { display: flex; justify-content: space-between; margin: 23px 3px; color: #868584; font: 8px var(--font-mono); letter-spacing: .12em; }
 .studio-inline-error { color: #e6aa9c; font-size: 12px; line-height: 1.8; }
+.studio-home-shortcuts { display: flex; flex-wrap: wrap; gap: 24px; padding: 20px 2px; }
+.studio-home-shortcuts .text-button { min-height: 32px; gap: 9px; }
+.studio-connection-details > summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; cursor: pointer; font-size: 13px; list-style: none; min-height: 30px; }
+.studio-connection-details > summary::-webkit-details-marker { display: none; }
+.studio-connection-summary { display: block; margin-top: 6px; color: #aaa49b; font-size: 11px; }
+.studio-connection-details > summary svg { width: 14px; transition: transform 180ms ease; }
+.studio-connection-details[open] > summary svg { transform: rotate(90deg); }
+.studio-connection-details[open] > summary { margin-bottom: 20px; }
+.studio-connection-details > summary:focus-visible { outline: 2px solid #e4bd8e; outline-offset: 5px; border-radius: 4px; }
+.studio-native-command { margin-top: 18px; font-size: 11px; line-height: 1.6; text-align: left; }
+.studio-next-step { display: grid; gap: 7px; margin-top: 22px; padding-top: 18px; border-top: 1px solid #ecebea12; }
+.studio-next-step span { color: #aaa49b; font-size: 11px; }
+.studio-next-step strong { color: #e9d6ba; font-weight: 500; font-size: 14px; }
+.studio-empty-conversations.is-setup > .cinematic-mark { --mark-size: 90px; width: 180px; height: 130px; }
+@media (prefers-reduced-motion: reduce) { .studio-connection-details > summary svg { transition: none; } }
 /* Settings, model setup, tool connection, and diagnostics share the same surfaces. */
 .content-scroll, .content-scroll.is-narrow { max-width: 980px; padding: 48px clamp(28px,4vw,52px) 50px; }
 .surface-header { margin-bottom: 34px; }
