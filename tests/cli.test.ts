@@ -390,9 +390,11 @@ test("browser check uses metadata-only launcher liveness in Zero Risk", async ()
   const cdp = createServer((request, response) => {
     requests += 1;
     expect(request.url).toBe("/json/version");
+    const address = cdp.address();
+    if (!address || typeof address === "string") throw new Error("CDP test server has no port");
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify({
-      webSocketDebuggerUrl: "ws://127.0.0.1:48142/devtools/browser/manual-check",
+      webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}/devtools/browser/manual-check`,
     }));
   });
   await new Promise<void>((resolveListen, rejectListen) => {

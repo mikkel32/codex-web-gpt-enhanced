@@ -1,0 +1,25 @@
+.automatic-setup {
+  display: flex; align-items: flex-start; gap: 14px; flex: 0 0 auto;
+  padding: 16px 20px; margin: 16px 22px 0; border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg); background: var(--color-background-surface);
+}
+.automatic-setup > svg { width: 22px; height: 22px; flex-shrink: 0; color: var(--color-text-accent); margin-top: 2px; }
+.automatic-setup-copy { flex: 1; min-width: 0; }
+.automatic-setup-copy > strong { font-size: 13px; }
+.automatic-setup-copy p { margin: 5px 0; font-size: 13px; color: var(--color-text-secondary); line-height: 1.5; }
+.automatic-setup-copy small { font-size: 12px; color: var(--color-text-tertiary); }
+.automatic-setup-copy details { margin-top: 10px; font-size: 12px; }
+.automatic-setup-copy summary { cursor: pointer; }
+.automatic-setup-copy pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow: auto; }
+.automatic-setup-actions { display: flex; flex-direction: column; gap: 5px; align-items: flex-end; }
+.automatic-setup-actions .button-primary { white-space: nowrap; }
+.automatic-setup.is-ready { border-color: var(--color-text-success); }
+.automatic-setup.is-error { border-color: var(--color-text-error); }
+.error-toast details { margin-top: 8px; font-size: 12px; }
+.error-toast pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 150px; overflow: auto; }
+@media (max-width: 720px) {
+  .automatic-setup { margin: 12px 12px 0; padding: 14px; flex-wrap: wrap; }
+  .automatic-setup-actions { width: 100%; flex-direction: row; align-items: center; justify-content: flex-end; }
+}
+.workspace { display: flex; flex-direction: column; }
+.workspace > .surface-transition { flex: 1; min-height: 0; height: auto; }

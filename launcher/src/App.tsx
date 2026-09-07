@@ -15,6 +15,8 @@ import { MariaHome, MADE_WITH_LOVE } from "./MariaHome";
 import { GuideLoader } from "./GuideLoader";
 import { createBootstrapOverlay } from "./bootstrap-overlay";
 import { MariaUpdates } from "./MariaUpdates";
+import { AutomaticSetup } from "./AutomaticSetup";
+import { describeSetupError } from "./setup-errors";
 import { BrowserSignIn } from "./BrowserSignIn";
 import { useActivityLogs } from "./useActivityLogs";
 import { WebAccessNotice } from "./WebAccessNotice";
@@ -157,7 +159,7 @@ export function App() {
         )}
       </AnimatePresence>
       <AnimatePresence>
-        {error ? <ErrorToast copy={copy} message={error} onDismiss={() => setError(null)} /> : null}
+        {error ? <ErrorToast copy={copy} language={language} message={error} onDismiss={() => setError(null)} /> : null}
       </AnimatePresence>
     </div></MotionConfig>
   );
@@ -504,6 +506,7 @@ function LauncherShell({
 
       <CommandPalette open={commandOpen} close={() => setCommandOpen(false)} navigate={navigateSurface} language={language} />
       <section className="workspace" ref={workspaceRef}>
+        <AutomaticSetup snapshot={{ ...snapshot, browser, operation }} surface={surface} navigate={navigateSurface} clearError={() => setError(null)} />
         <AnimatePresence>{operation?.status === "running" && surface !== "browser" ? <motion.aside className="runtime-operation" initial={{ opacity: 0, y: 18, scale: .94 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: .97 }} transition={SPRING} role="status"><Icon name="activity" /><span>{operation.message}</span><button onClick={() => navigateSurface("activity")}>{copy.activity}</button></motion.aside> : null}</AnimatePresence>
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
@@ -2159,7 +2162,8 @@ function ActionDot({ pulse = false, tone }: { pulse?: boolean; tone: "required" 
 }
 
 
-function ErrorToast({ copy, message, onDismiss }: { copy: Copy; message: string; onDismiss: () => void }) {
+function ErrorToast({ copy, language, message, onDismiss }: { copy: Copy; language: Language; message: string; onDismiss: () => void }) {
+  const failure = describeSetupError(message, language);
   return (
     <motion.div
       animate={{ opacity: 1, y: 0 }}
@@ -2170,8 +2174,9 @@ function ErrorToast({ copy, message, onDismiss }: { copy: Copy; message: string;
     >
       <StateDot state="error" />
       <span>
-        <strong>{copy.error}</strong>
-        <p>{message}</p>
+        <strong>{failure.title}</strong>
+        <p>{failure.message}</p>
+        <details><summary>{language === "zh-CN" ? "技术详情" : language === "ja" ? "技術的な詳細" : "Technical details"}</summary><pre>{failure.detail}</pre></details>
       </span>
       <button onClick={onDismiss} type="button">{copy.dismiss}</button>
     </motion.div>

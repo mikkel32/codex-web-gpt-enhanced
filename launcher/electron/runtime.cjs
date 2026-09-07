@@ -541,12 +541,25 @@ class RuntimeHost {
       return;
     }
     const runtime = await this.supervisor.startIfConfigured();
-    const expected = snapshot.configured ? "ready" : "not-configured";
+    // Restoring settings from an older launcher is not the same as starting that old
+    // runtime with this launcher's executable. Keep the supervisor's version gate.
+    const needsUpgrade = snapshot.owner === "launcher"
+      && typeof this.app.getVersion === "function"
+      && typeof snapshot.config?.releaseVersion === "string"
+      && snapshot.config.releaseVersion !== this.app.getVersion();
+    const expected = !snapshot.configured ? "not-configured" : needsUpgrade ? "needs-setup" : "ready";
     if (runtime.status !== expected) {
       throw new Error(
         `Previous runtime recovery returned ${runtime.status}; expected ${expected}${runtime.detail ? `: ${runtime.detail}` : ""}`,
       );
     }
+    if (needsUpgrade) {
+      this.logger.warn("runtime.previous_settings_restored_upgrade_required", {
+        fromVersion: snapshot.config.releaseVersion,
+        toVersion: this.app.getVersion(),
+      });
+    }
+    return runtime;
   }
 
   async rollbackFirstSetup(checkpoint) {
@@ -1338,11 +1351,12 @@ class RuntimeHost {
     this.lifecycleOperation = name;
     let setupCommandStarted = false;
     let runtimeTransitionStarted = false;
+    let runtimeStartAttempted = false;
     try {
       if (this.launcherProfile === "production") {
         await this.run(name, [...args, "--preflight-only"], {
           ...options,
-          message: "Validating Codex configuration before changing the runtime",
+          message: "Checking saved settings and the local browser connection before changing the runtime",
           successMessage: "Codex configuration is ready for setup",
           timeoutMs: Math.min(options.timeoutMs || 15_000, 15_000),
         });
@@ -1353,6 +1367,7 @@ class RuntimeHost {
       setupCommandStarted = true;
       const result = await this.run(name, args, options);
       if (repairsTunnelAccess) this.supervisor.clearTunnelAuthorizationPause?.();
+      runtimeStartAttempted = true;
       const runtime = await this.supervisor.startIfConfigured();
       if (runtime.status !== "ready") {
         throw new Error(`Setup completed, but the launcher-owned runtime is ${runtime.status}: ${runtime.detail || "not ready"}`);
@@ -1364,6 +1379,8 @@ class RuntimeHost {
       const failures = [];
       let rolledBack = false;
       let checkpointChanged = false;
+      let rollbackStopped = true;
+      let restoredRuntime;
       if (!previousRuntime.configured && setupCommandStarted) {
         try {
           rolledBack = await this.rollbackFirstSetup(checkpoint);
@@ -1374,6 +1391,14 @@ class RuntimeHost {
         }
       }
       if (previousRuntime.configured && checkpoint && runtimeTransitionStarted) {
+        // A failure after startup can leave the replacement alive. Never restore old
+        // files underneath that process, and never claim rollback if it cannot stop.
+        try {
+          if (previousRuntime.owner === "launcher" || runtimeStartAttempted) await this.supervisor.stopForSetup();
+        } catch (caught) {
+          rollbackStopped = false;
+          failures.push(`stopping the incomplete runtime failed: ${caught instanceof Error ? caught.message : String(caught)}`);
+        }
         try {
           checkpointChanged = this.setupCheckpointChanged(checkpoint);
         } catch (caught) {
@@ -1383,15 +1408,15 @@ class RuntimeHost {
           );
         }
         try {
-          this.restoreSetupCheckpoint(checkpoint);
+          if (rollbackStopped) this.restoreSetupCheckpoint(checkpoint);
         } catch (caught) {
           failures.push(caught instanceof Error ? caught.message : String(caught));
         }
       }
       let recoveryError;
-      if (runtimeTransitionStarted) {
+      if (runtimeTransitionStarted && rollbackStopped) {
         try {
-          await this.restorePreviousRuntime(previousRuntime, name, {
+          restoredRuntime = await this.restorePreviousRuntime(previousRuntime, name, {
             repairExternal: previousRuntime.owner === "external" && checkpointChanged,
           });
         } catch (caught) {
@@ -1406,6 +1431,8 @@ class RuntimeHost {
       const message = [
         primary,
         ...(rolledBack ? ["incomplete first-time setup was rolled back"] : []),
+        ...(restoredRuntime?.status === "needs-setup"
+          ? ["previous settings were restored; retry setup to finish upgrading them for this launcher"] : []),
         ...failures,
       ].join("; ");
       this.publishOperation?.({ name, status: "failed", message });

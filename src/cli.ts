@@ -330,7 +330,7 @@ async function setupCommand(args: string[]): Promise<void> {
   options.acknowledgedUnofficial = true;
 
   if (preflightOnly) {
-    preflightSetup(options);
+    await preflightSetup(options);
     stdout.write("Setup preflight complete.\n");
     return;
   }
