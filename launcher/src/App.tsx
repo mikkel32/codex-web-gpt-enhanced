@@ -546,7 +546,7 @@ function LauncherShell({
               if (viewport) viewport.scrollTop = scrollPositions.current.get(surface) ?? 0;
             }}
           >
-            {surface === "home" ? <MariaHome snapshot={{ ...snapshot, browser }} navigate={navigateSurface} /> : null}
+            {surface === "home" ? <MariaHome snapshot={{ ...snapshot, browser, operation }} navigate={navigateSurface} /> : null}
             {surface === "updates" ? <MariaUpdates snapshot={{ ...snapshot, browser, operation }} install={installUpdate} /> : null}
             {surface === "guide" ? <HelpCenter language={language} navigate={navigateSurface} openRepository={() => void api!.openExternal(snapshot.urls.github).catch(cause => setError(messageOf(cause)))} /> : null}
             {surface === "browser" ? (

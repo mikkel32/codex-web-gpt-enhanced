@@ -12,6 +12,8 @@ models available. Choose a native model for your Codex account, or choose a
 **Maria Web** model to use your ChatGPT session. Your task, files, tools, and results
 stay together in Codex.
 
+> **设置与恢复：** 在 Overview 中选择 **自动完成设置**。启动器会复用已保存的凭据，仅提示需要你完成的操作。遇到 `Tool read not found` 或 `Unknown root "/Users"` 时，请查看[连接器恢复指南](docs/CONNECTOR_RECOVERY.md)；更改文件夹权限并非默认解决方式。
+
 ## Maria 5.10
 
 即使进程内的会话缓存丢失，仍会使用已保存的 Web 会话生成检查点。

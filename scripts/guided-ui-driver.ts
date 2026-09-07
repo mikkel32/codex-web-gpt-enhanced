@@ -27,7 +27,10 @@ try {
     await page!.setViewportSize({ width, height: width < 500 ? 844 : 1000 });
     console.log(`RENDER_CASE ${scenario} ${lang} ${width}`);
     await page!.goto(`${url}/?scenario=${scenario}&lang=${lang}&version=${encodeURIComponent(version)}`);
-    await page!.waitForSelector(scenario === "onboarding" ? ".guided-welcome" : ".guided-setup");
+    // A pending Manual task opens its guide directly; its idle compact setup card
+    // is intentionally hidden and must not claim live readiness for active work.
+    await page!.waitForSelector(scenario === "onboarding" ? ".guided-welcome"
+      : scenario === "manual" ? ".manual-turn-guide" : ".guided-setup");
     await page!.waitForTimeout(500);
     scenarios += 1;
   };
@@ -128,7 +131,14 @@ try {
   await open("manual");
   await page.waitForSelector(".manual-turn-guide");
   assert.equal(await page.evaluate(() => (window as unknown as GuidedFixtureWindow).guidedFixture.calls.includes("openLogin")), false);
+  assert.equal(await page.locator(".guided-setup.is-ready").count(), 0, "A pending Manual prompt must not produce a ready setup card");
   await screenshot("manual-mode");
+  await navigation(1);
+  await page.locator(".guided-setup").getByRole("button", { name: "Check connection", exact: true }).click();
+  await page.locator(".guided-setup.is-busy").waitFor();
+  assert.equal(await page.evaluate(() => (window as unknown as GuidedFixtureWindow).guidedFixture.calls
+    .some(action => ["setupCore", "setupMcp", "verifyMcp", "openLogin"].includes(action))), false,
+    "The waiting Manual task must not be interrupted by installation or sign-in");
   await open("paused");
   await page.getByRole("button", { name: "Check connection", exact: true }).first().click();
   await page.locator(".guided-setup.is-review").waitFor();

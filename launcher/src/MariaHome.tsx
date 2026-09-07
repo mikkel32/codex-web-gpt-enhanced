@@ -6,6 +6,9 @@ import { WebAccessNotice } from "./WebAccessNotice";
 import { guidedCopy } from "./guided-copy";
 import { setupErrorDetail } from "./setup-errors";
 import { homeState } from "./home-state";
+import { ConnectionDiagnostics } from "./ConnectionDiagnostics";
+import { workspaceCopy } from "./workspace-copy";
+import { setupToolsRequired } from "./automatic-setup";
 
 export const MADE_WITH_LOVE = "Mikkel & Maria";
 
@@ -13,13 +16,17 @@ export function MariaHome({ snapshot, navigate }: {
   snapshot: LauncherSnapshot; navigate: (surface: Surface) => void;
 }) {
   const text = guidedCopy(snapshot.state.language);
-  const { status, checking, error, refresh } = useConnectionStatus();
+  const w = workspaceCopy(snapshot.state.language);
+  const toolsRequired = setupToolsRequired(snapshot);
+  const toolsConfigured = snapshot.mcpCredentialsConfigured && snapshot.state.mcpRuntimeInstalled === true
+    && snapshot.state.mcpSetupComplete === true;
+  const { status, checking, stale, error, refresh } = useConnectionStatus();
   const [actionError, setActionError] = useState("");
-  const nativeReady = !error && status?.nativeAvailable === true;
+  const nativeReady = !stale && !error && status?.nativeAvailable === true;
   const development = snapshot.profile === "development";
   const manual = snapshot.state.browserInteractionMode === "manual";
   const { tabs, paused } = homeState(snapshot);
-  const accountReady = !paused && snapshot.browser?.authenticated === true;
+  const accountReady = !paused && !manual && snapshot.browser?.authenticated === true;
   const selectTab = async (id: string) => {
     setActionError("");
     try { await window.codexWebLauncher!.selectBrowserTab(id); navigate("browser"); }
@@ -33,8 +40,9 @@ export function MariaHome({ snapshot, navigate }: {
       value: paused ? text.attention : manual ? text.manualSession : accountReady ? text.connected : text.signIn,
       ready: accountReady && !manual },
     { icon: "mcp" as const, label: text.tools, surface: "mcp" as const,
-      value: !snapshot.state.mcpRuntimeInstalled ? text.notEnabled : paused || error || !nativeReady && !development ? text.attention : snapshot.state.mcpSetupComplete ? text.connected : text.attention,
-      ready: snapshot.state.mcpSetupComplete === true && !paused && !error && (development || nativeReady) },
+      value: !toolsRequired ? w.optional : !toolsConfigured ? text.attention
+        : paused || error || (!nativeReady && !development) ? text.attention : w.configured,
+      ready: false }, // Saved configuration does not prove a live project-tool call.
   ];
   return <div className="studio-home maria-page guided-home">
     <WebAccessNotice access={snapshot.browser?.webAccess} openBrowser={() => navigate("browser")} />
@@ -61,5 +69,6 @@ export function MariaHome({ snapshot, navigate }: {
       {error ? <p role="status" className="studio-inline-error">{text.attention}: {text.offline}</p> : null}
       <footer><span>MARIA</span><span>{development ? "DEV / " : ""}{snapshot.version}</span></footer>
     </aside></div>
+    <ConnectionDiagnostics snapshot={snapshot} navigate={navigate} />
   </div>;
 }

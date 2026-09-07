@@ -46,6 +46,25 @@ test("readiness evidence ignores navigation and logs, not authentication or runt
   expect(setupEvidenceKey(current)).not.toBe(key);
 });
 
+test("changing the installation identity invalidates saved setup evidence", () => {
+  const current = snapshot();
+  current.version = "5.14.0-alpha.1";
+  current.profilePaths = { coreHome: "/fixture/core", codexHome: "/fixture/codex", userData: "/fixture/ui" };
+  const original = setupEvidenceKey(current);
+  for (const field of ["coreHome", "codexHome", "userData"] as const) {
+    const changed = structuredClone(current);
+    changed.profilePaths[field] += "-different";
+    expect(setupEvidenceKey(changed)).not.toBe(original);
+  }
+  current.version = "5.14.0-alpha.2";
+  expect(setupEvidenceKey(current)).not.toBe(original);
+});
+
+test("a saved catalog without an installed core is not a completed Codex milestone", () => {
+  const current = snapshot(); current.state.coreSetupComplete = false;
+  expect(guidedSetupSteps(current, "ready").find(step => step.id === "codex")?.done).toBe(false);
+});
+
 test.each(["en", "ja", "zh-CN"] as const)("guided copy is complete and populated for %s", language => {
   const translated = guidedCopy(language), english = guidedCopy("en");
   expect(Object.keys(translated).sort()).toEqual(Object.keys(english).sort());

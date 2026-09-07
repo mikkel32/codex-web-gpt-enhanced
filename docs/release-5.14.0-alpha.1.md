@@ -1,7 +1,7 @@
 # Maria WebGPT 5.14.0-alpha.1 — Your workspace, connected
 
 An opt-in preview of the redesigned Maria launcher. This release builds on the
-integrated automatic-setup and safe-recovery changes in 5.13.10-alpha.1.
+integrated automatic-setup and safe-recovery changes in 5.13.10-alpha.2.
 
 ## A simpler interface, throughout
 
@@ -35,6 +35,13 @@ available installer from a failed check or a remembered version number.
   indiscriminate retry loop.
 
 ## What still needs you
+
+The combined release retains claimed-task workspace discovery, distinct missing-tool
+and wrong-computer diagnostics, compatible-runtime health checks, bounded recovery,
+and verification of uploaded assets against the original build checksum manifest.
+Explicit setup requests arriving during a read-only check are preserved; Pause and
+disposal still cancel pending intent. A changed installation identity invalidates
+previously displayed setup evidence.
 
 Maria cannot create or approve account access on your behalf. You sign in, provide
 one-time tunnel credentials for local tools, and approve the ChatGPT connector.

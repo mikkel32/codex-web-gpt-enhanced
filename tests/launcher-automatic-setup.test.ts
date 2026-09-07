@@ -270,7 +270,8 @@ test("active final verification rejects changed authentication, permissions, mod
       return { ok: true, checks: [] };
     };
     await f.setup.start();
-    assert.equal(f.setup.getState().phase, "error", change);
+    const expected: Record<typeof change, SetupPhase> = { auth: "sign-in", access: "review", mode: "error", catalog: "codex", profile: "error" };
+    assert.equal(f.setup.getState().phase, expected[change], change);
     assert.ok(!f.phases.includes("ready"), change);
   }
 });
@@ -296,3 +297,179 @@ test("concurrent read-only checks share one flight and disposal discards complet
   await f.setup.inspect();
   assert.ok(!f.phases.includes("ready"));
 });
+
+test("a live broker turn blocks repair even when the tab snapshot is stale", async () => {
+  const f = fixture(); f.current.state.coreSetupComplete = true;
+  f.api.connectionStatus = async () => ({ nativeAvailable: false, browserConnected: true, activeBrowserTurns: 1 });
+  await f.setup.start();
+  assert.equal(f.setup.getState().phase, "busy"); assert.deepEqual(f.calls, []);
+});
+
+test("manual prompts waiting for the user are not interrupted by setup", async () => {
+  const f = fixture();
+  f.current.browser!.tabs = [{ status: "ready", manualState: "awaiting-user" }] as NonNullable<LauncherSnapshot["browser"]>["tabs"];
+  await f.setup.start();
+  assert.equal(f.setup.getState().phase, "busy"); assert.deepEqual(f.calls, []);
+});
+
+test("a pause arriving during the connection probe prevents installation", async () => {
+  const f = fixture();
+  f.api.connectionStatus = async () => {
+    f.current.browser!.webAccess = { status: "paused", reason: "verification", detectedAt: "now", retryAt: null, incidents: 1, canResume: true };
+    return { nativeAvailable: true, browserConnected: true, activeBrowserTurns: 0 };
+  };
+  await f.setup.start();
+  assert.equal(f.setup.getState().phase, "review"); assert.deepEqual(f.calls, []);
+});
+
+test("changing workflow during a probe cannot install using the old mode", async () => {
+  const f = fixture();
+  f.api.connectionStatus = async () => {
+    f.current.state.browserInteractionMode = "manual";
+    return { nativeAvailable: true, browserConnected: true, activeBrowserTurns: 0 };
+  };
+  await f.setup.start();
+  assert.equal(f.setup.getState().phase, "error"); assert.deepEqual(f.calls, []);
+});
+
+test("work starting during the probe prevents installation", async () => {
+  const f = fixture();
+  f.api.connectionStatus = async () => {
+    f.current.operation = { name: "update", status: "running", message: "Updating" };
+    return { nativeAvailable: true, browserConnected: true, activeBrowserTurns: 0 };
+  };
+  await f.setup.start();
+  assert.equal(f.setup.getState().phase, "busy"); assert.deepEqual(f.calls, []);
+});
+
+for (const change of ["sign-out", "restart", "uninstall", "tools", "mode", "pause"] as const) {
+  test(`final verification cannot publish ready after ${change}`, async () => {
+    const f = fixture(); f.current.state.coreSetupComplete = true; f.current.state.codexCatalogVerified = true;
+    f.api.doctor = async () => {
+      if (change === "sign-out") f.current.browser!.authenticated = false;
+      if (change === "restart") f.current.state.codexRestartRequired = true;
+      if (change === "uninstall") f.current.state.coreSetupComplete = false;
+      if (change === "tools") f.current.mcpCredentialsConfigured = true;
+      if (change === "mode") f.current.state.browserInteractionMode = "manual";
+      if (change === "pause") f.current.browser!.webAccess = { status: "paused", reason: "verification", detectedAt: "now", retryAt: null, incidents: 1, canResume: true };
+      return { ok: true, checks: [] };
+    };
+    await f.setup.start();
+    assert.notEqual(f.setup.getState().phase, "ready"); assert.ok(!f.phases.includes("ready"));
+  });
+}
+
+test("connector diagnostic details survive the automatic setup flow", async () => {
+  const f = fixture(); f.current.state.coreSetupComplete = true; f.current.state.codexCatalogVerified = true;
+  f.current.state.mcpRuntimeInstalled = true; f.current.mcpCredentialsConfigured = true;
+  f.api.verifyMcp = async () => ({ ok: false, checks: [{ id: "connector", status: "error", message: "Connection failed", detail: "Tool read not found" }] });
+  await f.setup.start();
+  assert.equal(f.setup.getState().phase, "connector");
+  assert.equal(describeSetupError(f.setup.getState().error).kind, "toolContract");
+  assert.deepEqual(f.surfaces, ["mcp"]);
+});
+
+test("reported tool and host errors have distinct localized recovery guidance", () => {
+  for (const language of ["en", "zh-CN", "ja"] as const) {
+    assert.equal(describeSetupError("MCP error -32602: Tool read not found", language).kind, "toolContract");
+    assert.equal(describeSetupError('Unknown root "/Users". Approved roots: /codex', language).kind, "workspace");
+    assert.equal(describeSetupError('Tool read not found; Unknown root "/Users"', language).kind, "workspace");
+  }
+  assert.ok(!setupErrorDetail("Bearer secret+/with==").includes("with"));
+  assert.equal(describeSetupError("Unknown root \"/Users\"").message.includes("Do not rewrite /Users to /codex"), true);
+});
+
+for (const change of ["sign-out", "mode", "pause", "credentials", "work", "profile", "workspace"] as const) {
+  for (const stage of ["installation", "connector"] as const) {
+    test(`setup rechecks ${change} after ${stage} before starting another step`, async () => {
+      const f = fixture(); f.current.mcpCredentialsConfigured = true;
+      f.current.state.codexCatalogVerified = true;
+      if (stage === "connector") { f.current.state.coreSetupComplete = true; f.current.state.mcpRuntimeInstalled = true; }
+      const changeState = () => {
+        if (change === "sign-out") f.current.browser!.authenticated = false;
+        if (change === "mode") f.current.state.browserInteractionMode = "manual";
+        if (change === "pause") f.current.browser!.webAccess = { status: "paused" } as NonNullable<LauncherSnapshot["browser"]>["webAccess"];
+        if (change === "credentials") f.current.mcpCredentialsConfigured = false;
+        if (change === "work") f.current.operation = { name: "task", status: "running", message: "Running" };
+        if (change === "profile") f.current.profile = "development";
+        if (change === "workspace") f.current.profilePaths = { coreHome: "/different/core", codexHome: "/different/codex", userData: "/different/launcher" };
+      };
+      if (stage === "installation") {
+        f.api.setupMcp = async () => {
+          f.calls.push("mcp"); f.current.state.coreSetupComplete = true; f.current.state.mcpRuntimeInstalled = true;
+          changeState(); return { ok: true, stdout: "" };
+        };
+      } else {
+        f.api.verifyMcp = async () => { f.calls.push("verify-mcp"); f.current.state.mcpSetupComplete = true; changeState(); return { ok: true, checks: [] }; };
+      }
+      await f.setup.start();
+      assert.notEqual(f.setup.getState().phase, "ready");
+      assert.deepEqual(f.calls, stage === "installation" ? ["mcp"] : ["verify-mcp"]);
+    });
+  }
+}
+
+test("an upgrade-required connection can be repaired while its recovery helper is running", async () => {
+  const f = fixture(); f.current.state.coreSetupComplete = true;
+  f.api.connectionStatus = async () => ({ nativeAvailable: false, browserConnected: false,
+    activeBrowserTurns: 0, phase: "needs-setup", recoveryAvailable: true });
+  await f.setup.start();
+  assert.deepEqual(f.calls, ["core"]); assert.equal(f.setup.getState().phase, "codex");
+});
+
+test("an old-version active turn still blocks automatic repair", async () => {
+  const f = fixture(); f.current.state.coreSetupComplete = true;
+  f.api.connectionStatus = async () => ({ nativeAvailable: false, browserConnected: false,
+    activeBrowserTurns: 1, phase: "needs-setup", recoveryAvailable: true });
+  await f.setup.start();
+  assert.deepEqual(f.calls, []); assert.equal(f.setup.getState().phase, "busy");
+});
+
+for (const ending of ["continue", "pause", "dispose"] as const) {
+  test(`explicit setup requested during inspection is single-flight and respects ${ending}`, async () => {
+    const f = configuredFixture();
+    let entered!: () => void;
+    let release!: () => void;
+    const inspecting = new Promise<void>(resolve => { entered = resolve; });
+    const completed = new Promise<void>(resolve => { release = resolve; });
+    f.api.doctor = async () => {
+      f.calls.push("doctor"); entered(); await completed; return { ok: true, checks: [] };
+    };
+    const check = f.setup.inspect();
+    await inspecting;
+    const start = f.setup.start({ toolsRequested: true });
+    assert.equal(f.setup.start({ toolsRequested: true }), start);
+    if (ending === "pause") f.setup.pause();
+    if (ending === "dispose") f.setup.dispose();
+    release();
+    await Promise.all([check, start]);
+    assert.deepEqual(f.calls, ["doctor"]);
+    if (ending === "continue") {
+      assert.equal(f.setup.getState().phase, "credentials");
+      assert.equal(f.setup.getState().toolsRequested, true);
+      assert.deepEqual(f.surfaces, ["mcp"]);
+    } else {
+      assert.equal(f.setup.getState().active, false);
+      assert.deepEqual(f.surfaces, []);
+      if (ending === "pause") assert.equal(f.setup.getState().phase, "paused");
+    }
+  });
+}
+
+for (const change of ["profile", "workspace", "version", "manual-prompt", "broker-turn"] as const) {
+  test(`inspection cannot publish stale success after ${change}`, async () => {
+    const f = configuredFixture();
+    f.api.doctor = async () => {
+      if (change === "profile") f.current.profile = "development";
+      if (change === "version") f.current.version = "different-version";
+      if (change === "workspace") f.current.profilePaths = { coreHome: "/changed/core", codexHome: "/changed/codex", userData: "/changed/ui" };
+      if (change === "manual-prompt") f.current.browser!.tabs = [{ status: "ready", manualState: "awaiting-user" }] as NonNullable<LauncherSnapshot["browser"]>["tabs"];
+      return { ok: true, checks: [] };
+    };
+    if (change === "broker-turn") f.api.connectionStatus = async () => ({ nativeAvailable: true, browserConnected: true, activeBrowserTurns: 1 });
+    await f.setup.inspect();
+    assert.equal(f.setup.getState().phase, "idle");
+    assert.ok(!f.phases.includes("ready"));
+    assert.deepEqual(f.surfaces, []);
+  });
+}

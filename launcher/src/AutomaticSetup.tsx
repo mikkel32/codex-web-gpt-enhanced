@@ -5,9 +5,10 @@ import { describeSetupError } from "./setup-errors";
 import { setupRecoveryKind } from "./setup-recovery";
 import { guidedCopy } from "./guided-copy";
 import { guidedSetupSteps, setupEvidenceKey } from "./guided-setup-view";
-import { useConnectionStatus } from "./useConnectionStatus";
 import { Icon } from "./icons";
 import "./automatic-setup.css";
+import { setupHasActiveWork } from "./automatic-setup";
+import { useConnectionStatus } from "./useConnectionStatus";
 
 /** One controller for the entire shell. Navigation never abandons a setup transaction. */
 export function AutomaticSetup({ snapshot, surface, navigate, clearError, startOnMount = false }: {
@@ -20,7 +21,7 @@ export function AutomaticSetup({ snapshot, surface, navigate, clearError, startO
   navigateRef.current = navigate;
   const controller = useRef<ReturnType<typeof createAutomaticSetup> | null>(null);
   const initialIntentConsumed = useRef(false);
-  const { status, error: connectionError } = useConnectionStatus();
+  const { status, stale, error: connectionError } = useConnectionStatus();
   const text = guidedCopy(snapshot.state.language);
   const evidence = setupEvidenceKey(snapshot);
   const lastEvidence = useRef(evidence);
@@ -67,13 +68,20 @@ export function AutomaticSetup({ snapshot, surface, navigate, clearError, startO
   }, [evidence, startOnMount, snapshot.state.coreSetupComplete]);
 
   useEffect(() => {
-    if (connectionError || (status && !status.nativeAvailable && snapshot.profile !== "development")) {
+    if (stale || connectionError || (status && (!status.nativeAvailable || status.activeBrowserTurns > 0) && snapshot.profile !== "development")) {
       controller.current?.invalidate();
     }
-  }, [status, connectionError, snapshot.profile]);
+  }, [status, stale, connectionError, snapshot.profile]);
+
+  // Recovery may finish without a browser event. Never resume a paused controller.
+  useEffect(() => {
+    const setup = controller.current;
+    if (!stale && !connectionError && status && setup?.getState().active
+      && setup.getState().phase === "busy") void setup.resume();
+  }, [status, stale, connectionError]);
 
   const pending = ["checking", "installing", "verifying"].includes(state.phase);
-  const locked = state.active || pending || snapshot.operation?.status === "running";
+  const locked = state.active || pending || setupHasActiveWork(snapshot);
   const savedTools = snapshot.mcpCredentialsConfigured || snapshot.state.mcpRuntimeInstalled === true;
   const manual = snapshot.state.browserInteractionMode === "manual";
   const canChoose = !savedTools && !manual && snapshot.profile !== "development";
@@ -103,7 +111,8 @@ export function AutomaticSetup({ snapshot, surface, navigate, clearError, startO
     if (state.phase === "credentials" || state.phase === "connector") { navigate("mcp"); return; }
     if (state.phase === "ready") { navigate("browser"); return; }
     if (state.phase === "error" && !retryable) {
-      navigate(failure?.kind === "signIn" ? "browser" : failure?.kind === "credentials" ? "mcp" : "activity");
+      navigate(failure?.kind === "signIn" ? "browser"
+        : ["credentials", "toolContract", "workspace"].includes(failure?.kind ?? "") ? "mcp" : "activity");
       return;
     }
     continueSetup();

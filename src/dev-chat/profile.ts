@@ -134,8 +134,12 @@ export function installedLauncherCandidates({
       posix.join(homeDirectory, "Applications", "Maria WebGPT.app", "Contents", "MacOS", "Maria WebGPT"),
     );
   } else if (platform === "win32") {
+    // An explicitly supplied environment/home describes that target, not the
+    // interactive Windows account. Never mix its paths with this user's registry.
+    const useHostRegistry = process.platform === "win32"
+      && environment === process.env && homeDirectory === homedir();
     const registeredLocation = windowsInstallLocation?.trim()
-      || (process.platform === "win32" ? registeredWindowsLauncherInstallLocation() : undefined);
+      || (useHostRegistry ? registeredWindowsLauncherInstallLocation() : undefined);
     if (registeredLocation && win32.isAbsolute(registeredLocation)) {
       candidates.push(win32.join(registeredLocation, "Maria WebGPT.exe"));
     } else {

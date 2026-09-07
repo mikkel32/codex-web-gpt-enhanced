@@ -74,7 +74,7 @@ export interface LogRecord {
 }
 
 export interface ConnectionStatus {
-  phase?: "online" | "recovering" | "offline" | "unconfigured" | "development";
+  phase?: "online" | "recovering" | "offline" | "unconfigured" | "development" | "needs-setup";
   checkedAt?: string;
   latencyMs?: number;
   nativeAvailable: boolean;

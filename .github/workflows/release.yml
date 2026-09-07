@@ -115,6 +115,11 @@ jobs:
       - name: Verify Astra picker in real Electron
         run: bun run smoke:astra-picker
       - run: bun run verify
+      - name: Verify guided workspace in isolated Electron
+        if: runner.os == 'Linux'
+        env:
+          MARIA_UI_ELECTRON: "1"
+        run: xvfb-run -a node launcher/scripts/smoke-workspace-ui.cjs
       - run: bun run app:package
       - name: Verify Linux AppImage ABI on current Arch
         if: runner.os == 'Linux'
@@ -267,24 +272,11 @@ jobs:
               "${notes_flags[@]}"
           fi
 
-          published_manifest="$(mktemp)"
-          gh release view "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --json assets \
-            --jq '.assets[] | select(.name != "checksums.txt") | [.name, .digest] | @tsv' \
-            | while IFS=$'\t' read -r name digest; do
-                if [[ "$digest" != sha256:* || -z "${digest#sha256:}" ]]; then
-                  echo "Published asset has no SHA-256 digest: $name" >&2
-                  exit 1
-                fi
-                printf '%s  %s\n' "${digest#sha256:}" "$name"
-              done \
-            | LC_ALL=C sort -k2 > "$published_manifest"
-          test -s "$published_manifest"
-          mv "$published_manifest" release-assets/checksums.txt
-          gh release upload "$RELEASE_TAG" release-assets/checksums.txt \
-            --repo "$GITHUB_REPOSITORY" \
-            --clobber
+          # Compare the uploaded bytes against the original local build. Rebuilding
+          # checksums from remote digests would silently bless a mismatched upload.
+          remote_assets="$(mktemp)"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets > "$remote_assets"
+          bun run scripts/verify-release-assets.ts release-assets/checksums.txt "$remote_assets"
 
           while IFS=$'\t' read -r name digest; do
             if [ "$name" = checksums.txt ]; then continue; fi

@@ -12,6 +12,8 @@ models available. Choose a native model for your Codex account, or choose a
 **Maria Web** model to use your ChatGPT session. Your task, files, tools, and results
 stay together in Codex.
 
+> **Setup and recovery:** start with **Set up automatically** in Overview. The launcher reuses saved credentials and guides only the steps that need you. For `Tool read not found` or `Unknown root "/Users"`, see [connector recovery](docs/CONNECTOR_RECOVERY.md); changing folder permissions is not the default fix.
+
 ## Maria 5.10
 
 Continuity now survives loss of the process-local conversation cache, and compaction

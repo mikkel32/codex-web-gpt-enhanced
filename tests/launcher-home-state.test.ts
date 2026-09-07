@@ -9,7 +9,7 @@ function fixture(): LauncherSnapshot {
     autoStart: true, keepRunningOnClose: true, showBrowserDuringTurns: true,
     experimentalBiggerContext: false, zeroRiskProEnabled: false, sidebarOpen: true,
     sidebarWidth: 252, mcpGuideStep: 0, sessionRefreshReminderAt: null,
-    codexCatalogVerified: true, mcpSetupComplete: false,
+    coreSetupComplete: true, codexCatalogVerified: true, mcpSetupComplete: false,
   }, browser: { authenticated: true, activeTabId: "home", tabs: [], status: "ready",
     message: "Ready", url: "", title: "ChatGPT", visible: false, surfaceActive: false,
     loading: false, canGoBack: false, canGoForward: false, zoomFactor: 1, maxTabs: 5 },
@@ -40,7 +40,7 @@ test("Home routes sign-in, model setup and manual tool setup in the correct orde
   expect(homeState(snapshot).surface).toBe("setup");
   snapshot.state.browserInteractionMode = "manual";
   expect(homeState(snapshot).action).toBe("tools");
-  snapshot.state.mcpSetupComplete = true;
+  snapshot.mcpCredentialsConfigured = true; snapshot.state.mcpRuntimeInstalled = true; snapshot.state.mcpSetupComplete = true;
   expect(homeState(snapshot).action).toBe("models");
   snapshot.profile = "development";
   expect(homeState(snapshot).next).toBeUndefined();
@@ -78,4 +78,15 @@ test("a late bootstrap snapshot cannot replace newer events with stale state", (
   expect(result.version).toBe(initial.version);
   expect(initial.state.sidebarWidth).toBe(252);
   expect(createBootstrapOverlay().merge(initial)).toEqual(initial);
+});
+
+
+test("Home never treats stale model and connector flags as completed setup", () => {
+  const snapshot = fixture(); snapshot.state.coreSetupComplete = false;
+  expect(homeState(snapshot).action).toBe("models");
+  snapshot.state.coreSetupComplete = true; snapshot.state.codexRestartRequired = true;
+  expect(homeState(snapshot).action).toBe("models");
+  snapshot.state.codexRestartRequired = false; snapshot.mcpCredentialsConfigured = true;
+  snapshot.state.mcpSetupComplete = true;
+  expect(homeState(snapshot).action).toBe("tools");
 });
