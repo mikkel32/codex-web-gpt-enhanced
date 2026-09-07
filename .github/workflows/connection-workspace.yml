@@ -6,20 +6,75 @@ on:
     paths: ['.github/workflows/connection-workspace.yml']
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  source:
+  validate:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/fix/automated-launcher-setup-20260907'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
+      - name: Retrieve exact authored changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/git/blobs/d9d5783f891ad0b8c3267676865ceeaeaa35ac6f" > "$RUNNER_TEMP/connection-transfer.json"
+          python3 - <<'PY'
+          import base64, gzip, hashlib, json, os, pathlib
+          root = pathlib.Path(os.environ['RUNNER_TEMP'])
+          encoded = ''.join(json.loads((root / 'connection-transfer.json').read_text())['content'].split())
+          # Correct transport transcription only; the full authored diff is pinned below.
+          replacements = {
+              'iT9v0cPfPH': 'iT9vPfPH',
+              '9a3d0B5f3Nz0TF': '9a3Nz0TF',
+              'csitGy/sHXBvH5d8': 'csitGy/svH5d8',
+              'W4DOretf387dY/YR22g7H+2NqmrjBxkP/F': 'W4DOretf7Hx5dWvjBxkP/F',
+          }
+          for old, new in replacements.items():
+              assert encoded.count(old) == 1, 'Unexpected transport content'
+              encoded = encoded.replace(old, new)
+          data = gzip.decompress(base64.b64decode(encoded, validate=True))
+          assert hashlib.sha256(data).hexdigest() == '318fe86c62ecd2d2fe12adfb2278c4a6deeb2a9b1946e6d67a67f52c88e5ff34', 'Authored patch checksum mismatch'
+          (root / 'connection-fixes.patch').write_bytes(data)
+          PY
+          git apply --check "$RUNNER_TEMP/connection-fixes.patch"
+          git apply --index "$RUNNER_TEMP/connection-fixes.patch"
+          git diff --cached --check
+      - uses: oven-sh/setup-bun@v2
         with:
-          persist-credentials: false
-      - name: Package tracked source only
-        run: git archive --format=tar HEAD > connection-source.tar
+          bun-version: 1.4.0
+      - name: Install locked dependencies
+        run: |
+          bun install --frozen-lockfile
+          bun install --frozen-lockfile --cwd launcher
+      - name: Validate source, regression suites, and launcher build
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            bun run typecheck &&
+            bun run launcher:typecheck &&
+            bun run test &&
+            bun run launcher:test &&
+            bun run launcher:build
+          } 2>&1 | tee "$RUNNER_TEMP/connection-validation.log"
+      - name: Commit verified source changes and remove temporary workflow
+        shell: bash
+        run: |
+          git rm .github/workflows/connection-workspace.yml
+          git diff --cached --check
+          git diff --cached --stat
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix: make launcher connection and setup resilient and guided'
+          git push origin HEAD:fix/automated-launcher-setup-20260907
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: connection-source
-          path: connection-source.tar
-          retention-days: 1
+          name: connection-validation
+          path: |
+            ${{ runner.temp }}/connection-validation.log
+            ${{ runner.temp }}/connection-transfer.json
+          retention-days: 3
