@@ -1,0 +1,53 @@
+name: Verified Native2 source delivery
+
+on:
+  push:
+    branches: [build/native2-workspace-transfer-20260907]
+    paths: [.github/workflows/native2-source-delivery.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native2-source-delivery-20260907
+  cancel-in-progress: false
+
+jobs:
+  deliver:
+    if: github.repository == 'mikkel32/codex-web-gpt-enhanced' && github.ref == 'refs/heads/build/native2-workspace-transfer-20260907'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Verify exact source and publish a clean review branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=a6b38bf328b9262df47ef5c573f56056043472f9
+          target=fix/native2-workspace-automation-20260907
+          git merge-base --is-ancestor "$base" HEAD
+          test "$(git rev-parse "$base^{tree}")" = 286f98aca20129abdbe257904a0773dfaf625994
+          existing="$(git ls-remote --heads origin "$target")"
+          test -z "$existing"
+          patch="$RUNNER_TEMP/native2-workspace.patch"
+          cat .native2-delivery/0{1,2,3,4,5,6,7,8,9}.patch > "$patch"
+          printf '%s  %s\n' bbebdb7cac502f24afca3e00dbb5e9c2e9e62973203a3c5b26d4fb1b41f8e0f0 "$patch" | sha256sum --check --strict
+          git apply --check "$patch"
+          git apply --index "$patch"
+          git rm -r -- .native2-delivery .github/workflows/native2-source-delivery.yml
+          test "$(git write-tree)" = 6b345d91069867b01f947afb8a8c8f3d55cfcb71
+          # The connected GitHub writer adds the separately verified CI update.
+          # This job's token never needs permission to modify workflow files.
+          git restore --source="$base" --staged --worktree -- .github/workflows/ci.yml
+          tree="$(git write-tree)"
+          test "$tree" = fbba2e250127b8bb963f69a60df974564161f8ea
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          commit="$(git commit-tree "$tree" -p "$base" -m 'fix: guided workspace setup and claimed-connector recovery' -m 'Preserve the public Native2 ABI, expose claimed workspace scope, protect active work and recheck readiness. Redesign the launcher around guided setup and local diagnostics. Add regression and credential-free Electron UI acceptance tests.')"
+          git push origin "$commit:refs/heads/$target"
+          printf 'Published source commit: %s\nSource tree before CI wiring: %s\n' "$commit" "$tree" >> "$GITHUB_STEP_SUMMARY"
