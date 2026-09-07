@@ -22,6 +22,7 @@ import { readJsonRequestBody } from "./http-body";
 import { httpStatusFromTerminalError } from "./lib/errors";
 import { createHash } from "node:crypto";
 import { augmentNativeModelCatalog } from "./model-catalog";
+import { assertWebRequestCompatibility } from "./web-request-compatibility";
 import {
   readCodexModelContextOverride,
   readCodexSubagentProtocol,
@@ -371,6 +372,7 @@ export interface ResponseRequestOptions {
 }
 
 export function routeChatGptWebRequest(parsed: CodexParsedRequest, config: AppConfig): ChatGptWebModelRoute {
+  assertWebRequestCompatibility(parsed._rawBody);
   const route = requireChatGptWebModelRoute(parsed.modelId, config);
   parsed.modelId = route.backendModel;
   // Zero Risk preserves a distinct backend identity. Its immutable Codex effort is only a
@@ -491,7 +493,6 @@ export async function responseRequest(
   if (typeof options.browserUnavailable === "function" ? options.browserUnavailable() : options.browserUnavailable) {
     return formatErrorResponse(503, "browser_unavailable", "Open Maria WebGPT to use ChatGPT Web. Regular Codex models are still connected.");
   }
-  options.onWebRequest?.();
   const requestedPreviousResponseId = raw && typeof raw === "object" && !Array.isArray(raw)
     ? (raw as { previous_response_id?: unknown }).previous_response_id
     : undefined;
@@ -543,6 +544,7 @@ export async function responseRequest(
   }
 
   const provider = providerConfig(config);
+  options.onWebRequest?.();
   const rememberWebResponse = (response: Record<string, unknown>): void => {
     rememberResponseState(parsed._rawBody, response, { force: true, nativeTurnId: extractChatGptTurnIdentity(parsed).turnId });
     try { recordChatGptWebResponseReceipt(provider, parsed, response); }
@@ -716,7 +718,6 @@ export async function compactRequest(
   if (typeof options.browserUnavailable === "function" ? options.browserUnavailable() : options.browserUnavailable) {
     return formatErrorResponse(503, "browser_unavailable", "Open Maria WebGPT to compact a ChatGPT Web task. Regular Codex models are still connected.");
   }
-  options.onWebRequest?.();
   let route: ChatGptWebModelRoute;
   try {
     route = requireChatGptWebModelRoute(raw.model, config);

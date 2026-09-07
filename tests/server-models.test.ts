@@ -183,6 +183,11 @@ test("Zero Risk returns one generic Web row without using scanned capabilities",
     service_tiers: [],
     default_service_tier: null,
     multi_agent_version: "v1",
+    experimental_supported_tools: [],
+    multi_agent_reasoning_effort: "low",
+    supports_image_detail_original: false,
+    supports_search_tool: true,
+    use_responses_lite: true,
   }]);
 });
 

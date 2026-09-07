@@ -46,6 +46,23 @@ function source(): Record<string, unknown> {
 }
 
 describe("native /models augmentation", () => {
+  test("future native capabilities cannot leak into Web model declarations", () => {
+    const input = source();
+    const template = (input.models as Array<Record<string, unknown>>)[1]!;
+    Object.assign(template, { future_server_capability: true, supports_image_detail_original: true,
+      experimental_supported_tools: ["clock", "send_user_message_async", "future_native_only_tool"],
+      model_messages: { instructions_template: "Keep the native host guidance" },
+      node_repl_auto_review_required: true, multi_agent_reasoning_effort: "xhigh" });
+    const config = defaultConfig("full"); config.proAvailable = true; config.subagentProtocol = "native";
+    const models = augmentNativeModelCatalog(input, config).models as Array<Record<string, unknown>>;
+    expect(models[1]).toEqual(template);
+    const web = models.find(model => model.slug === "chatgpt-web/astra-pro")!;
+    expect(web).not.toHaveProperty("future_server_capability");
+    expect(web).toMatchObject({ experimental_supported_tools: ["clock", "send_user_message_async"],
+      model_messages: template.model_messages, node_repl_auto_review_required: true,
+      supports_image_detail_original: false, use_responses_lite: true, supports_search_tool: true,
+      multi_agent_reasoning_effort: "ultra" });
+  });
   test("preserves every native model in order and appends one fixed model per ChatGPT Web mode", () => {
     const native = source();
     const nativeSnapshot = structuredClone(native);
@@ -93,6 +110,18 @@ describe("native /models augmentation", () => {
     const pro = models.find(model => model.slug === "chatgpt-web/pro")!;
     expect(pro.context_window).toBe(336_579);
     expect(pro.auto_compact_token_limit).toBe(285_000);
+    expect(Number(pro.context_window) * Number(pro.effective_context_window_percent) / 100).toBeLessThanOrEqual(285_000);
+  });
+
+  test("native global context overrides cannot make Web effective windows exceed their compaction budgets", () => {
+    for (const bigger of [false, true]) {
+      const config = defaultConfig("full"); config.proAvailable = true; config.experimentalBiggerContext = bigger;
+      const models = augmentNativeModelCatalog(source(), config, { contextWindow: 1_000_000 }).models as Array<Record<string, unknown>>;
+      for (const model of models.filter(model => String(model.slug).startsWith("chatgpt-web/"))) {
+        expect(Math.floor(Number(model.max_context_window) * Number(model.effective_context_window_percent) / 100))
+          .toBeLessThanOrEqual(Number(model.auto_compact_token_limit));
+      }
+    }
   });
 
   test("keeps native Sol selectable in the bounded Compatibility V1 registry", () => {
@@ -176,8 +205,8 @@ describe("native /models augmentation", () => {
       autoCompactTokenLimit: model.auto_compact_token_limit,
     }))).toEqual([
       { contextWindow: 41_000, effectiveContextWindowPercent: 78, autoCompactTokenLimit: 32_000 },
-      { contextWindow: 90_000, effectiveContextWindowPercent: 89, autoCompactTokenLimit: 80_000 },
-      { contextWindow: 90_000, effectiveContextWindowPercent: 89, autoCompactTokenLimit: 80_000 },
+      { contextWindow: 90_000, effectiveContextWindowPercent: 88, autoCompactTokenLimit: 80_000 },
+      { contextWindow: 90_000, effectiveContextWindowPercent: 88, autoCompactTokenLimit: 80_000 },
     ]);
   });
 

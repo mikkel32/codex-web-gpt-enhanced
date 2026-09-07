@@ -9,6 +9,21 @@ import {
 
 type JsonObject = Record<string, unknown>;
 
+// Client-side harness metadata is reusable. Inference capabilities must be declared
+// below, not acquired accidentally when OpenAI adds a field to a native model.
+const WEB_HARNESS_FIELDS = [
+  "base_instructions", "model_messages", "shell_type",
+  "include_skills_usage_instructions", "include_plugin_usage_instructions", "include_apps_usage_instructions",
+  "default_reasoning_summary", "support_verbosity", "default_verbosity",
+  "apply_patch_tool_type", "web_search_tool_type", "truncation_policy",
+  "node_repl_auto_review_required", "node_repl_disabled",
+] as const;
+
+function webHarnessMetadata(template: JsonObject): JsonObject {
+  return Object.fromEntries(WEB_HARNESS_FIELDS.filter(key => key in template)
+    .map(key => [key, structuredClone(template[key])]));
+}
+
 function object(value: unknown, label: string): JsonObject {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${label} must be a JSON object`);
@@ -20,14 +35,6 @@ function slug(value: unknown): string | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const candidate = (value as JsonObject).slug;
   return typeof candidate === "string" ? candidate : undefined;
-}
-
-function reasoningLevel(template: JsonObject, effort: string, description: string): JsonObject {
-  const levels = Array.isArray(template.supported_reasoning_levels)
-    ? template.supported_reasoning_levels.filter(level => level && typeof level === "object" && !Array.isArray(level)) as JsonObject[]
-    : [];
-  const source = levels.find(level => level.effort === effort);
-  return { ...(source ? structuredClone(source) : {}), effort, description };
 }
 
 function modelPriority(template: JsonObject): number | undefined {
@@ -108,7 +115,7 @@ export function buildChatGptWebModel(
   const multiAgentVersion = routedSubagentVersion(template, config);
   const priority = routedModelPriority(template, route, config);
   const model: JsonObject = {
-    ...structuredClone(template),
+    ...webHarnessMetadata(template),
     slug: route.slug,
     display_name: route.displayName,
     description: route.description,
@@ -132,11 +139,19 @@ export function buildChatGptWebModel(
     tool_mode: null,
     upgrade: null,
     default_reasoning_level: route.codexEffort,
-    supported_reasoning_levels: [reasoningLevel(template, route.codexEffort, route.displayName)],
+    supported_reasoning_levels: [{ effort: route.codexEffort, description: route.displayName }],
     context_window: limits.contextWindow,
     max_context_window: limits.contextWindow,
     effective_context_window_percent: limits.effectiveContextWindowPercent,
     auto_compact_token_limit: limits.autoCompactTokenLimit,
+    // Additional-tools envelopes and tool search are explicitly implemented by the bridge.
+    use_responses_lite: true,
+    supports_search_tool: true,
+    supports_image_detail_original: false,
+    experimental_supported_tools: config.mode === "full" && Array.isArray(template.experimental_supported_tools)
+      ? template.experimental_supported_tools.filter(name => name === "send_user_message_async" || name === "clock")
+      : [],
+    multi_agent_reasoning_effort: route.codexEffort,
     // ChatGPT Web has no Codex service tier. Never inherit the native template's Fast tiers.
     additional_speed_tiers: [],
     service_tiers: [],

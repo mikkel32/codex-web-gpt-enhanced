@@ -97,7 +97,9 @@ function contextLimits(
     contextWindow,
     // Codex reports this effective window in its context indicator. Align it with the practical
     // pre-compaction budget instead of exposing an unreachable underlying model window.
-    effectiveContextWindowPercent: Math.round((autoCompactTokenLimit / contextWindow) * 100),
+    // A global Codex auto-compaction override is clamped to this effective window.
+    // Rounding up lets that override exceed the Web budget even with a capped maximum.
+    effectiveContextWindowPercent: Math.floor((autoCompactTokenLimit / contextWindow) * 100),
     autoCompactTokenLimit,
   };
 }
