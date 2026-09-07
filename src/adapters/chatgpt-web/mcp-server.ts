@@ -818,6 +818,15 @@ export async function runChatGptMcpServer(options: {
         const page = [...directPage, ...nestedPage];
         const total = directMatches.length + nestedTotal;
         return result({
+          // Only the claimed turn supplies this context. Never substitute launcher config paths
+          // or another connector's roots. Discovery does not expand the sandbox or authorization.
+          environment: {
+            cwd: bound.cwd,
+            roots: [...bound.roots],
+            writable_roots: [...bound.writableRoots],
+            sandbox: bound.sandboxPolicy.type,
+          },
+          contract,
           tools: page,
           total,
           next_offset: offset + page.length < total ? offset + page.length : null,

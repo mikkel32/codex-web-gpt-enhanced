@@ -142,3 +142,84 @@ test("setup errors separate browser failure from version recovery and redact key
   assert.ok(!setupErrorDetail("key sk-proj-SECRET Bearer SECRET-TOKEN").includes("SECRET"));
   assert.ok(describeSetupError("Config requires 5.13.5", "ja").title.length > 0);
 });
+
+test("a live broker turn blocks repair even when the tab snapshot is stale", async () => {
+  const f = fixture(); f.current.state.coreSetupComplete = true;
+  f.api.connectionStatus = async () => ({ nativeAvailable: false, browserConnected: true, activeBrowserTurns: 1 });
+  await f.setup.start();
+  assert.equal(f.setup.getState().phase, "busy"); assert.deepEqual(f.calls, []);
+});
+
+test("manual prompts waiting for the user are not interrupted by setup", async () => {
+  const f = fixture();
+  f.current.browser!.tabs = [{ status: "ready", manualState: "awaiting-user" }] as NonNullable<LauncherSnapshot["browser"]>["tabs"];
+  await f.setup.start();
+  assert.equal(f.setup.getState().phase, "busy"); assert.deepEqual(f.calls, []);
+});
+
+test("a pause arriving during the connection probe prevents installation", async () => {
+  const f = fixture();
+  f.api.connectionStatus = async () => {
+    f.current.browser!.webAccess = { status: "paused", reason: "verification", detectedAt: "now", retryAt: null, incidents: 1, canResume: true };
+    return { nativeAvailable: true, browserConnected: true, activeBrowserTurns: 0 };
+  };
+  await f.setup.start();
+  assert.equal(f.setup.getState().phase, "review"); assert.deepEqual(f.calls, []);
+});
+
+test("changing workflow during a probe cannot install using the old mode", async () => {
+  const f = fixture();
+  f.api.connectionStatus = async () => {
+    f.current.state.browserInteractionMode = "manual";
+    return { nativeAvailable: true, browserConnected: true, activeBrowserTurns: 0 };
+  };
+  await f.setup.start();
+  assert.equal(f.setup.getState().phase, "error"); assert.deepEqual(f.calls, []);
+});
+
+test("work starting during the probe prevents installation", async () => {
+  const f = fixture();
+  f.api.connectionStatus = async () => {
+    f.current.operation = { name: "update", status: "running", message: "Updating" };
+    return { nativeAvailable: true, browserConnected: true, activeBrowserTurns: 0 };
+  };
+  await f.setup.start();
+  assert.equal(f.setup.getState().phase, "busy"); assert.deepEqual(f.calls, []);
+});
+
+for (const change of ["sign-out", "restart", "uninstall", "tools", "mode", "pause"] as const) {
+  test(`final verification cannot publish ready after ${change}`, async () => {
+    const f = fixture(); f.current.state.coreSetupComplete = true; f.current.state.codexCatalogVerified = true;
+    f.api.doctor = async () => {
+      if (change === "sign-out") f.current.browser!.authenticated = false;
+      if (change === "restart") f.current.state.codexRestartRequired = true;
+      if (change === "uninstall") f.current.state.coreSetupComplete = false;
+      if (change === "tools") f.current.mcpCredentialsConfigured = true;
+      if (change === "mode") f.current.state.browserInteractionMode = "manual";
+      if (change === "pause") f.current.browser!.webAccess = { status: "paused", reason: "verification", detectedAt: "now", retryAt: null, incidents: 1, canResume: true };
+      return { ok: true, checks: [] };
+    };
+    await f.setup.start();
+    assert.notEqual(f.setup.getState().phase, "ready"); assert.ok(!f.phases.includes("ready"));
+  });
+}
+
+test("connector diagnostic details survive the automatic setup flow", async () => {
+  const f = fixture(); f.current.state.coreSetupComplete = true; f.current.state.codexCatalogVerified = true;
+  f.current.state.mcpRuntimeInstalled = true; f.current.mcpCredentialsConfigured = true;
+  f.api.verifyMcp = async () => ({ ok: false, checks: [{ id: "connector", status: "error", message: "Connection failed", detail: "Tool read not found" }] });
+  await f.setup.start();
+  assert.equal(f.setup.getState().phase, "connector");
+  assert.equal(describeSetupError(f.setup.getState().error).kind, "toolContract");
+  assert.deepEqual(f.surfaces, ["mcp"]);
+});
+
+test("reported tool and host errors have distinct localized recovery guidance", () => {
+  for (const language of ["en", "zh-CN", "ja"] as const) {
+    assert.equal(describeSetupError("MCP error -32602: Tool read not found", language).kind, "toolContract");
+    assert.equal(describeSetupError('Unknown root "/Users". Approved roots: /codex', language).kind, "workspace");
+    assert.equal(describeSetupError('Tool read not found; Unknown root "/Users"', language).kind, "workspace");
+  }
+  assert.ok(!setupErrorDetail("Bearer secret+/with==").includes("with"));
+  assert.equal(describeSetupError("Unknown root \"/Users\"").message.includes("Do not rewrite /Users to /codex"), true);
+});

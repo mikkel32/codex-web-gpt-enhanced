@@ -63,6 +63,11 @@ jobs:
       - name: Verify Astra picker in real Electron
         run: bun run smoke:astra-picker
       - run: bun run verify
+      - name: Verify guided workspace in isolated Electron
+        if: runner.os == 'Linux'
+        env:
+          MARIA_UI_ELECTRON: "1"
+        run: xvfb-run -a node launcher/scripts/smoke-workspace-ui.cjs
       - run: bun run app:package
       - name: Verify Linux AppImage ABI on current Arch
         if: runner.os == 'Linux'
