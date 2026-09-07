@@ -1,0 +1,54 @@
+name: PR4 reviewed integration
+on:
+  push:
+    branches: [codex/automatic-setup-recovery-20260907]
+    paths: [.github/workflows/pr4-integrate.yml, scripts/pr4-release-integration.py]
+permissions:
+  contents: write
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Reproduce the reviewed merge against the pinned main commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = '01af52f6751ed3bbb9197fb7f0952216760ce511'
+          result=0
+          git merge --no-commit --no-ff origin/main || result=$?
+          test "$result" -eq 1
+          python scripts/pr4-release-integration.py
+          git add -A
+          git rm --cached .github/workflows/pr4-source-review.yml .github/workflows/pr4-integrate.yml scripts/pr4-release-integration.py
+          test "$(git write-tree)" = '7d1fab5a0ae0c61af2f3007ad8c092b8974c9612'
+          git reset HEAD -- .github/workflows/pr4-source-review.yml .github/workflows/pr4-integrate.yml scripts/pr4-release-integration.py
+          git diff --cached --check
+      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile
+        working-directory: launcher
+      - name: Verify the combined source before updating the PR
+        run: |
+          bun run typecheck
+          bun run launcher:typecheck
+          bun run test
+          bun run launcher:test
+          bun run launcher:build
+      - name: Push the verified merge without rewriting branch history
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --cached --check
+          git commit -m 'fix: reconcile PR4 with automatic setup and verified CDP recovery'
+          git push origin HEAD:refs/heads/codex/automatic-setup-recovery-20260907
+          git log -1 --format='MERGE_COMMIT=%H TREE=%T PARENTS=%P'
