@@ -63,6 +63,23 @@ export function createAutomaticSetup({ api, publish, navigate }: {
       const development = current.profile === "development";
       const toolsRequired = setupToolsRequired(current);
       const mode = current.state.browserInteractionMode;
+      const installationIdentity = (value: LauncherSnapshot) => JSON.stringify([
+        value.profile, value.version, value.profilePaths?.coreHome, value.profilePaths?.codexHome, value.profilePaths?.userData,
+      ]);
+      const identity = installationIdentity(current);
+      // Every yielded phase can race with user changes. Check again before beginning
+      // another step, not only at the end when damage or unwanted work could be done.
+      const canContinue = (value: LauncherSnapshot): boolean => {
+        if (setupHasActiveWork(value)) { emit("busy"); return false; }
+        if (installationIdentity(value) !== identity || value.state.browserInteractionMode !== mode
+          || setupToolsRequired(value) !== toolsRequired) {
+          throw new Error("Setup options changed during verification. Continue setup to check the new configuration.");
+        }
+        if (value.browser?.webAccess?.status === "paused") { emit("review"); navigate("browser"); return false; }
+        if (!manual && value.browser?.authenticated !== true) { emit("sign-in"); navigate("browser"); return false; }
+        if (toolsRequired && !value.mcpCredentialsConfigured) { emit("credentials"); navigate("mcp"); return false; }
+        return true;
+      };
       if (!manual && current.browser?.authenticated !== true) {
         emit("sign-in"); navigate("browser");
         if (!loginOpened) {
@@ -83,12 +100,7 @@ export function createAutomaticSetup({ api, publish, navigate }: {
         // The connection probe yielded. Recheck user intent and work before any installation.
         current = await snapshot();
         if (!active()) return;
-        if (setupHasActiveWork(current)) { emit("busy"); return; }
-        if (current.state.browserInteractionMode !== mode || setupToolsRequired(current) !== toolsRequired) {
-          throw new Error("Setup options changed during verification. Continue setup to check the new configuration.");
-        }
-        if (current.browser?.webAccess?.status === "paused") { emit("review"); navigate("browser"); return; }
-        if (!manual && current.browser?.authenticated !== true) { emit("sign-in"); navigate("browser"); return; }
+        if (!canContinue(current)) return;
       }
       if (transportNeedsRepair || !current.state.coreSetupComplete || (toolsRequired && !current.state.mcpRuntimeInstalled)) {
         if (installAttempted) throw new Error("Setup did not persist its installed state. Review Activity before retrying.");
@@ -98,7 +110,7 @@ export function createAutomaticSetup({ api, publish, navigate }: {
         if (!active()) return;
         if (result.ok !== true) throw new Error("Setup did not confirm that installation succeeded.");
         current = await snapshot();
-        if (!active()) return;
+        if (!active() || !canContinue(current)) return;
         if (!current.state.coreSetupComplete) throw new Error("Setup did not persist its installed state.");
       }
       if (!development && (!current.state.codexCatalogVerified || current.state.codexRestartRequired)) {
@@ -116,7 +128,7 @@ export function createAutomaticSetup({ api, publish, navigate }: {
           navigate("mcp"); return;
         }
         current = await snapshot();
-        if (!active()) return;
+        if (!active() || !canContinue(current)) return;
         if (!current.state.mcpSetupComplete) throw new Error("The tool connection has not been verified yet.");
       }
       emit("verifying");
@@ -134,13 +146,7 @@ export function createAutomaticSetup({ api, publish, navigate }: {
       }
       // Persisted completion is not live readiness. Never publish success from an old snapshot.
       current = await snapshot();
-      if (!active()) return;
-      if (setupHasActiveWork(current)) { emit("busy"); return; }
-      if (current.browser?.webAccess?.status === "paused") { emit("review"); navigate("browser"); return; }
-      if (current.state.browserInteractionMode !== mode || setupToolsRequired(current) !== toolsRequired) {
-        throw new Error("Setup options changed during verification. Continue setup to check the new configuration.");
-      }
-      if (!manual && current.browser?.authenticated !== true) { emit("sign-in"); navigate("browser"); return; }
+      if (!active() || !canContinue(current)) return;
       if (!current.state.coreSetupComplete) throw new Error("Setup did not persist its installed state.");
       if (!development && (!current.state.codexCatalogVerified || current.state.codexRestartRequired)) {
         emit("codex"); navigate("setup"); return;

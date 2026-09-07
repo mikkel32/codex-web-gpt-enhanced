@@ -3701,21 +3701,38 @@ describe("adapter liveness covers every path through a turn", () => {
     };
     const worker = ChatGptBrowserWorker.forProvider(provider);
     const originalRun = worker.run.bind(worker);
-    (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = () => new Promise<string>(() => {});
+    const cleanup = new AbortController();
+    const releases: Array<() => void> = [];
+    const runs: Promise<void>[] = [];
+    const activeBefore = chatGptTurnSessions.activeCount();
+    // Stay physically blocked during observation, but let teardown settle the exact
+    // fixture-owned work. An immortal mock pollutes subsequent server health tests.
+    (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = () => new Promise<string>(resolve => {
+      releases.push(() => resolve("liveness fixture completed"));
+    });
     try {
       const run = async (
         request: CodexParsedRequest,
         emit: (event: AdapterEvent) => void,
         signal: AbortSignal,
       ) => {
-        await createChatGptWebAdapter(provider).runTurn!(request, { headers: new Headers(), abortSignal: signal }, emit);
+        const task = createChatGptWebAdapter(provider).runTurn!(request, {
+          headers: new Headers(), abortSignal: AbortSignal.any([signal, cleanup.signal]),
+        }, emit);
+        runs.push(task);
+        await task;
       };
       const { heartbeats, stop } = await drive(provider, run);
       await Bun.sleep(observeMs);
       stop();
       return heartbeats;
     } finally {
+      cleanup.abort();
+      for (const release of releases) release();
+      await Promise.allSettled(runs);
+      await Bun.sleep(0);
       (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = originalRun;
+      expect(chatGptTurnSessions.activeCount()).toBe(activeBefore);
     }
   }
 

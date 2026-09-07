@@ -223,3 +223,49 @@ test("reported tool and host errors have distinct localized recovery guidance", 
   assert.ok(!setupErrorDetail("Bearer secret+/with==").includes("with"));
   assert.equal(describeSetupError("Unknown root \"/Users\"").message.includes("Do not rewrite /Users to /codex"), true);
 });
+
+for (const change of ["sign-out", "mode", "pause", "credentials", "work", "profile", "workspace"] as const) {
+  for (const stage of ["installation", "connector"] as const) {
+    test(`setup rechecks ${change} after ${stage} before starting another step`, async () => {
+      const f = fixture(); f.current.mcpCredentialsConfigured = true;
+      f.current.state.codexCatalogVerified = true;
+      if (stage === "connector") { f.current.state.coreSetupComplete = true; f.current.state.mcpRuntimeInstalled = true; }
+      const changeState = () => {
+        if (change === "sign-out") f.current.browser!.authenticated = false;
+        if (change === "mode") f.current.state.browserInteractionMode = "manual";
+        if (change === "pause") f.current.browser!.webAccess = { status: "paused" } as NonNullable<LauncherSnapshot["browser"]>["webAccess"];
+        if (change === "credentials") f.current.mcpCredentialsConfigured = false;
+        if (change === "work") f.current.operation = { name: "task", status: "running", message: "Running" };
+        if (change === "profile") f.current.profile = "development";
+        if (change === "workspace") f.current.profilePaths = { coreHome: "/different/core", codexHome: "/different/codex", userData: "/different/launcher" };
+      };
+      if (stage === "installation") {
+        f.api.setupMcp = async () => {
+          f.calls.push("mcp"); f.current.state.coreSetupComplete = true; f.current.state.mcpRuntimeInstalled = true;
+          changeState(); return { ok: true, stdout: "" };
+        };
+      } else {
+        f.api.verifyMcp = async () => { f.calls.push("verify-mcp"); f.current.state.mcpSetupComplete = true; changeState(); return { ok: true, checks: [] }; };
+      }
+      await f.setup.start();
+      assert.notEqual(f.setup.getState().phase, "ready");
+      assert.deepEqual(f.calls, stage === "installation" ? ["mcp"] : ["verify-mcp"]);
+    });
+  }
+}
+
+test("an upgrade-required connection can be repaired while its recovery helper is running", async () => {
+  const f = fixture(); f.current.state.coreSetupComplete = true;
+  f.api.connectionStatus = async () => ({ nativeAvailable: false, browserConnected: false,
+    activeBrowserTurns: 0, phase: "needs-setup", recoveryAvailable: true });
+  await f.setup.start();
+  assert.deepEqual(f.calls, ["core"]); assert.equal(f.setup.getState().phase, "codex");
+});
+
+test("an old-version active turn still blocks automatic repair", async () => {
+  const f = fixture(); f.current.state.coreSetupComplete = true;
+  f.api.connectionStatus = async () => ({ nativeAvailable: false, browserConnected: false,
+    activeBrowserTurns: 1, phase: "needs-setup", recoveryAvailable: true });
+  await f.setup.start();
+  assert.deepEqual(f.calls, []); assert.equal(f.setup.getState().phase, "busy");
+});
