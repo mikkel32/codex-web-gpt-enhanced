@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import { expandUserPath } from "./config";
 import { processRunning } from "./process";
+import { waitForLauncherCdp } from "./lib/launcher-cdp";
 
 export const LAUNCHER_BROWSER_HOST_KIND = "codex-web-gpt-launcher";
 export const LAUNCHER_BROWSER_IDLE_URL = "data:text/html;charset=utf-8,%3C!doctype%20html%3E%3Chtml%3E%3Chead%3E%3Cmeta%20charset%3D%22utf-8%22%3E%3Ctitle%3ECodex%20Web%20GPT%3C%2Ftitle%3E%3C%2Fhead%3E%3Cbody%3E%3C%2Fbody%3E%3C%2Fhtml%3E#codex-web-gpt-browser-host";
@@ -168,21 +169,10 @@ export function readLauncherBrowserHostDescriptor(configuredPath: string): Launc
   return descriptor;
 }
 
-async function assertCdpReady(descriptor: LauncherBrowserHostDescriptor, timeoutMs: number): Promise<void> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(`${descriptor.endpoint}/json/version`, { signal: controller.signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const body = await response.json() as Record<string, unknown>;
-    if (typeof body.webSocketDebuggerUrl !== "string" || !body.webSocketDebuggerUrl.startsWith("ws://127.0.0.1:")) {
-      throw new Error("CDP metadata did not expose a loopback WebSocket endpoint");
-    }
-  } catch (error) {
-    throw new Error(`Launcher browser CDP endpoint is not ready: ${error instanceof Error ? error.message : String(error)}`);
-  } finally {
-    clearTimeout(timer);
-  }
+async function assertCdpReady(descriptor: LauncherBrowserHostDescriptor, timeoutMs: number, signal?: AbortSignal): Promise<string> {
+  return waitForLauncherCdp(descriptor.endpoint, {
+    timeoutMs, signal, isOwnerRunning: () => processRunning(descriptor.pid),
+  });
 }
 
 export async function inspectLauncherBrowserHostLiveness(
@@ -243,11 +233,18 @@ export async function connectLauncherBrowserHost(
   if (abortSignal?.aborted) {
     throw new DOMException("Launcher browser connection aborted", "AbortError");
   }
+  const deadline = performance.now() + timeoutMs;
+  const remaining = () => {
+    if (abortSignal?.aborted) throw new DOMException("Launcher browser connection aborted", "AbortError");
+    const milliseconds = Math.ceil(deadline - performance.now());
+    if (milliseconds <= 0) throw new Error("Launcher browser connection timed out");
+    return milliseconds;
+  };
   const descriptor = readLauncherBrowserHostDescriptor(descriptorPath);
-  await assertCdpReady(descriptor, Math.min(timeoutMs, 5_000));
+  const websocket = await assertCdpReady(descriptor, Math.min(remaining(), 5_000), abortSignal);
   let browser: Browser;
   try {
-    browser = await chromium.connectOverCDP(descriptor.endpoint, { timeout: timeoutMs });
+    browser = await chromium.connectOverCDP(websocket, { timeout: remaining() });
   } catch (error) {
     throw new Error(`Could not connect Playwright to the launcher browser: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -260,7 +257,7 @@ export async function connectLauncherBrowserHost(
     const { context, page } = await selectLauncherPage(
       browser,
       descriptor,
-      timeoutMs,
+      remaining(),
       surfaceId,
       abortSignal,
     );
