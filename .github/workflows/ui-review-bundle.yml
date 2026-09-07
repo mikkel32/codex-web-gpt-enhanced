@@ -1,0 +1,40 @@
+name: UI review bundle
+
+on:
+  push:
+    branches: [codex/guided-workspace-ui-20260907]
+    paths: [.github/workflows/ui-review-bundle.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile
+        working-directory: launcher
+      - name: Export only tracked source and installed tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ui-review"
+          git archive HEAD | gzip > "$RUNNER_TEMP/ui-review/source.tar.gz"
+          tar -czf "$RUNNER_TEMP/ui-review/dependencies.tar.gz" node_modules launcher/node_modules
+          cp "$(command -v bun)" "$RUNNER_TEMP/ui-review/bun"
+          git rev-parse HEAD > "$RUNNER_TEMP/ui-review/source-sha.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-review-bundle
+          path: ${{ runner.temp }}/ui-review/*
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
