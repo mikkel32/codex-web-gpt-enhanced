@@ -1,0 +1,33 @@
+name: UI integration source
+on:
+  push:
+    branches: [build/ui-integration-export-20260907]
+    paths: [.github/workflows/ui-integration-export.yml]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Bundle only immutable public source history
+        shell: bash
+        run: |
+          set -euo pipefail
+          git cat-file -e fc8dbfce1ef21b87a9095ed161d382657745ade5^{commit}
+          git cat-file -e 0453c74adc1169a48aafd13dd48d0b352764664f^{commit}
+          git branch reviewed-main fc8dbfce1ef21b87a9095ed161d382657745ade5
+          git branch reviewed-ui 0453c74adc1169a48aafd13dd48d0b352764664f
+          git bundle create "$RUNNER_TEMP/ui-source.bundle" reviewed-main reviewed-ui
+          git bundle verify "$RUNNER_TEMP/ui-source.bundle"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-integration-source
+          path: ${{ runner.temp }}/ui-source.bundle
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
