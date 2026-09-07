@@ -1,0 +1,287 @@
+diff --git a/src/adapters/chatgpt-web/mcp-server.ts b/src/adapters/chatgpt-web/mcp-server.ts
+--- a/src/adapters/chatgpt-web/mcp-server.ts
++++ b/src/adapters/chatgpt-web/mcp-server.ts
+@@ -818,6 +818,15 @@
+         const page = [...directPage, ...nestedPage];
+         const total = directMatches.length + nestedTotal;
+         return result({
++          // Only the claimed turn supplies this context. Never substitute launcher config paths
++          // or another connector's roots. Discovery does not expand the sandbox or authorization.
++          environment: {
++            cwd: bound.cwd,
++            roots: [...bound.roots],
++            writable_roots: [...bound.writableRoots],
++            sandbox: bound.sandboxPolicy.type,
++          },
++          contract,
+           tools: page,
+           total,
+           next_offset: offset + page.length < total ? offset + page.length : null,
+diff --git a/src/adapters/chatgpt-web/prompt.ts b/src/adapters/chatgpt-web/prompt.ts
+--- a/src/adapters/chatgpt-web/prompt.ts
++++ b/src/adapters/chatgpt-web/prompt.ts
+@@ -488,6 +488,9 @@
+       "For local work required by the task, use the attached Codex Native tools directly according to their declared descriptions and schemas.",
+       "Call a Codex Native tool only when the latest active request requires a local effect or fresh local evidence that is not already present in the supplied context; otherwise answer the request directly without a tool call.",
+       "Use actual Codex Native results as evidence for local observations and effects.",
++      "Use the attached inventory tool to discover additional tools, then invoke only the exact returned wire_name through the declared tool-call gateway. read and exec_command are not aliases for the bridge's public codex_* tools. Never guess a tool name from a cached plugin schema.",
++      "The inventory's environment describes this claimed Codex turn: cwd, roots, writable_roots, and sandbox. Do not substitute another connector's computer or map a Mac /Users path to a Windows or virtual root because their folder names look similar.",
++      "A Tool not found or Unknown root error is not evidence of a missing user permission. Check the current tool contract and workspace before retrying; do not broaden access, replay a mutation, or switch computers to hide a deterministic failure.",
+       "A Codex Native MCP tool result may require context compaction. If it does, follow the compaction instructions in that result exactly.",
+       "After a deterministic tool failure, update the working hypothesis from that result and inspect the relevant repository or environment before choosing a different next action; do not repeat the same call unless its inputs or observable state changed.",
+       "Continue using the available tools until the requested work is complete and verified.",
+diff --git a/tests/chatgpt-web-harness.test.ts b/tests/chatgpt-web-harness.test.ts
+--- a/tests/chatgpt-web-harness.test.ts
++++ b/tests/chatgpt-web-harness.test.ts
+@@ -2666,6 +2666,13 @@
+         ["exec", "web__run", "multi_agent_v1__wait_agent"],
+       );
+       expect(emptyGatewayInventory.structuredContent).toEqual({
++        contract: "native",
++        environment: {
++          cwd: gatewayOnlyEnvironment.cwd,
++          roots: gatewayOnlyEnvironment.roots,
++          writable_roots: gatewayOnlyEnvironment.writableRoots,
++          sandbox: gatewayOnlyEnvironment.sandboxPolicy.type,
++        },
+         tools: [],
+         total: 0,
+         next_offset: null,
+diff --git a/tests/launcher-automatic-setup.test.ts b/tests/launcher-automatic-setup.test.ts
+--- a/tests/launcher-automatic-setup.test.ts
++++ b/tests/launcher-automatic-setup.test.ts
+@@ -142,3 +142,84 @@
+   assert.ok(!setupErrorDetail("key sk-proj-SECRET Bearer SECRET-TOKEN").includes("SECRET"));
+   assert.ok(describeSetupError("Config requires 5.13.5", "ja").title.length > 0);
+ });
++
++test("a live broker turn blocks repair even when the tab snapshot is stale", async () => {
++  const f = fixture(); f.current.state.coreSetupComplete = true;
++  f.api.connectionStatus = async () => ({ nativeAvailable: false, browserConnected: true, activeBrowserTurns: 1 });
++  await f.setup.start();
++  assert.equal(f.setup.getState().phase, "busy"); assert.deepEqual(f.calls, []);
++});
++
++test("manual prompts waiting for the user are not interrupted by setup", async () => {
++  const f = fixture();
++  f.current.browser!.tabs = [{ status: "ready", manualState: "awaiting-user" }] as NonNullable<LauncherSnapshot["browser"]>["tabs"];
++  await f.setup.start();
++  assert.equal(f.setup.getState().phase, "busy"); assert.deepEqual(f.calls, []);
++});
++
++test("a pause arriving during the connection probe prevents installation", async () => {
++  const f = fixture();
++  f.api.connectionStatus = async () => {
++    f.current.browser!.webAccess = { status: "paused", reason: "verification", detectedAt: "now", retryAt: null, incidents: 1, canResume: true };
++    return { nativeAvailable: true, browserConnected: true, activeBrowserTurns: 0 };
++  };
++  await f.setup.start();
++  assert.equal(f.setup.getState().phase, "review"); assert.deepEqual(f.calls, []);
++});
++
++test("changing workflow during a probe cannot install using the old mode", async () => {
++  const f = fixture();
++  f.api.connectionStatus = async () => {
++    f.current.state.browserInteractionMode = "manual";
++    return { nativeAvailable: true, browserConnected: true, activeBrowserTurns: 0 };
++  };
++  await f.setup.start();
++  assert.equal(f.setup.getState().phase, "error"); assert.deepEqual(f.calls, []);
++});
++
++test("work starting during the probe prevents installation", async () => {
++  const f = fixture();
++  f.api.connectionStatus = async () => {
++    f.current.operation = { name: "update", status: "running", message: "Updating" };
++    return { nativeAvailable: true, browserConnected: true, activeBrowserTurns: 0 };
++  };
++  await f.setup.start();
++  assert.equal(f.setup.getState().phase, "busy"); assert.deepEqual(f.calls, []);
++});
++
++for (const change of ["sign-out", "restart", "uninstall", "tools", "mode", "pause"] as const) {
++  test(`final verification cannot publish ready after ${change}`, async () => {
++    const f = fixture(); f.current.state.coreSetupComplete = true; f.current.state.codexCatalogVerified = true;
++    f.api.doctor = async () => {
++      if (change === "sign-out") f.current.browser!.authenticated = false;
++      if (change === "restart") f.current.state.codexRestartRequired = true;
++      if (change === "uninstall") f.current.state.coreSetupComplete = false;
++      if (change === "tools") f.current.mcpCredentialsConfigured = true;
++      if (change === "mode") f.current.state.browserInteractionMode = "manual";
++      if (change === "pause") f.current.browser!.webAccess = { status: "paused", reason: "verification", detectedAt: "now", retryAt: null, incidents: 1, canResume: true };
++      return { ok: true, checks: [] };
++    };
++    await f.setup.start();
++    assert.notEqual(f.setup.getState().phase, "ready"); assert.ok(!f.phases.includes("ready"));
++  });
++}
++
++test("connector diagnostic details survive the automatic setup flow", async () => {
++  const f = fixture(); f.current.state.coreSetupComplete = true; f.current.state.codexCatalogVerified = true;
++  f.current.state.mcpRuntimeInstalled = true; f.current.mcpCredentialsConfigured = true;
++  f.api.verifyMcp = async () => ({ ok: false, checks: [{ id: "connector", status: "error", message: "Connection failed", detail: "Tool read not found" }] });
++  await f.setup.start();
++  assert.equal(f.setup.getState().phase, "connector");
++  assert.equal(describeSetupError(f.setup.getState().error).kind, "toolContract");
++  assert.deepEqual(f.surfaces, ["mcp"]);
++});
++
++test("reported tool and host errors have distinct localized recovery guidance", () => {
++  for (const language of ["en", "zh-CN", "ja"] as const) {
++    assert.equal(describeSetupError("MCP error -32602: Tool read not found", language).kind, "toolContract");
++    assert.equal(describeSetupError('Unknown root "/Users". Approved roots: /codex', language).kind, "workspace");
++    assert.equal(describeSetupError('Tool read not found; Unknown root "/Users"', language).kind, "workspace");
++  }
++  assert.ok(!setupErrorDetail("Bearer secret+/with==").includes("with"));
++  assert.equal(describeSetupError("Unknown root \"/Users\"").message.includes("Do not rewrite /Users to /codex"), true);
++});
+diff --git a/tests/launcher-home-state.test.ts b/tests/launcher-home-state.test.ts
+--- a/tests/launcher-home-state.test.ts
++++ b/tests/launcher-home-state.test.ts
+@@ -9,7 +9,7 @@
+     autoStart: true, keepRunningOnClose: true, showBrowserDuringTurns: true,
+     experimentalBiggerContext: false, zeroRiskProEnabled: false, sidebarOpen: true,
+     sidebarWidth: 252, mcpGuideStep: 0, sessionRefreshReminderAt: null,
+-    codexCatalogVerified: true, mcpSetupComplete: false,
++    coreSetupComplete: true, codexCatalogVerified: true, mcpSetupComplete: false,
+   }, browser: { authenticated: true, activeTabId: "home", tabs: [], status: "ready",
+     message: "Ready", url: "", title: "ChatGPT", visible: false, surfaceActive: false,
+     loading: false, canGoBack: false, canGoForward: false, zoomFactor: 1, maxTabs: 5 },
+@@ -40,7 +40,7 @@
+   expect(homeState(snapshot).surface).toBe("setup");
+   snapshot.state.browserInteractionMode = "manual";
+   expect(homeState(snapshot).action).toBe("tools");
+-  snapshot.state.mcpSetupComplete = true;
++  snapshot.mcpCredentialsConfigured = true; snapshot.state.mcpRuntimeInstalled = true; snapshot.state.mcpSetupComplete = true;
+   expect(homeState(snapshot).action).toBe("models");
+   snapshot.profile = "development";
+   expect(homeState(snapshot).next).toBeUndefined();
+@@ -79,3 +79,14 @@
+   expect(initial.state.sidebarWidth).toBe(252);
+   expect(createBootstrapOverlay().merge(initial)).toEqual(initial);
+ });
++
++
++test("Home never treats stale model and connector flags as completed setup", () => {
++  const snapshot = fixture(); snapshot.state.coreSetupComplete = false;
++  expect(homeState(snapshot).action).toBe("models");
++  snapshot.state.coreSetupComplete = true; snapshot.state.codexRestartRequired = true;
++  expect(homeState(snapshot).action).toBe("models");
++  snapshot.state.codexRestartRequired = false; snapshot.mcpCredentialsConfigured = true;
++  snapshot.state.mcpSetupComplete = true;
++  expect(homeState(snapshot).action).toBe("tools");
++});
+diff --git a/tests/mcp-workspace-inventory.test.ts b/tests/mcp-workspace-inventory.test.ts
+new file mode 100644
+--- /dev/null
++++ b/tests/mcp-workspace-inventory.test.ts
+@@ -0,0 +1,53 @@
++import { expect, test } from "bun:test";
++import { Client } from "@modelcontextprotocol/sdk/client/index.js";
++import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
++import { randomUUID } from "node:crypto";
++import { join } from "node:path";
++import { tmpdir } from "node:os";
++import { defaultBrokerEndpoint } from "../src/config";
++import { TurnBroker } from "../src/adapters/chatgpt-web/turn-broker";
++import type { ChatGptTurnEnvironment } from "../src/adapters/chatgpt-web/environment";
++
++test("MCP inventory exposes only the claimed turn's workspace, with no read aliases or cross-host fallback", async () => {
++  const root = join(tmpdir(), `cgw-inventory-${randomUUID().slice(0, 8)}`);
++  const socket = process.platform === "win32" ? defaultBrokerEndpoint(root, "win32") : `${root}.sock`;
++  const broker = TurnBroker.forSocket(socket);
++  const mac: ChatGptTurnEnvironment = {
++    cwd: "/Users/fixture/project", roots: ["/Users/fixture/project"], writableRoots: [],
++    sandboxPolicy: { type: "readOnly", networkAccess: false },
++    tools: [{ name: "read_file", parameters: { type: "object", properties: { path: { type: "string" } } }, description: "Read a project file" }],
++  };
++  const windows: ChatGptTurnEnvironment = {
++    cwd: "C:\\fixture\\project", roots: ["C:\\fixture\\project"], writableRoots: ["C:\\fixture\\project"],
++    sandboxPolicy: { type: "workspaceWrite", writableRoots: ["C:\\fixture\\project"], networkAccess: false }, tools: [],
++  };
++  const token = await broker.register(mac, 60_000);
++  const otherToken = await broker.register(windows, 60_000);
++  const client = new Client({ name: "workspace-inventory-test", version: "1.0.0" });
++  const transport = new StdioClientTransport({ command: process.execPath,
++    args: ["src/cli.ts", "mcp", "--broker-socket", socket], cwd: process.cwd(), stderr: "pipe" });
++  try {
++    await client.connect(transport);
++    const inventory = await client.callTool({ name: "codex_tool_inventory", arguments: { turn_token: token } });
++    expect(inventory.structuredContent).toMatchObject({
++      contract: "native", environment: { cwd: mac.cwd, roots: mac.roots, writable_roots: [], sandbox: "readOnly" },
++      tools: [{ wire_name: "read_file" }], total: 1, next_offset: null,
++    });
++    expect(JSON.stringify(inventory)).not.toContain(token);
++    expect(JSON.stringify(inventory)).not.toContain("C:\\fixture");
++    const other = await client.callTool({ name: "codex_tool_inventory", arguments: { turn_token: otherToken, include_schema: false } });
++    expect(other.structuredContent).toMatchObject({ environment: { cwd: windows.cwd, roots: windows.roots, writable_roots: windows.writableRoots, sandbox: "workspaceWrite" }, tools: [] });
++    expect(JSON.stringify(other)).not.toContain(mac.cwd);
++    const unavailable = await client.callTool({ name: "codex_tool_call", arguments: { turn_token: token, wire_name: "read", arguments: { path: "/Users/fixture/project/file" } } });
++    expect(unavailable.isError).toBe(true);
++    const names = (await client.listTools()).tools.map(tool => tool.name);
++    expect(names).not.toContain("read"); expect(names).not.toContain("exec_command");
++    broker.revoke(token);
++    const revoked = await client.callTool({ name: "codex_tool_inventory", arguments: { turn_token: token } });
++    expect(revoked.isError).toBe(true);
++    expect(JSON.stringify(revoked)).not.toContain(mac.cwd);
++  } finally {
++    await client.close().catch(() => {});
++    broker.revoke(token); broker.revoke(otherToken); await broker.close();
++  }
++}, 30_000);
+diff --git a/tests/workspace-state.test.ts b/tests/workspace-state.test.ts
+new file mode 100644
+--- /dev/null
++++ b/tests/workspace-state.test.ts
+@@ -0,0 +1,51 @@
++import { expect, test } from "bun:test";
++import { workspaceSteps, setupActionSurface, launcherComputer } from "../launcher/src/workspace-state";
++import { workspaceCopy } from "../launcher/src/workspace-copy";
++import type { LauncherSnapshot } from "../launcher/src/types";
++const snapshot = () => ({ profile: "production", state: { browserInteractionMode: "automatic" },
++  browser: { authenticated: true }, mcpCredentialsConfigured: false } as LauncherSnapshot);
++
++test("browser-only milestones do not ask for tool credentials", () => {
++  expect(workspaceSteps(snapshot()).map(step => step.id)).toEqual(["account", "runtime", "models"]);
++});
++test("a catalog flag alone cannot mark installation complete", () => {
++  const s = snapshot(); s.state.codexCatalogVerified = true;
++  expect(workspaceSteps(s).filter(step => step.id !== "account").every(step => !step.done)).toBe(true);
++  s.state.coreSetupComplete = true; s.state.codexRestartRequired = true;
++  expect(workspaceSteps(s).find(step => step.id === "models")!.done).toBe(false);
++});
++test("manual and DEV milestones match their different setup requirements", () => {
++  const s = snapshot(); s.state.browserInteractionMode = "manual";
++  expect(workspaceSteps(s).map(step => step.id)).toEqual(["runtime", "models", "tools"]);
++  s.profile = "development";
++  expect(workspaceSteps(s).map(step => step.id)).toEqual(["runtime", "tools"]);
++});
++test("tool milestones require credentials, installed runtime and a completed check", () => {
++  const s = snapshot(); s.mcpCredentialsConfigured = true; s.state.mcpSetupComplete = true;
++  expect(workspaceSteps(s).at(-1)!.done).toBe(false);
++  s.state.mcpRuntimeInstalled = true;
++  expect(workspaceSteps(s).at(-1)!.done).toBe(true);
++});
++test("paused browser authentication is not complete", () => {
++  const s = snapshot(); s.browser!.webAccess = { status: "paused" } as NonNullable<LauncherSnapshot["browser"]>["webAccess"];
++  expect(workspaceSteps(s)[0]!.done).toBe(false);
++});
++test("contextual setup navigation is explicit and cannot change modes", () => {
++  expect(setupActionSurface("credentials")).toBe("mcp");
++  expect(setupActionSurface("review")).toBe("browser");
++  expect(setupActionSurface("codex")).toBe("setup");
++  expect(setupActionSurface("installing")).toBeNull();
++});
++test("computer labels preserve unknown platforms rather than guessing a host", () => {
++  expect(launcherComputer("darwin")).toBe("macOS");
++  expect(launcherComputer("win32")).toBe("Windows");
++  expect(launcherComputer("custom")).toBe("custom");
++});
++test("workspace copy is complete in all supported languages", () => {
++  const en = workspaceCopy("en");
++  for (const locale of ["zh-CN", "ja"] as const) {
++    const localized = workspaceCopy(locale);
++    expect(Object.keys(localized).sort()).toEqual(Object.keys(en).sort());
++    expect(Object.values(localized).every(value => value.length > 0)).toBe(true);
++  }
++});
