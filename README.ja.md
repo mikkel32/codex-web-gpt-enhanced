@@ -12,6 +12,8 @@ models available. Choose a native model for your Codex account, or choose a
 **Maria Web** model to use your ChatGPT session. Your task, files, tools, and results
 stay together in Codex.
 
+> **セットアップと復旧:** Overview の **自動でセットアップ** から開始します。保存済みの認証情報を再利用し、必要な操作だけを案内します。`Tool read not found` または `Unknown root "/Users"` が表示された場合は、[コネクターの復旧](docs/CONNECTOR_RECOVERY.md)を参照してください。フォルダー権限の変更が既定の対処法ではありません。
+
 ## Maria 5.10
 
 プロセス内の会話キャッシュが失われても、保存した Web 会話を使ってチェックポイントを作成します。

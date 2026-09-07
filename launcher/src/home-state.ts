@@ -4,10 +4,14 @@ export function homeState(snapshot: Pick<LauncherSnapshot, "state" | "browser" |
   const manual = snapshot.state.browserInteractionMode === "manual";
   const steps: { id: "account" | "models" | "tools"; done: boolean; surface: Surface }[] = [];
   if (!manual) steps.push({ id: "account", done: snapshot.browser?.authenticated === true, surface: "browser" });
+  const toolsDone = snapshot.mcpCredentialsConfigured === true && snapshot.state.mcpRuntimeInstalled === true
+    && snapshot.state.mcpSetupComplete === true;
+  const modelsDone = snapshot.state.coreSetupComplete === true && snapshot.state.codexCatalogVerified === true
+    && snapshot.state.codexRestartRequired !== true;
   const toolsRequired = manual || snapshot.profile === "development" || snapshot.mcpCredentialsConfigured || snapshot.state.mcpRuntimeInstalled;
-  if (manual || snapshot.profile === "development") steps.push({ id: "tools", done: snapshot.state.mcpSetupComplete === true, surface: "mcp" });
-  if (snapshot.profile !== "development") steps.push({ id: "models", done: snapshot.state.codexCatalogVerified === true, surface: "setup" });
-  if (toolsRequired && !manual && snapshot.profile !== "development") steps.push({ id: "tools", done: snapshot.state.mcpSetupComplete === true, surface: "mcp" });
+  if (manual || snapshot.profile === "development") steps.push({ id: "tools", done: toolsDone, surface: "mcp" });
+  if (snapshot.profile !== "development") steps.push({ id: "models", done: modelsDone, surface: "setup" });
+  if (toolsRequired && !manual && snapshot.profile !== "development") steps.push({ id: "tools", done: toolsDone, surface: "mcp" });
   const next = steps.find(step => !step.done);
   const tabs = (snapshot.browser?.tabs ?? []).filter(tab => tab.id !== "home");
   const resume = tabs.find(tab => tab.id === snapshot.browser?.activeTabId)

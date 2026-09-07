@@ -4,6 +4,9 @@ import { createAutomaticSetup, type AutomaticSetupState } from "./automatic-setu
 import { describeSetupError } from "./setup-errors";
 import { Icon } from "./icons";
 import "./automatic-setup.css";
+import { workspaceCopy } from "./workspace-copy";
+import { setupActionSurface, workspaceSteps } from "./workspace-state";
+import { setupHasActiveWork } from "./automatic-setup";
 
 const labels = {
   en: {
@@ -43,22 +46,35 @@ export function AutomaticSetup({ snapshot, surface, navigate, clearError }: {
     const subscriptions = [api.onStateChanged(changed), api.onBrowserState(changed), api.onOperation(changed)];
     return () => { subscriptions.forEach(unsubscribe => unsubscribe()); setup.dispose(); controller.current = null; };
   }, []);
+  const w = workspaceCopy(snapshot.state.language);
+  const steps = workspaceSteps(snapshot);
+  const nextSurface = setupActionSurface(state.phase);
   const visible = state.phase !== "idle" || surface === "home" || surface === "setup";
   if (!visible) return null;
   const pending = ["checking", "installing", "verifying"].includes(state.phase);
   const failure = state.error ? describeSetupError(state.error, snapshot.state.language) : null;
   return <section className={`automatic-setup is-${state.phase}`} aria-label={text.title}>
-    <Icon name={state.phase === "ready" ? "check" : "setup"} />
+    <span className="setup-emblem"><Icon name={state.phase === "ready" ? "check" : "setup"} /></span>
     <div className="automatic-setup-copy">
-      <strong>{text.title}</strong>
+      <span className="maria-eyebrow">{text.title}</span>
+      <h2>{state.phase === "ready" ? w.ready : w.setup}</h2>
       <p role="status" aria-live="polite">{text.phases[state.phase]}</p>
       {state.phase === "idle" ? <small>{text.hint}</small> : null}
+      {state.phase === "ready" ? <small>{w.readyBody}</small> : null}
       {failure ? <div role="alert"><p><strong>{failure.title}</strong> — {failure.message}</p><details><summary>{text.details}</summary><pre>{failure.detail}</pre></details></div> : null}
     </div>
     <div className="automatic-setup-actions">
-      <button className="button-primary" disabled={pending || snapshot.operation?.status === "running"}
+      <button className="button-primary" disabled={pending || setupHasActiveWork(snapshot)}
         onClick={() => { clearError(); void controller.current?.continue(); }}>{state.phase === "ready" ? text.check : state.phase === "idle" ? text.start : text.resume}</button>
+      {nextSurface && nextSurface !== surface ? <button className="text-button" onClick={() => navigate(nextSurface)}>{w.openStep}<Icon name="forward" /></button> : null}
       {state.active ? <button className="text-button" onClick={() => controller.current?.pause()}>{text.pause}</button> : null}
     </div>
+    {(surface === "home" || surface === "setup") ? <ol className="setup-milestones" aria-label={w.milestones}>
+      {steps.map((step, index) => <li key={step.id} className={step.done ? "is-done" : "is-pending"}>
+        <button onClick={() => navigate(step.surface)} aria-label={`${w[step.id]}: ${step.done ? w.completed : w.pending}`}>
+          <span>{step.done ? <Icon name="check" /> : index + 1}</span><strong>{w[step.id]}</strong>
+        </button>
+      </li>)}
+    </ol> : null}
   </section>;
 }

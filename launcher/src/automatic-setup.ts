@@ -12,6 +12,18 @@ type SetupApi = Pick<LauncherApi, "snapshot" | "openLogin" | "setupCore" | "setu
   | "verifyMcp" | "doctor" | "connectionStatus">;
 
 /** User-initiated, event-driven setup. Never stores credentials or retries a mutating step blindly. */
+export function setupToolsRequired(current: LauncherSnapshot): boolean {
+  return current.state.browserInteractionMode === "manual" || current.profile === "development"
+    || current.state.mcpRuntimeInstalled === true || current.mcpCredentialsConfigured;
+}
+
+/** Manual prompts are active work too: installing beneath them invalidates their capability. */
+export function setupHasActiveWork(current: LauncherSnapshot): boolean {
+  return current.operation?.status === "running" || (current.browser?.tabs ?? []).some(tab =>
+    tab.status === "running" || tab.status === "testing"
+    || ["awaiting-user", "sent", "running"].includes(tab.manualState ?? ""));
+}
+
 export function createAutomaticSetup({ api, publish, navigate }: {
   api: SetupApi;
   publish: (state: AutomaticSetupState) => void;
@@ -41,8 +53,7 @@ export function createAutomaticSetup({ api, publish, navigate }: {
       emit("checking", { error: undefined });
       let current = await snapshot();
       if (!active()) return;
-      if (current.operation?.status === "running"
-        || current.browser?.tabs.some(tab => tab.status === "running")) {
+      if (setupHasActiveWork(current)) {
         emit("busy"); return;
       }
       if (current.browser?.webAccess?.status === "paused") {
@@ -50,8 +61,8 @@ export function createAutomaticSetup({ api, publish, navigate }: {
       }
       const manual = current.state.browserInteractionMode === "manual";
       const development = current.profile === "development";
-      const toolsRequired = manual || development || current.state.mcpRuntimeInstalled === true
-        || current.mcpCredentialsConfigured;
+      const toolsRequired = setupToolsRequired(current);
+      const mode = current.state.browserInteractionMode;
       if (!manual && current.browser?.authenticated !== true) {
         emit("sign-in"); navigate("browser");
         if (!loginOpened) {
@@ -64,11 +75,20 @@ export function createAutomaticSetup({ api, publish, navigate }: {
         emit("credentials"); navigate("mcp"); return;
       }
       let transportNeedsRepair = false;
-      if (current.state.coreSetupComplete && !development && !installAttempted) {
+      if (!development) {
         const connection = await api.connectionStatus();
         if (!active()) return;
-        if (connection.phase === "recovering") { emit("busy"); return; }
-        transportNeedsRepair = !connection.nativeAvailable;
+        if (connection.phase === "recovering" || connection.activeBrowserTurns > 0) { emit("busy"); return; }
+        transportNeedsRepair = current.state.coreSetupComplete === true && !installAttempted && !connection.nativeAvailable;
+        // The connection probe yielded. Recheck user intent and work before any installation.
+        current = await snapshot();
+        if (!active()) return;
+        if (setupHasActiveWork(current)) { emit("busy"); return; }
+        if (current.state.browserInteractionMode !== mode || setupToolsRequired(current) !== toolsRequired) {
+          throw new Error("Setup options changed during verification. Continue setup to check the new configuration.");
+        }
+        if (current.browser?.webAccess?.status === "paused") { emit("review"); navigate("browser"); return; }
+        if (!manual && current.browser?.authenticated !== true) { emit("sign-in"); navigate("browser"); return; }
       }
       if (transportNeedsRepair || !current.state.coreSetupComplete || (toolsRequired && !current.state.mcpRuntimeInstalled)) {
         if (installAttempted) throw new Error("Setup did not persist its installed state. Review Activity before retrying.");
@@ -90,7 +110,11 @@ export function createAutomaticSetup({ api, publish, navigate }: {
         emit("verifying");
         const report = await api.verifyMcp();
         if (!active()) return;
-        if (!report.ok) { emit("connector"); navigate("mcp"); return; }
+        if (!report.ok) {
+          emit("connector", { error: report.checks.filter(check => check.status === "error")
+            .map(check => [check.message, check.detail].filter(Boolean).join(": ")).join("; ") || undefined });
+          navigate("mcp"); return;
+        }
         current = await snapshot();
         if (!active()) return;
         if (!current.state.mcpSetupComplete) throw new Error("The tool connection has not been verified yet.");
@@ -100,12 +124,29 @@ export function createAutomaticSetup({ api, publish, navigate }: {
       if (!active()) return;
       if (!report.ok) {
         throw new Error(report.checks.filter(check => check.status === "error")
-          .map(check => check.message).join("; ") || "Connection checks did not pass. Review Activity.");
+          .map(check => [check.message, check.detail].filter(Boolean).join(": ")).join("; ") || "Connection checks did not pass. Review Activity.");
       }
       if (!development) {
         const connection = await api.connectionStatus();
         if (!active()) return;
+        if (connection.activeBrowserTurns > 0 || connection.phase === "recovering") { emit("busy"); return; }
         if (!connection.nativeAvailable) throw new Error("The native Codex connection is not ready yet.");
+      }
+      // Persisted completion is not live readiness. Never publish success from an old snapshot.
+      current = await snapshot();
+      if (!active()) return;
+      if (setupHasActiveWork(current)) { emit("busy"); return; }
+      if (current.browser?.webAccess?.status === "paused") { emit("review"); navigate("browser"); return; }
+      if (current.state.browserInteractionMode !== mode || setupToolsRequired(current) !== toolsRequired) {
+        throw new Error("Setup options changed during verification. Continue setup to check the new configuration.");
+      }
+      if (!manual && current.browser?.authenticated !== true) { emit("sign-in"); navigate("browser"); return; }
+      if (!current.state.coreSetupComplete) throw new Error("Setup did not persist its installed state.");
+      if (!development && (!current.state.codexCatalogVerified || current.state.codexRestartRequired)) {
+        emit("codex"); navigate("setup"); return;
+      }
+      if (toolsRequired && (!current.mcpCredentialsConfigured || !current.state.mcpRuntimeInstalled || !current.state.mcpSetupComplete)) {
+        emit(current.mcpCredentialsConfigured ? "connector" : "credentials"); navigate("mcp"); return;
       }
       emit("ready", { active: false });
     } catch (error) {

@@ -2666,6 +2666,13 @@ describe("ChatGPT outer-native harness v4", () => {
         ["exec", "web__run", "multi_agent_v1__wait_agent"],
       );
       expect(emptyGatewayInventory.structuredContent).toEqual({
+        contract: "native",
+        environment: {
+          cwd: gatewayOnlyEnvironment.cwd,
+          roots: gatewayOnlyEnvironment.roots,
+          writable_roots: gatewayOnlyEnvironment.writableRoots,
+          sandbox: gatewayOnlyEnvironment.sandboxPolicy.type,
+        },
         tools: [],
         total: 0,
         next_offset: null,
