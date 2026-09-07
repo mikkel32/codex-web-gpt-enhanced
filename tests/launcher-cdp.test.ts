@@ -4,7 +4,7 @@ const endpoint = "http://127.0.0.1:19222";
 const socket = "ws://127.0.0.1:19222/devtools/browser/owned-browser";
 const ready = () => Response.json({ webSocketDebuggerUrl: socket });
 const run = (impl: (...args: Parameters<typeof fetch>) => Promise<Response>, timeoutMs = 2_000, signal?: AbortSignal) =>
-  waitForLauncherCdp(endpoint, { timeoutMs, signal, isOwnerRunning: () => true, fetchImpl: impl as typeof fetch });
+  waitForLauncherCdp(endpoint, { timeoutMs, signal, isOwnerRunning: () => true, fetchImpl: impl });
 
 test("CDP recovers from connection refusal and temporary HTTP failure", async () => {
   let calls = 0;
@@ -56,7 +56,7 @@ test("CDP refuses a dead owner before issuing a request", async () => {
   let calls = 0;
   await expect(waitForLauncherCdp(endpoint, {
     timeoutMs: 100, isOwnerRunning: () => false,
-    fetchImpl: (async () => { calls++; return ready(); }) as typeof fetch,
+    fetchImpl: async () => { calls++; return ready(); },
   })).rejects.toThrow("host exited");
   expect(calls).toBe(0);
 });

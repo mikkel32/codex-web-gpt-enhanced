@@ -544,7 +544,8 @@ class RuntimeHost {
     // A restored old configuration still requires an upgrade; do not turn that
     // pre-existing state into a second failure or bypass exact-version checks.
     const launcherVersion = this.app.getVersion?.();
-    const needsUpgrade = typeof launcherVersion === "string"
+    const needsUpgrade = this.launcherProfile === "production"
+      && typeof launcherVersion === "string"
       && typeof snapshot.config?.releaseVersion === "string"
       && snapshot.config.releaseVersion !== launcherVersion;
     const expected = !snapshot.configured ? "not-configured" : needsUpgrade ? "needs-setup" : "ready";

@@ -72,3 +72,19 @@ test("failed preflight leaves the previous installation untouched", async t => {
   assert.equal(events.includes("stop"), false);
   assert.equal(events.includes("restore"), false);
 });
+
+
+test("DEV rollback does not apply the production release-version gate", async t => {
+  const { host, supervisor } = fixture(t);
+  host.launcherProfile = "development";
+  supervisor.startIfConfigured = async () => ({ status: "ready" });
+  assert.equal((await host.restorePreviousRuntime(host.runtimeConfigSnapshot(), "setup")).status, "ready");
+});
+test("failed final verification never emits a completed setup event", async t => {
+  const { host, events } = fixture(t, "5.13.8");
+  host.run = async () => ({ code: 0 });
+  await assert.rejects(host.runSetup("core-setup", ["setup"], {
+    afterRuntimeReady: async () => { throw new Error("verification failed"); },
+  }), /verification failed/);
+  assert.equal(events.some(event => event.status === "completed"), false);
+});

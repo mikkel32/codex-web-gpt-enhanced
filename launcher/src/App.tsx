@@ -10,6 +10,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { copyFor, type Copy } from "./i18n";
+import { setupRecoveryCopy, setupRecoveryKind } from "./setup-recovery";
 import { Icon, type IconName } from "./icons";
 import { MariaHome, MADE_WITH_LOVE } from "./MariaHome";
 import { GuideLoader } from "./GuideLoader";
@@ -49,6 +50,8 @@ export function App() {
   const [operation, setOperation] = useState<OperationState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [bootAttempt, setBootAttempt] = useState(0);
+  const [repairingSetup, setRepairingSetup] = useState(false);
+  const repairSetupPending = useRef(false);
   const documentLanguage = snapshot?.state.language ?? "en";
 
   useEffect(() => {
@@ -110,6 +113,16 @@ export function App() {
     };
   }, [bootAttempt]);
 
+  const retrySetup = useCallback(async () => {
+    if (!api || repairSetupPending.current) return;
+    repairSetupPending.current = true;
+    setRepairingSetup(true);
+    setError(null);
+    try { await api.setupCore(); }
+    catch (cause) { setError(messageOf(cause)); }
+    finally { repairSetupPending.current = false; setRepairingSetup(false); }
+  }, []);
+
   const updateState = useCallback((state: LauncherState) => {
     setSnapshot((current) => current
       ? {
@@ -157,7 +170,7 @@ export function App() {
         )}
       </AnimatePresence>
       <AnimatePresence>
-        {error ? <ErrorToast copy={copy} message={error} onDismiss={() => setError(null)} /> : null}
+        {error ? <ErrorToast copy={copy} language={language} message={error} busy={repairingSetup || operation?.status === "running"} onRetry={snapshot.state.onboardingComplete ? () => void retrySetup() : undefined} onDismiss={() => setError(null)} /> : null}
       </AnimatePresence>
     </div></MotionConfig>
   );
@@ -2159,20 +2172,31 @@ function ActionDot({ pulse = false, tone }: { pulse?: boolean; tone: "required" 
 }
 
 
-function ErrorToast({ copy, message, onDismiss }: { copy: Copy; message: string; onDismiss: () => void }) {
+function ErrorToast({ copy, language, message, busy, onRetry, onDismiss }: {
+  copy: Copy; language: Language; message: string; busy: boolean;
+  onRetry?: () => void; onDismiss: () => void;
+}) {
+  const kind = setupRecoveryKind(message);
+  const recovery = kind ? setupRecoveryCopy(kind, language) : null;
   return (
     <motion.div
       animate={{ opacity: 1, y: 0 }}
       className="error-toast"
+      role="alert"
       exit={{ opacity: 0, y: 8 }}
       initial={{ opacity: 0, y: 8 }}
       transition={PANEL_TRANSITION}
     >
       <StateDot state="error" />
       <span>
-        <strong>{copy.error}</strong>
-        <p>{message}</p>
+        <strong>{recovery?.title ?? copy.error}</strong>
+        <p>{recovery?.body ?? message}</p>
+        {recovery ? <details>
+          <summary>{recovery.details}</summary>
+          <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: 200, overflowY: "auto" }}>{message}</pre>
+        </details> : null}
       </span>
+      {recovery && onRetry ? <button disabled={busy} onClick={onRetry} type="button">{busy ? copy.running : recovery.retry}</button> : null}
       <button onClick={onDismiss} type="button">{copy.dismiss}</button>
     </motion.div>
   );

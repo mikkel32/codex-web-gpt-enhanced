@@ -331,6 +331,12 @@ async function setupCommand(args: string[]): Promise<void> {
 
   if (preflightOnly) {
     preflightSetup(options);
+    // Verify local transport before stopping a working runtime; never inspect ChatGPT here.
+    if (options.browserHostDescriptorPath) {
+      await inspectLauncherBrowserHostLiveness(options.browserHostDescriptorPath, {
+        expectedProfile: "production", timeoutMs: 5_000,
+      });
+    }
     stdout.write("Setup preflight complete.\n");
     return;
   }

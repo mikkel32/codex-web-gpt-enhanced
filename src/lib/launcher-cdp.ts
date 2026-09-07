@@ -2,7 +2,7 @@ type CdpReadinessOptions = {
   timeoutMs: number;
   signal?: AbortSignal;
   isOwnerRunning: () => boolean;
-  fetchImpl?: typeof fetch;
+  fetchImpl?: (...args: Parameters<typeof fetch>) => ReturnType<typeof fetch>;
 };
 
 class CdpMetadataError extends Error {}
