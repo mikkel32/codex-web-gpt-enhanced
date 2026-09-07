@@ -915,7 +915,7 @@ test("a browser-mode commit failure restores the previous runtime inside setup",
     }),
     /surface ownership failed/,
   );
-  assert.equal(stops, 1);
+  assert.equal(stops, 2);
   assert.equal(starts, 1);
   assert.equal(checkpointRestores, 1);
   assert.equal(runtimeRestores, 1);
@@ -1115,6 +1115,7 @@ test("failed terminal migration restores removed launchd ownership before verify
       return config;
     },
     prepareExternalMigration() {},
+    stopForSetup: async () => ({ status: "stopped" }),
     startIfConfigured: async () => {
       startAttempts += 1;
       throw new Error("synthetic launcher startup failure");
@@ -1235,4 +1236,44 @@ test("passkey sign-in is rejected outside macOS even if IPC is invoked directly"
   const fixture = hostFor(null).host;
   fixture.platform = "win32";
   assert.throws(() => fixture.passkeyChromeExecutable(), /supported only on macOS/);
+});
+
+test("cross-version rollback preserves settings without claiming the old runtime is ready", async () => {
+  const config = { version: 3, mode: "browser-only", browserHost: "launcher", releaseVersion: "5.13.5" };
+  const { host } = hostFor(config);
+  host.app.getVersion = () => "5.13.8";
+  host.supervisor.startIfConfigured = async () => ({ status: "needs-setup", detail: "Config requires 5.13.5; launcher is 5.13.8" });
+  const restored = await host.restorePreviousRuntime(host.runtimeConfigSnapshot(), "core-setup");
+  assert.equal(restored.status, "needs-setup");
+  assert.equal(config.releaseVersion, "5.13.5");
+});
+
+test("same-version rollback still requires a healthy ready runtime", async () => {
+  const { host } = hostFor({ mode: "browser-only", browserHost: "launcher", releaseVersion: "1.1.3" });
+  host.supervisor.startIfConfigured = async () => ({ status: "needs-setup" });
+  await assert.rejects(host.restorePreviousRuntime(host.runtimeConfigSnapshot(), "core-setup"), /expected ready/);
+});
+
+test("cross-version rollback does not hide external ownership or degraded recovery", async () => {
+  const { host } = hostFor({ mode: "browser-only", browserHost: "launcher", releaseVersion: "1.1.2" });
+  host.supervisor.startIfConfigured = async () => ({ status: "external", detail: "Another process owns the port" });
+  await assert.rejects(host.restorePreviousRuntime(host.runtimeConfigSnapshot(), "core-setup"), /expected needs-setup/);
+});
+
+test("rollback never restores old files underneath an unstoppable replacement", async () => {
+  const config = { mode: "browser-only", browserHost: "launcher", releaseVersion: "1.1.3" };
+  const { host } = hostFor(config);
+  host.runSetup = RuntimeHost.prototype.runSetup;
+  let stops = 0;
+  let restored = false;
+  host.captureSetupCheckpoint = () => [];
+  host.setupCheckpointChanged = () => true;
+  host.restoreSetupCheckpoint = () => { restored = true; };
+  host.supervisor.stopForSetup = async () => { if (++stops > 1) throw new Error("still alive"); };
+  host.run = async (_name, args) => {
+    if (!args.includes("--preflight-only")) throw new Error("synthetic failure");
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  await assert.rejects(host.runSetup("core-setup", ["setup", "--browser-only"], {}), /stopping the incomplete runtime failed: still alive/);
+  assert.equal(restored, false);
 });

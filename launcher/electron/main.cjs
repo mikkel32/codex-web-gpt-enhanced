@@ -717,7 +717,7 @@ function registerIpc({ logger, stateStore }) {
       }
     }
     const result = IS_DEV_PROFILE ? await runtimeHost.setupDevCore() : await runtimeHost.setupCore();
-    stateStore.update({
+    const state = stateStore.update({
       coreSetupComplete: true,
       codexCatalogVerified: IS_DEV_PROFILE ? true : false,
       codexRestartRequired: IS_DEV_PROFILE ? false : true,
@@ -732,6 +732,7 @@ function registerIpc({ logger, stateStore }) {
         mcpGuideStep: 0,
       }),
     });
+    send("launcher:state-changed", state);
     await browserHost.returnToIdle().catch((error) => {
       logger.warn("browser.idle_cleanup_failed", {
         message: error instanceof Error ? error.message : String(error),
