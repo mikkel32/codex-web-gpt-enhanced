@@ -1174,7 +1174,17 @@ class BrowserHost {
     let reason;
     if (challenge) reason = "verification";
     else if (details.statusCode === 429) reason = "rate-limit";
-    else if (details.statusCode === 401) reason = "sign-in";
+    else if (details.statusCode === 401) {
+      const pathname = new URL(details.url).pathname;
+      // A connector, account feature, or other optional endpoint can reject its own
+      // authorization while ChatGPT is still signed in. Only primary session/send
+      // failures affect the Web gate, and even those are not proof of a logout.
+      if (!/^\/backend-api\/(?:me|(?:f\/)?conversation)\/?$/.test(pathname)) {
+        this.logger.debug?.("browser.auxiliary_authorization_failure", { httpStatus: 401 });
+        return false;
+      }
+      reason = "authorization";
+    }
     else if (details.statusCode === 503 && /\/backend-api\/(?:f\/)?conversation(?:\/|$)/.test(new URL(details.url).pathname)) reason = "service";
     if (!reason) return false;
     const retryHeader = Object.entries(details.responseHeaders ?? {}).find(([name]) => name.toLowerCase() === "retry-after")?.[1];

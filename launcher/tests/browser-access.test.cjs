@@ -74,6 +74,45 @@ test('challenge and cooldown signals are limited to owned ChatGPT surfaces', () 
   assert.equal(writes.length,1);
 });
 
+test('auxiliary backend authorization failures do not mark a signed-in browser as logged out', () => {
+  const host=Object.assign(Object.create(BrowserHost.prototype),{
+    accessGate:new BrowserAccessGate(),turnTabs:new Map(),
+    view:{webContents:{id:7,isDestroyed:()=>false}},logger:{warn(){},debug(){}},
+  });
+  for(const path of ['/backend-api/codex/usage','/backend-api/connectors/example','/backend-api/accounts/check','/backend-api/conversation/example/files']) {
+    assert.equal(host.handleChatGptBackendResponse({webContentsId:7,url:'https://chatgpt.com'+path,statusCode:401}),false);
+    assert.equal(host.accessGate.snapshot().status,'ready');
+  }
+});
+
+test('primary request authorization failures ask for a session check, not an asserted logout', () => {
+  const host=Object.assign(Object.create(BrowserHost.prototype),{
+    accessGate:new BrowserAccessGate(),turnTabs:new Map(),
+    view:{webContents:{id:7,isDestroyed:()=>false}},logger:{warn(){}},
+  });
+  for(const path of ['/backend-api/me','/backend-api/conversation','/backend-api/f/conversation']) {
+    assert.equal(host.handleChatGptBackendResponse({webContentsId:7,url:'https://chatgpt.com'+path,statusCode:401}),true);
+    assert.equal(host.accessGate.snapshot().reason,'authorization');
+    host.accessGate.resume();
+  }
+  host.pauseWebAccess('sign-in');
+  assert.equal(host.accessGate.snapshot().reason,'sign-in');
+});
+
+test('authorization pauses persist distinctly and stronger session evidence takes precedence', () => {
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'maria-auth-pause-'));
+  try {
+    const filePath=path.join(root,'pause.json');
+    const gate=new BrowserAccessGate({filePath}); gate.pause('authorization');
+    const restored=new BrowserAccessGate({filePath});
+    assert.equal(restored.snapshot().reason,'authorization');
+    assert.match(restored.message(),/If already signed in/);
+    restored.pause('sign-in'); restored.pause('authorization');
+    assert.equal(restored.snapshot().reason,'sign-in');
+    restored.resume(); assert.equal(restored.snapshot().status,'ready');
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
 test('authenticated control requests return a terminal pause before browser allocation', async () => {
   const gate=new BrowserAccessGate();gate.pause('verification');let allocations=0;
   const host={browserInteractionMode:()=> 'automatic',beginTurn:()=>{gate.assertAvailable();allocations++;}};

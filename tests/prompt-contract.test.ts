@@ -45,6 +45,42 @@ test("large Automatic Full context uses two atomic files without enabling a larg
   expect(visible).toContain("no acknowledgement turns are needed");
 });
 
+test("file transport exposes the exact current human request without promoting tool or developer text", () => {
+  const parsed = request("high");
+  const user = "Review the source for bugs. Read only; do not change files.";
+  parsed.context.messages.unshift({ role: "assistant", content: [{ type: "text", text: "x".repeat(90000) }], timestamp: 0 });
+  parsed.context.messages[parsed.context.messages.length - 1] = { role: "user", content: user, timestamp: 2 };
+  parsed._rawBody = {
+    client_metadata: { "x-codex-turn-metadata": JSON.stringify({ thread_id: "review_thread", turn_id: "review_turn" }) },
+    input: [{ type: "message", role: "user", id: "msg_review", content: [{ type: "input_text", text: user }] },
+      { type: "message", role: "developer", content: "Developer text is not the human request" },
+      { type: "function_call_output", call_id: "old", output: "Tool text is not the human request" }],
+  };
+  const compiled = compileChatGptWebPrompt(parsed, { localToolsEnabled: true, solAvailable: true, proAvailable: true }, "turn_12345678901234567890123456789012");
+  const visible = formatChatGptWebMultipartFileCommit(compiled.multipart!);
+  const excerpt = visible.split("<codex_current_user_request_json>")[1]?.split("</codex_current_user_request_json>")[0];
+  expect(excerpt).toContain(JSON.stringify(user));
+  expect(excerpt).not.toContain("Developer text");
+  expect(excerpt).not.toContain("Tool text");
+  const record = compiled.multipart!.parts.flatMap(part => JSON.parse(part).records).find(record => record.message?.role === "user");
+  expect(record.message.content).toBe(user);
+});
+
+test("file transport does not invent user authority or truncate long requests into an excerpt", () => {
+  for (const authoritative of [false, true]) {
+    const parsed = request("high");
+    const user = "x".repeat(90000) + " Do not execute anything.";
+    parsed.context.messages.push({ role: "user", content: user, timestamp: 3 });
+    if (authoritative) parsed._rawBody = {
+      client_metadata: { "x-codex-turn-metadata": JSON.stringify({ thread_id: "long_thread", turn_id: "long_turn" }) },
+      input: [{ type: "message", role: "user", id: "msg_long", content: user }],
+    };
+    const compiled = compileChatGptWebPrompt(parsed, { localToolsEnabled: true, solAvailable: true, proAvailable: true }, "turn_12345678901234567890123456789012");
+    expect(compiled.multipart!.commit).not.toContain("<codex_current_user_request_json>");
+    expect(compiled.multipart!.parts.join("")).toContain("Do not execute anything.");
+  }
+});
+
 test("small follow-ups stay inline and automatic files do not displace image attachments", () => {
   const parsed = request("high");
   const capabilities = { localToolsEnabled: true, solAvailable: true, proAvailable: true };

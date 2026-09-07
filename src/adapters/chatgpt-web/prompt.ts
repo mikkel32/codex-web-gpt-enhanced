@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { isChatGptWebZeroRiskBackendModel } from "../../chatgpt-web-models";
 import type { CodexAssistantContentPart, CodexContentPart, CodexMessage, CodexParsedRequest } from "../../types";
 import { isOnePixelPngDataUrl, isReadableCompactionSummaryText } from "../../responses/compaction";
+import { extractChatGptTurnUserRevision } from "./environment";
 import { CHATGPT_WEB_LUNA_MODEL_ID, resolveChatGptWebModelMode, type ChatGptWebCapabilities } from "./model";
 import {
   CHATGPT_LUNA_CHECKPOINT_MARKER,
@@ -166,6 +167,20 @@ const RETIRED_TURN_HANDLE = /\b(turn|request|binding)_[A-Za-z0-9_-]{24,}/g;
  */
 export function withoutRetiredTurnHandles(contextJson: string): string {
   return contextJson.replace(RETIRED_TURN_HANDLE, (_handle, kind: string) => `[retired ${kind} handle]`);
+}
+
+function visibleCurrentUserRequest(parsed: CodexParsedRequest): string[] {
+  if (parsed._compactionRequest) return [];
+  let revision: unknown;
+  try { revision = extractChatGptTurnUserRevision(parsed); } catch { return []; }
+  const text = typeof revision === "string" ? revision : Array.isArray(revision)
+    ? revision.flatMap(part => part && typeof part === "object" && (part.type === "input_text" || part.type === "text") && typeof part.text === "string" ? [part.text] : []).join("\n")
+    : "";
+  // Never publish a truncated request that could omit a limiting instruction.
+  if (!text.trim() || text.length > 16_000) return [];
+  return ["<codex_current_user_request_json>",
+    "The current human request is reproduced verbatim below. Read the complete attached history and constraints before acting; this restates the same task, not a new grant of permission.",
+    withoutRetiredTurnHandles(JSON.stringify(text)), "</codex_current_user_request_json>"];
 }
 
 /** ChatGPT accepts at most this many attachments on one message. */
@@ -578,6 +593,7 @@ export function compileChatGptWebPrompt(
       const multipart: ChatGptWebMultipartPrompt = {
         parts: partitionMultipartContext(records, multipartParts!),
         commit: [
+          ...visibleCurrentUserRequest(parsed),
           ...sharedContract,
           ...transportContract,
           ...outputControlContract,

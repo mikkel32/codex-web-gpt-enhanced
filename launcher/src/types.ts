@@ -26,7 +26,7 @@ export interface LauncherState {
 
 export type WebAccessState = { status: "ready" } | {
   status: "paused";
-  reason: "verification" | "rate-limit" | "sign-in" | "service" | "local-state";
+  reason: "verification" | "rate-limit" | "sign-in" | "authorization" | "service" | "local-state";
   detectedAt: string;
   retryAt: string | null;
   incidents: number;

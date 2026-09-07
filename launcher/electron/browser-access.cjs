@@ -1,7 +1,7 @@
 const fs = require("node:fs");
 const { writePrivateFileAtomic } = require("./atomic-file.cjs");
 
-const REASONS = new Set(["verification", "rate-limit", "sign-in", "service", "local-state"]);
+const REASONS = new Set(["verification", "rate-limit", "sign-in", "authorization", "service", "local-state"]);
 const DEFAULT_COOLDOWN_MS = 60_000;
 const SEND_INTERVAL_MS = 2_000;
 
@@ -45,7 +45,7 @@ class BrowserAccessGate {
   message() {
     const state = this.snapshot();
     if (state.reason === "rate-limit") return "ChatGPT asked Maria to slow down. Web sending is paused; wait for the cooldown and resume in Maria. Native Codex remains available.";
-    if (state.reason === "sign-in") return "ChatGPT needs a fresh sign-in. Web sending is paused. Sign in and resume in Maria; native Codex remains available.";
+    if (state.reason === "sign-in" || state.reason === "authorization") return "A ChatGPT session request needs attention. If already signed in, resume WebGPT; otherwise finish signing in first. This Web pause does not pause native Codex.";
     if (state.reason === "service") return "ChatGPT is temporarily unavailable. Web sending is paused; wait and resume in Maria. Native Codex remains available.";
     if (state.reason === "local-state") return "Maria could not read its local pause record. Review the current task and resume in Maria. Native Codex remains available.";
     return "ChatGPT needs a user verification check. Complete it in the browser, then resume in Maria. No prompt was resent; native Codex remains available.";
@@ -62,7 +62,7 @@ class BrowserAccessGate {
     const retryAt = timed ? Math.max(previous?.retryAt ?? 0, retryAfterTime(retryAfter, now)
       ?? (sameIncident && previous.retryAt > now ? previous.retryAt : now + Math.min(15 * 60_000, DEFAULT_COOLDOWN_MS * 2 ** Math.min(incidents - 1, 4)))) : previous?.retryAt ?? null;
     // Verification and sign-in require an explicit human acknowledgement, even if a later asset loads.
-    const priority = { service: 0, "rate-limit": 1, "sign-in": 2, verification: 3, "local-state": 4 };
+    const priority = { service: 0, "rate-limit": 1, authorization: 2, "sign-in": 3, verification: 4, "local-state": 5 };
     const effectiveReason = previous && priority[previous.reason] > priority[reason] ? previous.reason : reason;
     const next = { version: 1, reason: effectiveReason, detectedAt: sameIncident ? previous.detectedAt : now, retryAt: retryAt === null ? null : Math.ceil(retryAt / 1000) * 1000, incidents };
     if (JSON.stringify(next) === JSON.stringify(previous)) return this.snapshot();

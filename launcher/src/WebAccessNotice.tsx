@@ -13,7 +13,7 @@ export function WebAccessNotice({ access, openBrowser }: { access?: WebAccessSta
     return () => clearTimeout(timer);
   }, [until, now]);
   if (!access || access.status !== "paused") return null;
-  const title = { verification: "ChatGPT needs you", "rate-limit": "Giving ChatGPT a moment", "sign-in": "Sign in to continue", service: "ChatGPT is temporarily unavailable", "local-state": "WebGPT paused locally" }[access.reason];
+  const title = { verification: "ChatGPT needs you", "rate-limit": "Giving ChatGPT a moment", "sign-in": "Check ChatGPT session", authorization: "Check ChatGPT session", service: "ChatGPT is temporarily unavailable", "local-state": "WebGPT paused locally" }[access.reason];
   const waiting = until > Math.max(now, Date.now());
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true); setError("");
@@ -23,7 +23,7 @@ export function WebAccessNotice({ access, openBrowser }: { access?: WebAccessSta
   return <aside className="web-access-notice" aria-label="Web sending paused">
     <Icon name="info" />
     <div className="web-access-copy" role="status"><strong>{title}</strong>
-      <p>{access.reason === "verification" ? "Complete the verification in ChatGPT, then resume here." : access.reason === "sign-in" ? "Finish signing in to ChatGPT, then resume here." : access.reason === "local-state" ? "Maria could not read its pause record. Review the current task, then resume." : "Web sending is paused to respect the service's request."} Native Codex remains available.</p>
+      <p>{access.reason === "verification" ? "Complete the verification in ChatGPT, then resume here." : access.reason === "sign-in" || access.reason === "authorization" ? "A ChatGPT session request needs attention. If you are already signed in, resume here. Otherwise, finish signing in to ChatGPT first." : access.reason === "local-state" ? "Maria could not read its pause record. Review the current task, then resume." : "Web sending is paused to respect the service's request."} This pause applies only to WebGPT.</p>
       {until ? <p>{waiting ? "Wait until" : "Cooldown ended at"} {new Date(until).toLocaleString()}.</p> : null}
       <small>Resume enables your next request. Stopped turns are never replayed automatically.</small>
       {error ? <p className="web-access-error" role="alert">{error}</p> : null}

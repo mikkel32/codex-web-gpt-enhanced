@@ -317,6 +317,24 @@ test("an unbounded broker call outlives the bounded default timeout", async () =
   }
 }, 15_000);
 
+test("rejected tool results do not revoke a still-active task binding", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cgw-rejected-tools-"));
+  const broker = TurnBroker.forSocket(defaultBrokerEndpoint(root));
+  try {
+    const token = await broker.register({ cwd: root, roots: [root], writableRoots: [root], sandboxPolicy: { type: "dangerFullAccess" },
+      tools: [{ name: "exec_command", description: "Synthetic command tool", parameters: { type: "object" } }],
+    }, undefined, "trace_rejected_tools");
+    const { bindingId } = await callTurnBroker<{ bindingId: string }>(broker.socketPath, { method: "claim", token });
+    for (let index = 0; index < 3; index++) {
+      const pending = callTurnBroker<{ isError?: boolean }>(broker.socketPath, { method: "invoke", bindingId, wireName: "exec_command", arguments: { cmd: "synthetic" } });
+      const calls = await broker.nextToolBatch(token);
+      broker.completeTool(token, calls[0]!.callId, { isError: index < 2, content: [{ type: "text", text: index < 2 ? "Review unavailable" : "Read completed" }] });
+      expect((await pending).isError).toBe(index < 2);
+      expect((await callTurnBroker<{ bindingId: string }>(broker.socketPath, { method: "claim", token })).bindingId).toBe(bindingId);
+    }
+  } finally { await broker.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
 test("turn broker names the finished turn that owns a replayed handle", async () => {
   const root = mkdtempSync(join(tmpdir(), "cgw-broker-"));
   const socketPath = defaultBrokerEndpoint(root);
