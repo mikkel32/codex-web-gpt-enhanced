@@ -41,6 +41,10 @@ jobs:
           PY
           git apply --check "$RUNNER_TEMP/connection-fixes.patch"
           git apply --index "$RUNNER_TEMP/connection-fixes.patch"
+          gh api "repos/$GITHUB_REPOSITORY/git/blobs/1ad35029a674ddd8cd133410d83b710707779f2e" --jq .content | base64 --decode > "$RUNNER_TEMP/connection-fixture.patch"
+          echo "cf37c7d781414ded20f62c4df139b55350afef42fbc079bea3c78770eb464050  $RUNNER_TEMP/connection-fixture.patch" | sha256sum --check
+          git apply --check "$RUNNER_TEMP/connection-fixture.patch"
+          git apply --index "$RUNNER_TEMP/connection-fixture.patch"
           git diff --cached --check
       - uses: oven-sh/setup-bun@v2
         with:
