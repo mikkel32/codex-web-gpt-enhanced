@@ -39,6 +39,7 @@ import {
 import { ChatGptExternalTurnProgress } from "./turn-progress";
 import {
   canonicalizeCompactionHandoff,
+  compactionHandoffFailure,
   existingStructuredCompactionRun,
   MAX_COMPACTION_HANDOFF_TIMEOUT_MS,
   requestRetainedCompactionHandoff,
@@ -1095,17 +1096,17 @@ export function createChatGptWebAdapter(
                 throw error;
               }
               const handoffError = error instanceof Error ? error : new Error(String(error));
-              const retainedUnavailable = handoffError instanceof ChatGptWebAdapterError
-                && handoffError.code === "compaction_source_unavailable";
+              const failure = compactionHandoffFailure(handoffError);
+              const retainedUnavailable = failure.code === "compaction_source_unavailable";
               console.error("[chatgpt-web] structured context handoff failed:", handoffError);
               emit({
                 type: "error",
                 message: retainedUnavailable
                   ? "Maria could not restore the saved ChatGPT conversation. Inspect the original chat before continuing; no replacement chat was opened."
-                  : "ChatGPT did not complete the context handoff. Retry the task.",
-                status: 409,
-                errorType: "invalid_request_error",
-                code: retainedUnavailable ? "compaction_source_unavailable" : "compaction_handoff_failed",
+                  : failure.message,
+                status: failure.status,
+                errorType: failure.errorType,
+                code: failure.code,
                 retryable: false,
               });
               return;

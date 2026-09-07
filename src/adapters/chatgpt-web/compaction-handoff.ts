@@ -7,10 +7,12 @@ import type {
 import { extractChatGptCompactionSourceRevision } from "./environment";
 import { GOAL_CONTEXT_MARKER, latestGoalContext } from "./goal-context";
 import type { ChatGptBrowserWorker } from "./browser-worker";
+import { ChatGptWebAdapterError } from "./adapter-error";
 import type { CompactionTransactionHandle } from "./compaction-transaction";
 import type { ChatGptWebCapabilities } from "./model";
 import {
   activeCompactionToolResultInstruction,
+  parseCompactionFinalHandoff,
   structuredCompactionHandoffInstruction,
   zeroRiskActiveCompactionToolResultInstruction,
 } from "./native-compaction-control";
@@ -131,6 +133,35 @@ function currentToolResults(
 }
 
 export const MAX_COMPACTION_HANDOFF_TIMEOUT_MS = 5 * 60_000;
+
+/** Preserve actionable, already-public adapter errors instead of hiding every cause as 409. */
+export function compactionHandoffFailure(error: unknown): ChatGptWebAdapterError {
+  const find = (value: unknown, depth = 0): ChatGptWebAdapterError | undefined => {
+    if (value instanceof ChatGptWebAdapterError) return value;
+    if (depth >= 4) return undefined;
+    if (value instanceof AggregateError) {
+      for (const child of value.errors) {
+        const found = find(child, depth + 1);
+        if (found) return found;
+      }
+    }
+    return value instanceof Error ? find(value.cause, depth + 1) : undefined;
+  };
+  const typed = find(error);
+  if (typed) return typed;
+  const timeout = error instanceof Error && /timed out|timeout/i.test(error.message);
+  const cancelled = error instanceof Error && error.name === "AbortError";
+  return new ChatGptWebAdapterError(timeout
+    ? "ChatGPT context handoff timed out before its checkpoint and browser cleanup completed. Inspect the original ChatGPT response before retrying."
+    : cancelled ? "The context handoff was cancelled."
+    : "ChatGPT context handoff failed. The launcher log contains the underlying error; inspect the original chat before retrying.", {
+    status: cancelled ? 499 : 409,
+    errorType: cancelled ? "client_closed_request" : "invalid_request_error",
+    code: timeout ? "compaction_handoff_timeout" : cancelled ? "client_cancelled" : "compaction_handoff_failed",
+    retryable: false,
+    cause: error,
+  });
+}
 
 function boundedCompactionTimeout(timeoutMs: number): number {
   return Math.min(timeoutMs, MAX_COMPACTION_HANDOFF_TIMEOUT_MS);
@@ -330,14 +361,30 @@ export async function requestRetainedCompactionHandoff(
       abortSignal: browserAbort.signal,
       onTextDelta: () => {},
     });
-    const browserFailure = browser.then<never>(
-      () => new Promise<never>(() => {}),
-      error => { throw error; },
-    );
+    const controlHandoff = broker.waitForCompactionHandoff(transaction.token, operationSignal);
+    const expectedHandoffId = transaction.handoffId;
+    const browserHandoff = browser.then(async answer => {
+      const checkpoint = parseCompactionFinalHandoff(answer, expectedHandoffId);
+      if (checkpoint !== undefined) return checkpoint;
+      // A control IPC response can arrive just after the browser finishes. Give that
+      // already-sent handoff a bounded grace period, never another browser submission.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await withCompactionAbort(Promise.race([
+          controlHandoff,
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => reject(new ChatGptWebAdapterError(
+              "ChatGPT finished the compaction response without a checkpoint matching this request. Inspect the original ChatGPT response before retrying.",
+              { status: 409, errorType: "invalid_request_error", code: "compaction_handoff_missing", retryable: false },
+            )), Math.min(1_000, operationTimeoutMs / 2));
+          }),
+        ]), operationSignal);
+      } finally { if (timer) clearTimeout(timer); }
+    });
     const summary = await withCompactionAbort(
       Promise.race([
-        broker.waitForCompactionHandoff(transaction.token, operationSignal),
-        browserFailure,
+        controlHandoff,
+        browserHandoff,
       ]),
       operationSignal,
     );

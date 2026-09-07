@@ -4,6 +4,21 @@ import type { CompactionTransactionHandle } from "./compaction-transaction";
 export const CODEX_COMPACTION_CONTROL_WIRE_NAME = "codex.control.compaction_handoff";
 export const CODEX_ACTIVE_COMPACTION_REQUEST_MARKER = "CODEX_ACTIVE_COMPACTION_REQUEST";
 
+/** Only the final answer of this exact checkpoint request can use the text return channel. */
+export function parseCompactionFinalHandoff(text: string, handoffId: string): string | undefined {
+  const trimmed = text.trim();
+  const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/i.exec(trimmed);
+  try {
+    const value: unknown = JSON.parse(fenced?.[1] ?? trimmed);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const record = value as Record<string, unknown>;
+    if (record.type !== "codex_compaction_handoff" || record.handoff_id !== handoffId
+      || typeof record.summary !== "string" || Object.keys(record).length !== 3) return undefined;
+    const summary = record.summary.trim();
+    return summary && summary !== "<complete checkpoint summary>" ? summary : undefined;
+  } catch { return undefined; }
+}
+
 function compactionControlBinding(transaction: CompactionTransactionHandle): string[] {
   return [
     "Submit the complete checkpoint through the attached Codex Native control plane by calling codex_tool_call exactly once with the binding below.",
@@ -68,6 +83,9 @@ export function structuredCompactionHandoffInstruction(
     "Automatic Codex context compaction has started. Stop ordinary task work and do not call any more work tools.",
     COMPACT_PROMPT,
     ...compactionControlBinding(transaction),
+    "If the attached control tool is unavailable or cannot submit the checkpoint, return the checkpoint in your final answer using exactly this JSON object instead (replace only summary with the complete checkpoint):",
+    JSON.stringify({ type: "codex_compaction_handoff", handoff_id: transaction.handoffId, summary: "<complete checkpoint summary>" }),
+    "The handoff_id must match this request exactly. Do not return an acknowledgment, ordinary task answer, or a checkpoint from an earlier request.",
     "After the control call returns submitted=true, call no more tools. The bridge will close this one-purpose Web response after accepting the checkpoint.",
     "The outer bridge accepts compaction only after the structured checkpoint is valid and its owned browser turn has physically settled.",
   ].join("\n");

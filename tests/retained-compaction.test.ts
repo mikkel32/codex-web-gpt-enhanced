@@ -5,9 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BrowserTurn } from "../src/adapters/chatgpt-web/browser-worker";
 import { ChatGptBrowserWorker } from "../src/adapters/chatgpt-web/browser-worker";
-import { chatGptRetainedConversationUnavailableError } from "../src/adapters/chatgpt-web/adapter-error";
+import { ChatGptWebAdapterError, chatGptRetainedConversationUnavailableError } from "../src/adapters/chatgpt-web/adapter-error";
+import { parseCompactionFinalHandoff } from "../src/adapters/chatgpt-web/native-compaction-control";
 import {
   MAX_COMPACTION_HANDOFF_TIMEOUT_MS,
+  compactionHandoffFailure,
   cancelAllStructuredCompactions,
   cancelStructuredCompactionNativeTurn,
   cancelStructuredCompactionTrace,
@@ -394,6 +396,99 @@ test("a completed retained agent returns an exact checkpoint and its browser is 
   expect(browserRetired).toBeTrue();
   expect(transactionAborted).toBeTrue();
   expect(transactionTtl).toBe(MAX_COMPACTION_HANDOFF_TIMEOUT_MS);
+});
+
+test("retained compaction accepts a final checkpoint bound to its exact handoff when the tool is unavailable", async () => {
+  const handoffId = "handoff_22222222222222222222222222222222";
+  let runs = 0, aborted = false;
+  const worker = { run: async (turn: BrowserTurn) => {
+    runs++;
+    expect(turn.requireRetainedConversation).toBeTrue();
+    const prepared = await turn.prepareResume!();
+    expect(prepared.text).toContain('"type":"codex_compaction_handoff"');
+    return JSON.stringify({ type: "codex_compaction_handoff", handoff_id: handoffId, summary: "Keep the existing task and observe job 42; do not launch it again." });
+  } };
+  const broker = {
+    beginCompactionTransaction: async () => ({ token: "control_test", handoffId }),
+    waitForCompactionHandoff: () => new Promise<string>(() => {}),
+    abortCompactionTransaction: () => { aborted = true; },
+  } as unknown as TurnBroker;
+  await expect(requestRetainedCompactionHandoff(worker as never, request(true),
+    { conversationKey: () => "same-conversation" }, broker,
+    { localToolsEnabled: true, solAvailable: true, proAvailable: true }, "trace_final_checkpoint", undefined, 100))
+    .resolves.toBe("Keep the existing task and observe job 42; do not launch it again.");
+  expect(runs).toBe(1);
+  expect(aborted).toBeTrue();
+});
+
+test("final checkpoint records reject stale ids, ordinary replies, malformed JSON, and placeholders", () => {
+  const record = { type: "codex_compaction_handoff", handoff_id: "current", summary: "Bevar opgaven og vent på job 42." };
+  expect(parseCompactionFinalHandoff(JSON.stringify(record), "current")).toBe(record.summary);
+  expect(parseCompactionFinalHandoff("```json\n" + JSON.stringify(record) + "\n```", "current")).toBe(record.summary);
+  for (const text of ["Done", "{}", JSON.stringify({ ...record, handoff_id: "old" }), JSON.stringify({ ...record, summary: " " }),
+    JSON.stringify({ ...record, summary: "<complete checkpoint summary>" }), JSON.stringify({ ...record, unrelated: true }),
+    "Here is the checkpoint: " + JSON.stringify(record), JSON.stringify(record).slice(0, -1)]) {
+    expect(parseCompactionFinalHandoff(text, "current")).toBeUndefined();
+  }
+});
+
+test("a completed response without a matching checkpoint stops waiting without resubmission", async () => {
+  let runs = 0, aborted = false;
+  const worker = { run: async () => { runs++; return "I will prepare the handoff next."; } };
+  const broker = {
+    beginCompactionTransaction: async () => ({ token: "control_test", handoffId: "current" }),
+    waitForCompactionHandoff: () => new Promise<string>(() => {}),
+    abortCompactionTransaction: () => { aborted = true; },
+  } as unknown as TurnBroker;
+  await expect(requestRetainedCompactionHandoff(worker as never, request(true),
+    { conversationKey: () => "same-conversation" }, broker,
+    { localToolsEnabled: true, solAvailable: true, proAvailable: true }, "trace_missing_checkpoint", undefined, 500))
+    .rejects.toMatchObject({ code: "compaction_handoff_missing", retryable: false });
+  expect(runs).toBe(1);
+  expect(aborted).toBeTrue();
+});
+
+test("a late control handoff can settle after an unmarked browser final without another send", async () => {
+  let runs = 0;
+  const broker = {
+    beginCompactionTransaction: async () => ({ token: "control_test", handoffId: "current" }),
+    waitForCompactionHandoff: () => new Promise<string>(resolve => setTimeout(() => resolve("Accepted through the control plane"), 10)),
+    abortCompactionTransaction() {},
+  } as unknown as TurnBroker;
+  const worker = { run: async () => { runs++; return "Checkpoint submitted."; } };
+  await expect(requestRetainedCompactionHandoff(worker as never, request(true),
+    { conversationKey: () => "same-conversation" }, broker,
+    { localToolsEnabled: true, solAvailable: true, proAvailable: true }, "trace_late_checkpoint", undefined, 500))
+    .resolves.toBe("Accepted through the control plane");
+  expect(runs).toBe(1);
+});
+
+test("operator cancellation wins over an otherwise valid final checkpoint", async () => {
+  const controller = new AbortController();
+  const broker = {
+    beginCompactionTransaction: async () => ({ token: "control_test", handoffId: "current" }),
+    waitForCompactionHandoff: () => new Promise<string>(() => {}),
+    abortCompactionTransaction() {},
+  } as unknown as TurnBroker;
+  const worker = { run: async () => {
+    controller.abort(new DOMException("User cancelled compaction", "AbortError"));
+    return JSON.stringify({ type: "codex_compaction_handoff", handoff_id: "current", summary: "Cancelled checkpoint" });
+  } };
+  await expect(requestRetainedCompactionHandoff(worker as never, request(true),
+    { conversationKey: () => "same-conversation" }, broker,
+    { localToolsEnabled: true, solAvailable: true, proAvailable: true }, "trace_cancelled_checkpoint", controller.signal, 500))
+    .rejects.toMatchObject({ name: "AbortError" });
+});
+
+test("handoff errors preserve actionable causes without copying raw errors or tokens to the user", () => {
+  for (const [status, code] of [[429, "rate_limit_exceeded"], [401, "chatgpt_session_expired"], [400, "astra_pro_unavailable"]] as const) {
+    const cause = new ChatGptWebAdapterError("Actionable public error", { status, code, errorType: "invalid_request_error", retryable: false });
+    expect(compactionHandoffFailure(new AggregateError([cause, new Error("cleanup failed")]))).toBe(cause);
+  }
+  expect(compactionHandoffFailure(new Error("compaction transaction timed out"))).toMatchObject({ code: "compaction_handoff_timeout" });
+  const raw = new Error("private control_secret session contents");
+  expect(compactionHandoffFailure(raw).message).not.toContain(raw.message);
+  expect(compactionHandoffFailure(new DOMException("cancelled", "AbortError"))).toMatchObject({ code: "client_cancelled" });
 });
 
 test("completed retained compaction never treats ordinary assistant text as a handoff", async () => {
@@ -1056,11 +1151,11 @@ test("retained compaction can close its browser epoch while preserving an ordina
   sessions.clear();
 });
 
-test("adapter compact returns one same-agent handoff and preserves a pre-existing ordinary final", async () => {
+test.each(["control", "final"])("adapter compact returns one same-agent %s handoff and preserves a pre-existing ordinary final", async channel => {
   const root = mkdtempSync(join(shortSocketTempRoot(), "cgw-adapter-retained-compact-"));
   const provider: CodexProviderConfig = {
     adapter: "chatgpt-web",
-    baseUrl: `browser://retained-compact-${Date.now()}`,
+    baseUrl: `browser://retained-compact-${channel}-${Date.now()}`,
     chatgptWeb: {
       browserHost: "launcher",
       browserHostDescriptorPath: join(root, "launcher.json"),
@@ -1098,6 +1193,7 @@ test("adapter compact returns one same-agent handoff and preserves a pre-existin
     expect(turn.nativeConnector).toBeTrue();
     expect(turn.capabilities.localToolsEnabled).toBeFalse();
     prepared.release();
+    if (channel === "final") return JSON.stringify({ type: "codex_compaction_handoff", handoff_id: binding.handoffId, summary: "Adapter retained checkpoint" });
     await callTurnBroker(provider.chatgptWeb!.brokerSocketPath!, {
       method: "submit_compaction_handoff",
       token: binding.token,
@@ -1350,7 +1446,10 @@ test("cancel-all waits for physical settlement of a fresh compaction fallback", 
   }
 });
 
-test("structured compact does not replace a known conversation when its retained browser disappeared", async () => {
+test.each(["compaction_source_unavailable", "rate_limit_exceeded", "chatgpt_session_expired", "astra_pro_unavailable"])("structured compact surfaces %s without replacing the known conversation", async code => {
+  const failure = code === "compaction_source_unavailable" ? chatGptRetainedConversationUnavailableError()
+    : new ChatGptWebAdapterError(`Actionable ${code}`, { status: code === "rate_limit_exceeded" ? 429 : code === "chatgpt_session_expired" ? 401 : 400,
+      code, errorType: "invalid_request_error", retryable: false });
   const root = mkdtempSync(join(shortSocketTempRoot(), "cgw-stale-retained-compact-"));
   const provider: CodexProviderConfig = {
     adapter: "chatgpt-web",
@@ -1384,7 +1483,7 @@ test("structured compact does not replace a known conversation when its retained
   let browserStarts = 0;
   (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = async turn => {
     browserStarts += 1;
-    if (turn.requireRetainedConversation) throw chatGptRetainedConversationUnavailableError();
+    if (turn.requireRetainedConversation) throw failure;
     const prepared = await turn.prepare();
     expect(prepared.text).toContain("Original task");
     prepared.release();
@@ -1400,7 +1499,8 @@ test("structured compact does not replace a known conversation when its retained
     expect(browserStarts).toBe(1);
     expect(events.some(event => event.type === "text_delta"
       && event.text.includes("Fallback checkpoint after retained browser loss"))).toBeFalse();
-    expect(events.at(-1)).toMatchObject({ type: "error", code: "compaction_source_unavailable", retryable: false });
+    expect(events.at(-1)).toMatchObject({ type: "error", code, status: failure.status, retryable: false });
+    if (code !== "compaction_source_unavailable") expect(events.at(-1)).toMatchObject({ message: failure.message });
   } finally {
     (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = originalRun;
     chatGptTurnSessions.clear();
