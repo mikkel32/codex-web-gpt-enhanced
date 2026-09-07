@@ -25,7 +25,7 @@ import {
   preflightCodexIntegration,
   readCodexSubagentProtocol,
 } from "./codex-integration";
-import { inspectLauncherBrowserHost } from "./launcher-browser-host";
+import { inspectLauncherBrowserHost, inspectLauncherBrowserHostLiveness } from "./launcher-browser-host";
 import {
   DEV_CONFIG_PURPOSE,
   DEV_LAUNCHER_PROFILE,
@@ -425,7 +425,7 @@ function prepareSetup(options: SetupOptions): PreparedSetup {
   return { existing, config, launcherOwned };
 }
 
-export function preflightSetup(options: SetupOptions): void {
+export async function preflightSetup(options: SetupOptions): Promise<void> {
   const { existing, config } = prepareSetup(options);
   if (config.mode === "full") {
     const saved = existing?.mode === "full"
@@ -461,6 +461,14 @@ export function preflightSetup(options: SetupOptions): void {
   preflightCodexIntegration(config, {
     replaceExistingRoute: options.replaceCodexRoute,
   });
+  // Fail before RuntimeHost stops a working daemon or changes any saved configuration.
+  // Manual mode deliberately does not depend on automated browser inspection.
+  if (config.browserHost === "launcher" && config.browserInteractionMode !== "manual") {
+    await inspectLauncherBrowserHostLiveness(config.browserHostDescriptorPath!, {
+      expectedProfile: "production",
+      timeoutMs: 5_000,
+    });
+  }
 }
 
 export async function setup(options: SetupOptions): Promise<SetupResult> {

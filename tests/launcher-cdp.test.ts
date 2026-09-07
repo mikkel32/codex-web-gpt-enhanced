@@ -9,7 +9,7 @@ const run = (impl: (...args: Parameters<typeof fetch>) => Promise<Response>, tim
 test("CDP recovers from connection refusal and temporary HTTP failure", async () => {
   let calls = 0;
   expect(await run(async (_url, options) => {
-    expect(options?.redirect).toBe("error");
+    expect(options?.redirect).toBe("manual");
     calls++;
     if (calls === 1) throw new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } });
     return calls === 2 ? new Response(null, { status: 503 }) : ready();
@@ -62,4 +62,25 @@ test("CDP refuses a dead owner before issuing a request", async () => {
 });
 test.each([0, -1, Infinity, NaN])("CDP rejects invalid timeout %s", async timeoutMs => {
   await expect(waitForLauncherCdp(endpoint, { timeoutMs, isOwnerRunning: () => true })).rejects.toThrow("timeout must be positive");
+});
+
+test("CDP shared readiness rechecks ownership after receiving metadata", async () => {
+  let ownerChecks = 0;
+  await expect(waitForLauncherCdp(endpoint, {
+    timeoutMs: 100, isOwnerRunning: () => ++ownerChecks === 1, fetchImpl: async () => ready(),
+  })).rejects.toThrow("host exited during CDP readiness verification");
+  expect(ownerChecks).toBe(2);
+});
+
+test.each([301, 302, 307, 308])("CDP compatibility facade rejects redirect HTTP %i once", async status => {
+  let calls = 0;
+  await expect(run(async () => { calls++; return new Response(null, { status }); })).rejects.toThrow(`HTTP ${status}`);
+  expect(calls).toBe(1);
+});
+
+test("CDP diagnostics do not repeat arbitrary exception data", async () => {
+  await expect(run(async () => { throw new Error("private-cookie-value sk-proj-example-secret"); }, 10))
+    .rejects.toThrow("local browser transport unavailable");
+  try { await run(async () => { throw new Error("private-cookie-value sk-proj-example-secret"); }, 10); }
+  catch (error) { expect(String(error)).not.toContain("private-cookie-value"); expect(String(error)).not.toContain("sk-proj-"); }
 });

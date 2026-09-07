@@ -1,7 +1,8 @@
 export type SetupRecoveryKind = "browser" | "version";
 export function setupRecoveryKind(message: string): SetupRecoveryKind | null {
+  if (/stopping the incomplete runtime failed|checkpoint restoration failed|rollback failed/i.test(message)) return null;
   const primary = message.split(/;\s*(?:restoring the previous|Previous settings|first-time setup)/i)[0] ?? message;
-  if (/sign in|logged out|unauthorized|forbidden|HTTP (401|403)|access (denied|paused)/i.test(primary)) return null;
+  if (/sign in|logged out|unauthorized|forbidden|HTTP (?:3\d\d|4\d\d)|access (denied|paused)|CDP metadata|unsafe permissions|unexpected.*(?:partition|surface)|different launcher browser host/i.test(primary)) return null;
   if (/Launcher browser CDP endpoint|Could not connect Playwright to the launcher browser|Launcher browser host process is not running/i.test(primary)) return "browser";
   const versions = /Config requires (\d+)\.(\d+)\.(\d+); launcher is (\d+)\.(\d+)\.(\d+)(?:\s|;|$)/.exec(primary);
   if (!versions) return null;

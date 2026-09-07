@@ -23,3 +23,13 @@ test.each(["en", "ja", "zh-CN"])("recovery copy is available for %s", language =
     for (const value of Object.values(copy)) expect(value.length).toBeGreaterThan(0);
   }
 });
+
+test.each([
+  "Launcher browser CDP endpoint is not ready; stopping the incomplete runtime failed: still alive",
+  "Launcher browser CDP endpoint is not ready; checkpoint restoration failed",
+  "Launcher browser CDP endpoint is not ready: CDP metadata did not identify the expected loopback browser endpoint",
+  "Launcher browser CDP endpoint returned HTTP 302",
+  "Launcher browser CDP endpoint returned HTTP 404",
+])("unsafe recovery never offers a blind setup retry: %s", message => {
+  expect(setupRecoveryKind(message)).toBeNull();
+});
