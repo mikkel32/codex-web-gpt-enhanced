@@ -17,8 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      EXPECTED_MAIN: a6b38bf328b9262df47ef5c573f56056043472f9
-      EXPECTED_PARENT: 23ca72403419d5bb648d372734186b8c2faa34b5
+      EXPECTED_MAIN: 41c57fd2b6439e65dcf913d0fd44cc91426b69ab
+      EXPECTED_PARENT: 71312c3a65f01e39900ec6bec4e6c00823d43139
       EXPECTED_TREE: 5cb0698b929ac96b35a80a354d0534a693d6c03f
     steps:
       - uses: actions/checkout@v6
