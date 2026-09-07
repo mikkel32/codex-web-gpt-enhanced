@@ -7,6 +7,7 @@ import "./automatic-setup.css";
 import { workspaceCopy } from "./workspace-copy";
 import { setupActionSurface, workspaceSteps } from "./workspace-state";
 import { setupHasActiveWork } from "./automatic-setup";
+import { useConnectionStatus } from "./useConnectionStatus";
 
 const labels = {
   en: {
@@ -35,6 +36,7 @@ export function AutomaticSetup({ snapshot, surface, navigate, clearError }: {
   navigateRef.current = navigate;
   const controller = useRef<ReturnType<typeof createAutomaticSetup> | null>(null);
   const text = labels[snapshot.state.language ?? "en"];
+  const connection = useConnectionStatus();
   useEffect(() => {
     const api = window.codexWebLauncher;
     if (!api) return;
@@ -46,6 +48,14 @@ export function AutomaticSetup({ snapshot, surface, navigate, clearError }: {
     const subscriptions = [api.onStateChanged(changed), api.onBrowserState(changed), api.onOperation(changed)];
     return () => { subscriptions.forEach(unsubscribe => unsubscribe()); setup.dispose(); controller.current = null; };
   }, []);
+  // Native recovery and broker-only turns can finish without a browser/state event.
+  // Reuse the shared, visibility-aware monitor instead of adding another polling loop.
+  useEffect(() => {
+    const setup = controller.current;
+    if (!connection.stale && !connection.error && connection.status && setup?.getState().phase === "busy") {
+      void setup.resume();
+    }
+  }, [connection.status, connection.stale, connection.error]);
   const w = workspaceCopy(snapshot.state.language);
   const steps = workspaceSteps(snapshot);
   const nextSurface = setupActionSurface(state.phase);

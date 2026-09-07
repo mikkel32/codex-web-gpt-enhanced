@@ -3,7 +3,7 @@ const { chromium, _electron: electron } = require('playwright-core');
 const { pathToFileURL } = require('node:url');
 const { tmpdir } = require('node:os');
 const fs = require('node:fs'), path = require('node:path'), http = require('node:http'), assert = require('node:assert/strict');
-function fixture({ language = 'en', firstRun = false, manual = false, development = false, offline = false, onboarding = false } = {}) {
+function fixture({ language = 'en', firstRun = false, manual = false, development = false, offline = false, onboarding = false, recovering = false } = {}) {
   const listeners = {};
   const state = { version: 1, language, onboardingComplete: !onboarding, browserInteractionMode: manual ? 'manual' : 'automatic',
     autoStart: true, keepRunningOnClose: true, showBrowserDuringTurns: true, experimentalBiggerContext: true,
@@ -18,9 +18,11 @@ function fixture({ language = 'en', firstRun = false, manual = false, developmen
     connectorName: manual ? 'Codex Zero Risk' : 'Codex Native2', connectorNames: { automatic: 'Codex Native2', manual: 'Codex Zero Risk' },
     mcpCredentialsConfigured: !firstRun, logs: [], urls: { github: 'https://github.com/mikkel32/codex-web-gpt-enhanced', connectors: '', keys: '', tunnels: '' },
     version: 'fixture', platform: 'darwin', packaged: true, operation: null, update: { status: 'up-to-date' } };
+  window.testConnectionStatus = { nativeAvailable: !offline && !recovering, browserConnected: true,
+    activeBrowserTurns: 0, phase: recovering ? 'recovering' : offline ? 'offline' : 'online' };
   window.testSnapshot = snapshot; window.testListeners = listeners; window.testDoctorCalls = 0; window.testMutations = 0;
   window.codexWebLauncher = new Proxy({ snapshot: async () => snapshot, logs: async () => [],
-    connectionStatus: async () => ({ nativeAvailable: !offline, browserConnected: true, activeBrowserTurns: 0 }),
+    connectionStatus: async () => window.testConnectionStatus,
     doctor: async () => { window.testDoctorCalls++; await new Promise(resolve => setTimeout(resolve, 150)); return { ok: true, checks: [
       { id: 'local', status: 'ok', message: 'Fixture local runtime checked' },
       { id: 'connector', status: 'warning', message: 'ChatGPT attachment is not verified by local checks' } ] }; },
@@ -105,6 +107,26 @@ async function main() {
         if (output && ['Settings', 'Models & setup', 'Workspace tools'].includes(label)) await page.screenshot({ path: path.join(output, `${label.replace(/[^a-z]/gi, '-').toLowerCase()}-${width}.png`) });
       }
       assert.deepEqual(errors, []); console.log('Passed viewport', width); results.push({ width, surfaces: 8, errors }); await context.close();
+    }
+    // No IPC state/browser/operation event: only the shared monitor observes recovery.
+    for (const pause of [false, true]) {
+      const context = await browser.newContext({ viewport: { width: 700, height: 900 }, reducedMotion: 'reduce' });
+      await context.addInitScript(fixture, { recovering: true });
+      const page = await context.newPage(), errors = []; page.setDefaultTimeout(15000);
+      page.on('pageerror', error => errors.push(error.message)); await page.goto(pageUrl);
+      await page.getByRole('button', { name: 'Set up automatically', exact: true }).click();
+      await page.locator('.automatic-setup.is-busy').waitFor();
+      if (pause) await page.getByRole('button', { name: 'Pause setup', exact: true }).click();
+      await page.evaluate(() => { window.testConnectionStatus = { ...window.testConnectionStatus, nativeAvailable: true, phase: 'online' }; });
+      if (pause) {
+        await page.waitForTimeout(3500); await page.locator('.automatic-setup.is-paused').waitFor();
+        assert.equal(await page.evaluate(() => window.testDoctorCalls), 0);
+      } else {
+        await page.locator('.automatic-setup.is-ready').waitFor();
+        assert.equal(await page.evaluate(() => window.testDoctorCalls), 1);
+      }
+      assert.equal(await page.evaluate(() => window.testMutations), 0); assert.deepEqual(errors, []);
+      results.push({ recoveryWithoutEvents: true, pause, errors }); await context.close();
     }
     for (const options of [{ firstRun: true }, { firstRun: true, manual: true }, { development: true }, { offline: true }, { language: 'ja' }, { language: 'zh-CN' }, { onboarding: true }]) {
       const context = await browser.newContext({ viewport: { width: 700, height: 900 }, reducedMotion: 'reduce' });
