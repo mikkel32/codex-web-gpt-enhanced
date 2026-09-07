@@ -119,3 +119,17 @@ test("DEV launcher child cannot inherit production home or browser-profile overr
     CODEX_WEB_GPT_DEV_HOME: paths.home,
   });
 });
+
+test("explicit Windows discovery inputs never borrow the host registry", () => {
+  expect(installedLauncherCandidates({
+    platform: "win32", homeDirectory: "C:\\fixture\\isolated", environment: {},
+  })).toEqual([]);
+  expect(installedLauncherCandidates({
+    platform: "win32", homeDirectory: "C:\\fixture\\isolated",
+    environment: { LOCALAPPDATA: "D:\\fixture\\local" },
+  })).toEqual(["D:\\fixture\\local\\Programs\\Maria WebGPT\\Maria WebGPT.exe"]);
+  expect(installedLauncherCandidates({
+    platform: "win32", homeDirectory: "C:\\fixture\\isolated", environment: {},
+    windowsInstallLocation: "D:\\fixture\\installed",
+  })).toEqual(["D:\\fixture\\installed\\Maria WebGPT.exe"]);
+});

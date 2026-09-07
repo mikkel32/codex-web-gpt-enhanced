@@ -6,6 +6,7 @@ import "./styles.css";
 import "./studio.css";
 import "./kinetic.css";
 import "./workspace.css";
+import "./guided.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

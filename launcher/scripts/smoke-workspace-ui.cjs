@@ -94,17 +94,22 @@ async function main() {
       await page.getByLabel('Explain a connector error', { exact: true }).fill('Unknown root "/Users". Approved roots: /codex');
       await page.getByText('This is not the connected workspace', { exact: true }).waitFor();
       await page.getByLabel('Explain a connector error', { exact: true }).fill('');
+      const automaticChecks = await page.evaluate(() => window.testDoctorCalls);
+      assert.equal(automaticChecks, 1, 'returning-user inspection runs once without installing');
       await page.getByRole('button', { name: 'Run local checks', exact: true }).click();
       await page.getByText('Local checks passed', { exact: true }).waitFor();
-      assert.equal(await page.evaluate(() => window.testDoctorCalls), 1);
+      assert.equal(await page.evaluate(() => window.testDoctorCalls), automaticChecks + 1, 'one click performs one additional local check');
       await page.getByText('ChatGPT attachment is not verified by local checks', { exact: true }).waitFor();
       assert.equal(await page.evaluate(() => window.testMutations), 0);
       if (output) await page.screenshot({ path: path.join(output, `diagnostics-${width}.png`) });
-      for (const label of ['Models & setup', 'Workspace tools', 'Activity', 'Settings', 'Help & guide', 'Updates', 'Browser']) {
-        if (width < 820) await page.getByRole('button', { name: 'Show sidebar', exact: true }).click();
-        await page.locator('.sidebar-item').filter({ hasText: new RegExp('^' + label + '$') }).click(); await page.waitForTimeout(width === 1180 ? 1000 : 150);
+      for (const [index, label, selector] of [[3, 'Connection', '.setup-list'], [4, 'Local tools', '.wizard-stepper'],
+        [5, 'Activity', '.activity-table'], [8, 'Settings', '.studio-settings-section:visible'],
+        [6, 'Help', '.guided-help'], [7, 'Updates', '.maria-updates'], [2, 'ChatGPT', '.browser-surface']]) {
+        // The new shell keeps advanced pages reachable through its declared keyboard routes.
+        await page.keyboard.press(`Meta+${index}`); await page.locator(selector).first().waitFor();
+        await page.waitForTimeout(width === 1180 ? 1000 : 150);
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `${label} overflows at ${width}`);
-        if (output && ['Settings', 'Models & setup', 'Workspace tools'].includes(label)) await page.screenshot({ path: path.join(output, `${label.replace(/[^a-z]/gi, '-').toLowerCase()}-${width}.png`) });
+        if (output && ['Settings', 'Connection', 'Local tools'].includes(label)) await page.screenshot({ path: path.join(output, `${label.replace(/[^a-z]/gi, '-').toLowerCase()}-${width}.png`) });
       }
       assert.deepEqual(errors, []); console.log('Passed viewport', width); results.push({ width, surfaces: 8, errors }); await context.close();
     }
@@ -114,16 +119,18 @@ async function main() {
       await context.addInitScript(fixture, { recovering: true });
       const page = await context.newPage(), errors = []; page.setDefaultTimeout(15000);
       page.on('pageerror', error => errors.push(error.message)); await page.goto(pageUrl);
-      await page.getByRole('button', { name: 'Set up automatically', exact: true }).click();
+      await page.locator('.guided-setup.is-idle').waitFor();
+      await page.locator('.guided-setup').getByRole('button', { name: 'Check connection', exact: true }).click();
       await page.locator('.automatic-setup.is-busy').waitFor();
-      if (pause) await page.getByRole('button', { name: 'Pause setup', exact: true }).click();
+      const checksBeforeRecovery = await page.evaluate(() => window.testDoctorCalls);
+      if (pause) await page.getByRole('button', { name: 'Pause', exact: true }).click();
       await page.evaluate(() => { window.testConnectionStatus = { ...window.testConnectionStatus, nativeAvailable: true, phase: 'online' }; });
       if (pause) {
         await page.waitForTimeout(3500); await page.locator('.automatic-setup.is-paused').waitFor();
-        assert.equal(await page.evaluate(() => window.testDoctorCalls), 0);
+        assert.equal(await page.evaluate(() => window.testDoctorCalls), checksBeforeRecovery);
       } else {
         await page.locator('.automatic-setup.is-ready').waitFor();
-        assert.equal(await page.evaluate(() => window.testDoctorCalls), 1);
+        assert.equal(await page.evaluate(() => window.testDoctorCalls), checksBeforeRecovery + 1);
       }
       assert.equal(await page.evaluate(() => window.testMutations), 0); assert.deepEqual(errors, []);
       results.push({ recoveryWithoutEvents: true, pause, errors }); await context.close();
@@ -133,10 +140,14 @@ async function main() {
       await context.addInitScript(fixture, options);
       const page = await context.newPage(), errors = []; page.setDefaultTimeout(15000);
       page.on('pageerror', error => errors.push(error.message)); await page.goto(pageUrl); console.log('Opened fixture page');
-      await page.locator(options.onboarding ? '.welcome' : '.studio-home').waitFor(); await page.waitForTimeout(200);
+      await page.locator(options.onboarding ? '.guided-welcome' : '.studio-home').waitFor(); await page.waitForTimeout(200);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
       assert.equal(await page.evaluate(() => window.testMutations), 0);
-      if (options.offline) assert.equal(await page.locator('.workspace-status-card').first().innerText(), 'Native Codex\nNeeds attention');
+      if (options.offline) {
+        const connection = page.locator('.guided-health-row').first();
+        assert.equal(await connection.locator('small').innerText(), 'Not connected');
+        assert.equal(await connection.locator('i.is-ready').count(), 0);
+      }
       if (output) await page.screenshot({ path: path.join(output, `state-${Object.entries(options).map(([k,v]) => `${k}-${v}`).join('-')}.png`) });
       assert.deepEqual(errors, []); results.push({ options, errors }); await context.close();
     }
