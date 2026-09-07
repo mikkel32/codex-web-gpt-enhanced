@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import { expandUserPath } from "./config";
 import { processRunning } from "./process";
-import { waitForLauncherCdp } from "./launcher-cdp-readiness";
+import { waitForLauncherCdp, waitForLauncherCdpConnection } from "./launcher-cdp-readiness";
 
 export const LAUNCHER_BROWSER_HOST_KIND = "codex-web-gpt-launcher";
 export const LAUNCHER_BROWSER_IDLE_URL = "data:text/html;charset=utf-8,%3C!doctype%20html%3E%3Chtml%3E%3Chead%3E%3Cmeta%20charset%3D%22utf-8%22%3E%3Ctitle%3ECodex%20Web%20GPT%3C%2Ftitle%3E%3C%2Fhead%3E%3Cbody%3E%3C%2Fbody%3E%3C%2Fhtml%3E#codex-web-gpt-browser-host";
@@ -177,7 +177,9 @@ export async function inspectLauncherBrowserHostLiveness(
     signal?: AbortSignal;
   } = {},
 ): Promise<LauncherBrowserHostDescriptor> {
-  return waitForLauncherCdp(() => readLauncherBrowserHostDescriptor(descriptorPath), options);
+  return waitForLauncherCdp(() => readLauncherBrowserHostDescriptor(descriptorPath), {
+    ...options, isOwnerRunning: descriptor => processRunning(descriptor.pid),
+  });
 }
 
 export async function selectLauncherPage(
@@ -224,16 +226,20 @@ export async function connectLauncherBrowserHost(
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("Launcher connection timeout must be positive and finite");
   const deadline = performance.now() + timeoutMs;
   const remaining = () => {
+    if (abortSignal?.aborted) throw new DOMException("Launcher browser connection aborted", "AbortError");
     const ms = Math.ceil(deadline - performance.now());
     if (ms <= 0) throw new Error("Launcher browser connection timed out");
     return ms;
   };
-  const descriptor = await inspectLauncherBrowserHostLiveness(descriptorPath, {
-    timeoutMs: Math.min(remaining(), 5_000), signal: abortSignal,
-  });
+  const { descriptor, webSocketDebuggerUrl } = await waitForLauncherCdpConnection(
+    () => readLauncherBrowserHostDescriptor(descriptorPath), {
+      timeoutMs: Math.min(remaining(), 5_000), signal: abortSignal,
+      isOwnerRunning: candidate => processRunning(candidate.pid),
+    },
+  );
   let browser: Browser;
   try {
-    browser = await chromium.connectOverCDP(descriptor.endpoint, { timeout: remaining() });
+    browser = await chromium.connectOverCDP(webSocketDebuggerUrl, { timeout: remaining() });
   } catch (error) {
     throw new Error(`Could not connect Playwright to the launcher browser: ${error instanceof Error ? error.message : String(error)}`);
   }

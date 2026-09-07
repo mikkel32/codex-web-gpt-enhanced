@@ -45,20 +45,21 @@ function endpointURL(endpoint: string): URL {
   return url;
 }
 
-function validateMetadata(body: unknown, endpoint: URL): void {
+function validateMetadata(body: unknown, endpoint: URL): string {
   let socket: URL;
   try {
     if (!body || typeof body !== "object" || !("webSocketDebuggerUrl" in body)
       || typeof body.webSocketDebuggerUrl !== "string") throw new Error();
     socket = new URL(body.webSocketDebuggerUrl);
   } catch {
-    throw new InvalidCdpMetadataError("CDP metadata did not expose a loopback WebSocket endpoint");
+    throw new InvalidCdpMetadataError("CDP metadata did not expose a valid browser WebSocket");
   }
   if (socket.protocol !== "ws:" || socket.hostname !== "127.0.0.1" || socket.port !== endpoint.port
     || socket.username || socket.password || socket.search || socket.hash
     || !/^\/devtools\/browser\/[^/]+$/.test(socket.pathname)) {
-    throw new InvalidCdpMetadataError("CDP metadata must identify a browser on the same loopback port");
+    throw new InvalidCdpMetadataError("CDP metadata did not identify the expected loopback browser endpoint on the same loopback port");
   }
+  return socket.href;
 }
 
 function transportDetail(error: unknown): string {
@@ -70,10 +71,18 @@ function transportDetail(error: unknown): string {
     ? "probe timed out" : "local browser transport unavailable";
 }
 
-export async function waitForLauncherCdp<T extends CdpHostDescriptor>(
+export interface CdpReadinessOptions<T extends CdpHostDescriptor> {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  expectedProfile?: T["profile"];
+  isOwnerRunning?: (descriptor: T) => boolean;
+  fetchImpl?: (...args: Parameters<typeof fetch>) => ReturnType<typeof fetch>;
+}
+
+export async function waitForLauncherCdpConnection<T extends CdpHostDescriptor>(
   readDescriptor: () => T,
-  options: { timeoutMs?: number; signal?: AbortSignal; expectedProfile?: T["profile"] } = {},
-): Promise<T> {
+  options: CdpReadinessOptions<T> = {},
+): Promise<{ descriptor: T; webSocketDebuggerUrl: string }> {
   const timeoutMs = options.timeoutMs ?? 5_000;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("CDP readiness timeout must be positive and finite");
   const deadline = performance.now() + timeoutMs;
@@ -85,6 +94,9 @@ export async function waitForLauncherCdp<T extends CdpHostDescriptor>(
     // Reread on every attempt: a restart can atomically replace the descriptor and its port.
     // Invalid permissions, identity, ownership, or a dead process remain immediate failures.
     const descriptor = readDescriptor();
+    if (options.isOwnerRunning && !options.isOwnerRunning(descriptor)) {
+      throw new Error("Launcher browser host exited before its CDP endpoint became ready");
+    }
     expectedProfile ??= descriptor.profile;
     if (descriptor.profile !== expectedProfile) {
       throw new Error(`Launcher browser belongs to ${descriptor.profile}, but ${expectedProfile} was required`);
@@ -99,9 +111,10 @@ export async function waitForLauncherCdp<T extends CdpHostDescriptor>(
     if (options.signal?.aborted) cancel();
     const timer = setTimeout(cancel, Math.min(1_000, remaining));
     try {
-      const response = await fetch(`${endpoint.origin}/json/version`, {
+      const response = await (options.fetchImpl ?? fetch)(`${endpoint.origin}/json/version`, {
         signal: controller.signal,
         redirect: "manual",
+        cache: "no-store",
       });
       if (!response.ok) {
         await response.body?.cancel();
@@ -114,14 +127,17 @@ export async function waitForLauncherCdp<T extends CdpHostDescriptor>(
         try { body = await response.json(); }
         catch (error) {
           if (controller.signal.aborted) throw error;
-          throw new InvalidCdpMetadataError("Launcher CDP endpoint returned invalid JSON");
+          throw new InvalidCdpMetadataError("CDP metadata is not valid JSON");
         }
-        validateMetadata(body, endpoint);
+        const webSocketDebuggerUrl = validateMetadata(body, endpoint);
         if (controller.signal.aborted || performance.now() >= deadline) {
           throw new DOMException("CDP probe timed out", "AbortError");
         }
         aborted(options.signal);
-        return descriptor;
+        if (options.isOwnerRunning && !options.isOwnerRunning(descriptor)) {
+          throw new InvalidCdpMetadataError("Launcher browser host exited during CDP readiness verification");
+        }
+        return { descriptor, webSocketDebuggerUrl };
       }
     } catch (error) {
       aborted(options.signal);
@@ -140,4 +156,12 @@ export async function waitForLauncherCdp<T extends CdpHostDescriptor>(
     `Launcher browser CDP endpoint is not ready after ${timeoutMs}ms (${attempts} attempts): ${detail}. `
     + "Keep Maria open and retry setup. If this persists, restart Maria and export its privacy-safe log.",
   );
+}
+
+/** Metadata-only callers share the exact same ownership, deadline and retry checks. */
+export async function waitForLauncherCdp<T extends CdpHostDescriptor>(
+  readDescriptor: () => T,
+  options: CdpReadinessOptions<T> = {},
+): Promise<T> {
+  return (await waitForLauncherCdpConnection(readDescriptor, options)).descriptor;
 }
