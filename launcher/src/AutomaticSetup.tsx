@@ -1,64 +1,151 @@
 import { useEffect, useRef, useState } from "react";
 import type { LauncherSnapshot, Surface } from "./types";
-import { createAutomaticSetup, type AutomaticSetupState } from "./automatic-setup";
+import { createAutomaticSetup, type AutomaticSetupState, type SetupPhase } from "./automatic-setup";
 import { describeSetupError } from "./setup-errors";
+import { setupRecoveryKind } from "./setup-recovery";
+import { guidedCopy } from "./guided-copy";
+import { guidedSetupSteps, setupEvidenceKey } from "./guided-setup-view";
+import { useConnectionStatus } from "./useConnectionStatus";
 import { Icon } from "./icons";
 import "./automatic-setup.css";
 
-const labels = {
-  en: {
-    title: "Automatic setup", check: "Check again", start: "Set up automatically", resume: "Continue setup", pause: "Pause setup", details: "Technical details",
-    hint: "Maria handles installation and connection checks. Only sign-in, account permissions, and reopening Codex may need you.",
-    phases: { idle: "Ready when you are", checking: "Checking your existing setup", busy: "Waiting for the current operation or task to finish", "sign-in": "Sign in to ChatGPT; setup continues afterwards", review: "Complete the browser verification before continuing", credentials: "Add your tool credentials once in Tools", installing: "Installing and checking the runtime", codex: "Finish active work, reopen Codex, and open its model picker", connector: "Check the ChatGPT connector in Tools, then continue", verifying: "Verifying the connection", ready: "Setup verified and ready", paused: "Paused; any running installation finishes safely", error: "Setup needs attention" },
-  },
-  "zh-CN": {
-    title: "自动设置", check: "再次检查", start: "自动完成设置", resume: "继续设置", pause: "暂停设置", details: "技术详情",
-    hint: "Maria 自动安装并检查连接。登录、账户权限以及重新打开 Codex 可能需要你操作。",
-    phases: { idle: "准备就绪", checking: "正在检查已有设置", busy: "等待当前操作或任务完成", "sign-in": "请登录 ChatGPT，随后自动继续", review: "请先完成浏览器验证", credentials: "请在工具中添加一次凭据", installing: "正在安装并检查运行时", codex: "完成当前工作后重新打开 Codex 并打开模型选择器", connector: "请在工具中检查 ChatGPT 连接器后继续", verifying: "正在验证连接", ready: "设置已验证并就绪", paused: "已暂停，正在进行的安装将安全完成", error: "设置需要处理" },
-  },
-  ja: {
-    title: "自動セットアップ", check: "再確認", start: "自動でセットアップ", resume: "セットアップを続ける", pause: "一時停止", details: "技術的な詳細",
-    hint: "Maria がインストールと接続確認を行います。ログイン、アカウント権限、Codex の再起動のみ操作が必要な場合があります。",
-    phases: { idle: "準備完了", checking: "既存の設定を確認中", busy: "現在の操作またはタスクの完了待ち", "sign-in": "ChatGPT にログインすると続行します", review: "ブラウザーの認証を完了してください", credentials: "ツールで認証情報を一度登録してください", installing: "ランタイムのインストールと確認中", codex: "作業完了後に Codex を開き直しモデル選択を開いてください", connector: "ツールで ChatGPT コネクターを確認して続行してください", verifying: "接続を検証中", ready: "セットアップの検証完了", paused: "一時停止中。進行中のインストールは安全に完了します", error: "セットアップの確認が必要です" },
-  },
-};
-
-/** Stays mounted across navigation so signing in never loses the setup intent. */
-export function AutomaticSetup({ snapshot, surface, navigate, clearError }: {
-  snapshot: LauncherSnapshot; surface: Surface; navigate: (surface: Surface) => void; clearError: () => void;
+/** One controller for the entire shell. Navigation never abandons a setup transaction. */
+export function AutomaticSetup({ snapshot, surface, navigate, clearError, startOnMount = false }: {
+  snapshot: LauncherSnapshot; surface: Surface; navigate: (surface: Surface) => void;
+  clearError: () => void; startOnMount?: boolean;
 }) {
   const [state, setState] = useState<AutomaticSetupState>({ phase: "idle", active: false });
+  const [wantTools, setWantTools] = useState(false);
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
   const controller = useRef<ReturnType<typeof createAutomaticSetup> | null>(null);
-  const text = labels[snapshot.state.language ?? "en"];
+  const initialIntentConsumed = useRef(false);
+  const { status, error: connectionError } = useConnectionStatus();
+  const text = guidedCopy(snapshot.state.language);
+  const evidence = setupEvidenceKey(snapshot);
+  const lastEvidence = useRef(evidence);
+  const expanded = surface === "home";
+
   useEffect(() => {
     const api = window.codexWebLauncher;
     if (!api) return;
-    const setup = createAutomaticSetup({ api, publish: setState, navigate: next => navigateRef.current(next) });
+    const setup = createAutomaticSetup({ api, publish: setState,
+      navigate: next => navigateRef.current(next === "setup" ? "home" : next) });
     controller.current = setup;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const changed = () => {
-      if (setup.getState().active) void setup.resume();
+      if (!setup.getState().active || timer !== undefined) return;
+      // Coalesce the state/browser/operation events from a single commit.
+      timer = setTimeout(() => { timer = undefined; void setup.resume(); }, 100);
     };
-    const subscriptions = [api.onStateChanged(changed), api.onBrowserState(changed), api.onOperation(changed)];
-    return () => { subscriptions.forEach(unsubscribe => unsubscribe()); setup.dispose(); controller.current = null; };
+    const subscriptions = [api.onStateChanged(changed), api.onBrowserState(changed), api.onOperation(operation => { setup.observeOperation(operation); changed(); })];
+    return () => {
+      clearTimeout(timer);
+      subscriptions.forEach(unsubscribe => unsubscribe());
+      setup.dispose(); controller.current = null; initialIntentConsumed.current = false;
+    };
   }, []);
-  const visible = state.phase !== "idle" || surface === "home" || surface === "setup";
-  if (!visible) return null;
+
+  useEffect(() => {
+    // The main-process state event can arrive before completeOnboarding's IPC
+    // reply. Observe the explicit start intent even if this shell is mounted.
+    if (startOnMount && !initialIntentConsumed.current && controller.current) {
+      initialIntentConsumed.current = true;
+      void controller.current.start();
+    }
+  }, [startOnMount]);
+
+  useEffect(() => {
+    const setup = controller.current;
+    if (lastEvidence.current !== evidence) {
+      lastEvidence.current = evidence;
+      setup?.invalidate();
+    }
+    if (!startOnMount && snapshot.state.coreSetupComplete && setup?.getState().phase === "idle") {
+      void setup.inspect();
+    }
+  }, [evidence, startOnMount, snapshot.state.coreSetupComplete]);
+
+  useEffect(() => {
+    if (connectionError || (status && !status.nativeAvailable && snapshot.profile !== "development")) {
+      controller.current?.invalidate();
+    }
+  }, [status, connectionError, snapshot.profile]);
+
   const pending = ["checking", "installing", "verifying"].includes(state.phase);
+  const locked = state.active || pending || snapshot.operation?.status === "running";
+  const savedTools = snapshot.mcpCredentialsConfigured || snapshot.state.mcpRuntimeInstalled === true;
+  const manual = snapshot.state.browserInteractionMode === "manual";
+  const canChoose = !savedTools && !manual && snapshot.profile !== "development";
+  const steps = guidedSetupSteps(snapshot, state.phase, canChoose ? wantTools : state.toolsRequested);
+  const done = steps.filter(step => step.done).length;
   const failure = state.error ? describeSetupError(state.error, snapshot.state.language) : null;
-  return <section className={`automatic-setup is-${state.phase}`} aria-label={text.title}>
-    <Icon name={state.phase === "ready" ? "check" : "setup"} />
-    <div className="automatic-setup-copy">
-      <strong>{text.title}</strong>
-      <p role="status" aria-live="polite">{text.phases[state.phase]}</p>
-      {state.phase === "idle" ? <small>{text.hint}</small> : null}
-      {failure ? <div role="alert"><p><strong>{failure.title}</strong> — {failure.message}</p><details><summary>{text.details}</summary><pre>{failure.detail}</pre></details></div> : null}
-    </div>
-    <div className="automatic-setup-actions">
-      <button className="button-primary" disabled={pending || snapshot.operation?.status === "running"}
-        onClick={() => { clearError(); void controller.current?.continue(); }}>{state.phase === "ready" ? text.check : state.phase === "idle" ? text.start : text.resume}</button>
-      {state.active ? <button className="text-button" onClick={() => controller.current?.pause()}>{text.pause}</button> : null}
-    </div>
+  const retryable = state.error ? setupRecoveryKind(state.error) !== null : false;
+  const phaseCopy: Record<SetupPhase, [string, string]> = {
+    idle: [snapshot.state.coreSetupComplete ? text.check : text.setup, text.setupBody],
+    checking: [text.checking, text.checkingBody], busy: [text.busy, text.busyBody],
+    "sign-in": [text.signIn, text.signInBody], review: [text.review, text.reviewBody],
+    credentials: [text.credentials, text.credentialsBody], installing: [text.installing, text.installingBody],
+    codex: [text.codex, text.codexBody], connector: [text.connector, text.connectorBody],
+    verifying: [text.verifying, text.verifyingBody], ready: [text.ready, text.readyBody],
+    paused: [text.paused, text.pausedBody], error: [failure?.title ?? text.attention, failure?.message ?? text.reviewDetails],
+  };
+  const [title, body] = phaseCopy[state.phase];
+  const stepNames = { account: text.stepAccount, runtime: text.stepRuntime, codex: text.stepCodex, tools: text.stepTools, check: text.stepCheck };
+  const continueSetup = () => {
+    clearError();
+    if (state.active) void controller.current?.continue();
+    else void controller.current?.start({ toolsRequested: canChoose ? wantTools : state.toolsRequested });
+  };
+  const action = () => {
+    if (!expanded) { navigate("home"); return; }
+    if (state.phase === "sign-in" || state.phase === "review") { navigate("browser"); return; }
+    if (state.phase === "credentials" || state.phase === "connector") { navigate("mcp"); return; }
+    if (state.phase === "ready") { navigate("browser"); return; }
+    if (state.phase === "error" && !retryable) {
+      navigate(failure?.kind === "signIn" ? "browser" : failure?.kind === "credentials" ? "mcp" : "activity");
+      return;
+    }
+    continueSetup();
+  };
+  const actionLabel = !expanded ? text.backHome : state.phase === "sign-in" ? text.openSignIn
+    : state.phase === "review" ? text.openReview : state.phase === "credentials" ? text.openTools
+    : state.phase === "connector" ? text.openTools : state.phase === "ready" ? text.openChat
+    : state.phase === "error" && !retryable ? text.reviewDetails
+    : state.phase === "codex" ? text.reopened : state.phase === "idle" ? snapshot.state.coreSetupComplete ? text.check : text.start : text.continue;
+  if (!expanded && state.phase === "idle") return null;
+  return <section className={`automatic-setup guided-setup is-${state.phase}${expanded ? " is-expanded" : " is-compact"}`}
+    aria-label={text.setup} aria-busy={pending}>
+    <div className="guided-setup-topline"><span className="guided-wordmark"><Icon name="setup" /> MARIA CONNECT</span>
+      <span className={`guided-status is-${state.phase}`}><i />{state.phase === "ready" ? text.done : state.active ? text.automaticStep : manual ? text.manual : text.automatic}</span></div>
+    <div className="guided-setup-intro"><div><h1 role="status" aria-live="polite">{title}</h1><p>{body}</p></div>
+      {expanded ? <div className={`guided-connection-symbol ${pending ? "is-busy" : ""}`} aria-hidden="true"><Icon name={state.phase === "ready" ? "check" : "globe"} /></div> : null}</div>
+    {expanded ? <>
+      {canChoose && ["idle", "paused"].includes(state.phase) ? <fieldset className="guided-targets" disabled={locked}>
+        <legend>{text.target}</legend><div>
+          <label className={!wantTools ? "is-selected" : ""}><input type="radio" name="setup-target" value="chat" checked={!wantTools} onChange={() => setWantTools(false)} />
+            <span><strong>{text.basic}</strong><small>{text.basicBody}</small></span></label>
+          <label className={wantTools ? "is-selected" : ""}><input type="radio" name="setup-target" value="tools" checked={wantTools} onChange={() => setWantTools(true)} />
+            <span><strong>{text.full}</strong><small>{text.fullBody}</small></span></label>
+        </div></fieldset> : null}
+      {savedTools ? <p className="guided-preserved"><Icon name="check" />{text.saved}<span>{text.preserved}</span></p> : null}
+      <div className="guided-progress-heading"><strong>{text.progress}</strong><span>{done}/{steps.length} {text.stepsComplete}</span></div>
+      <ol className="guided-steps" aria-label={text.progress}>{steps.map((step, index) => <li key={step.id} className={step.current ? "is-current" : step.done ? "is-done" : ""} aria-current={step.current ? "step" : undefined}>
+        <span className="guided-step-marker" aria-hidden="true">{step.done && !step.current ? <Icon name="check" /> : String(index + 1).padStart(2, "0")}</span>
+        <span><strong>{stepNames[step.id]}</strong><small>{step.current ? text.current : step.done ? text.done : text.upcoming}</small></span>
+      </li>)}</ol>
+      {failure ? <details className="guided-error-details"><summary>{text.details}</summary><pre>{failure.detail}</pre></details> : null}
+    </> : null}
+    <div className="guided-setup-footer"><div className="automatic-setup-actions">
+      <button className="button-primary" type="button" disabled={expanded && (pending || (snapshot.operation?.status === "running" && !state.active))} onClick={action}>
+        {actionLabel}<Icon name={pending ? "reload" : "forward"} /></button>
+      {state.active ? <button className="text-button" type="button" onClick={() => controller.current?.pause()}>{text.pause}</button>
+        : state.phase === "ready" && expanded ? <>
+          <button className="text-button" type="button" onClick={continueSetup}>{text.check}</button>
+          {canChoose ? <button className="text-button" type="button" onClick={() => {
+            clearError(); setWantTools(true); void controller.current?.start({ toolsRequested: true });
+          }}>{text.optionalTools}</button> : null}
+        </> : null}
+    </div>{expanded ? <small className="guided-privacy"><Icon name="check" />{text.privacy}</small> : null}</div>
   </section>;
 }

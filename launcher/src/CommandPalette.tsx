@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "./icons";
 import { copyFor } from "./i18n";
+import { guidedCopy } from "./guided-copy";
 import { studioCopy } from "./studio-copy";
 import type { Language, Surface } from "./types";
 
@@ -12,16 +13,17 @@ export function CommandPalette({ open, close, navigate, language }: {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
   const c = copyFor(language);
+  const guided = guidedCopy(language);
   const s = studioCopy(language);
   const pages: { id: Surface; label: string; icon: IconName }[] = [
     { id: "home", label: c.overview, icon: "globe" },
     { id: "browser", label: c.browser, icon: "browser" },
-    { id: "setup", label: c.setup, icon: "setup" },
-    { id: "mcp", label: s.tools, icon: "mcp" },
+    { id: "setup", label: guided.connection, icon: "setup" },
+    { id: "mcp", label: guided.stepTools, icon: "mcp" },
     { id: "activity", label: c.activity, icon: "activity" },
     { id: "settings", label: c.settings, icon: "settings" },
     { id: "updates", label: language === "en" ? "Updates" : language === "ja" ? "アップデート" : "更新", icon: "update" },
-    { id: "guide", label: c.guide, icon: "logs" },
+    { id: "guide", label: guided.help, icon: "logs" },
   ];
   const results = pages.filter(page => page.label.toLocaleLowerCase().includes(query.toLocaleLowerCase().trim()));
   useEffect(() => {

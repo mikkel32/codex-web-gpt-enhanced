@@ -142,3 +142,157 @@ test("setup errors separate browser failure from version recovery and redact key
   assert.ok(!setupErrorDetail("key sk-proj-SECRET Bearer SECRET-TOKEN").includes("SECRET"));
   assert.ok(describeSetupError("Config requires 5.13.5", "ja").title.length > 0);
 });
+
+function configuredFixture() {
+  const f = fixture();
+  f.current.state.coreSetupComplete = true;
+  f.current.state.codexCatalogVerified = true;
+  f.current.state.codexRestartRequired = false;
+  return f;
+}
+
+test("a clean Automatic tools request establishes the Codex prerequisite before collecting credentials", async () => {
+  const f = fixture();
+  await f.setup.start({ toolsRequested: true });
+  assert.deepEqual(f.calls, ["core"]);
+  assert.equal(f.setup.getState().phase, "codex");
+  f.current.state.codexCatalogVerified = true;
+  await f.setup.resume();
+  assert.equal(f.setup.getState().phase, "credentials");
+  assert.deepEqual(f.calls, ["core"]);
+  // The credential form owns the external install, then emits its committed state.
+  f.current.mcpCredentialsConfigured = true;
+  f.current.state.mcpRuntimeInstalled = true;
+  await f.setup.resume();
+  assert.deepEqual(f.calls, ["core", "verify-mcp", "doctor"]);
+  assert.equal(f.setup.getState().phase, "ready");
+});
+
+test("existing Full, manual and DEV profiles never install Browser-only to work around missing credentials", async () => {
+  for (const kind of ["full", "manual", "dev"] as const) {
+    const f = fixture();
+    if (kind === "full") f.current.state.mcpRuntimeInstalled = true;
+    if (kind === "manual") f.current.state.browserInteractionMode = "manual";
+    if (kind === "dev") f.current.profile = "development";
+    await f.setup.start({ toolsRequested: true });
+    assert.equal(f.setup.getState().phase, "credentials", kind);
+    assert.deepEqual(f.calls, [], kind);
+  }
+});
+
+test("the optional tool target can be deselected after pausing without changing saved Full configuration", async () => {
+  const f = configuredFixture();
+  await f.setup.start({ toolsRequested: true });
+  assert.equal(f.setup.getState().phase, "credentials");
+  f.setup.pause();
+  await f.setup.start({ toolsRequested: false });
+  assert.equal(f.setup.getState().phase, "ready");
+  assert.deepEqual(f.calls, ["doctor"]);
+  assert.equal(f.setup.getState().toolsRequested, false);
+});
+
+test("a credential form failure halts automatic setup without retrying the external mutation", async () => {
+  const f = configuredFixture();
+  await f.setup.start({ toolsRequested: true });
+  f.setup.observeOperation({ name: "mcp-setup", status: "failed", message: "Authorization denied" });
+  f.current.mcpCredentialsConfigured = true;
+  await f.setup.resume();
+  assert.equal(f.setup.getState().phase, "error");
+  assert.equal(f.setup.getState().active, false);
+  assert.deepEqual(f.calls, []);
+});
+
+test("an unrelated operation failure does not abandon a waiting setup", async () => {
+  const f = configuredFixture();
+  await f.setup.start({ toolsRequested: true });
+  f.setup.observeOperation({ name: "update-check", status: "failed", message: "Offline" });
+  assert.equal(f.setup.getState().phase, "credentials");
+  assert.equal(f.setup.getState().active, true);
+});
+
+test("returning users are verified read-only without login, navigation or setup writes", async () => {
+  const f = configuredFixture();
+  await f.setup.inspect();
+  assert.equal(f.setup.getState().phase, "ready");
+  assert.deepEqual(f.calls, ["doctor"]);
+  assert.deepEqual(f.surfaces, []);
+  assert.equal(f.setup.getState().active, false);
+});
+
+test("read-only checking never repairs an unhealthy, signed-out or incomplete installation", async () => {
+  for (const mode of ["offline", "doctor", "signed-out", "restart", "tools", "busy"] as const) {
+    const f = configuredFixture();
+    if (mode === "offline") f.api.connectionStatus = async () => ({ nativeAvailable: false, browserConnected: true, activeBrowserTurns: 0 });
+    if (mode === "doctor") f.api.doctor = async () => ({ ok: false, checks: [] });
+    if (mode === "signed-out") f.current.browser!.authenticated = false;
+    if (mode === "restart") f.current.state.codexRestartRequired = true;
+    if (mode === "tools") f.current.mcpCredentialsConfigured = true;
+    if (mode === "busy") f.current.operation = { name: "core-setup", status: "running", message: "Installing" };
+    await f.setup.inspect();
+    assert.equal(f.setup.getState().phase, "idle", mode);
+    assert.equal(f.calls.some(call => ["core", "mcp", "login", "verify-mcp"].includes(call)), false, mode);
+    assert.deepEqual(f.surfaces, [], mode);
+  }
+});
+
+test("a sign-out during read-only checking cannot be overwritten by a successful old report", async () => {
+  const f = configuredFixture();
+  f.api.doctor = async () => { f.current.browser!.authenticated = false; return { ok: true, checks: [] }; };
+  await f.setup.inspect();
+  assert.equal(f.setup.getState().phase, "idle");
+  assert.ok(!f.phases.includes("ready"));
+});
+
+test("invalidating an in-flight read-only check discards its late result", async () => {
+  const f = configuredFixture();
+  f.api.doctor = async () => { f.setup.invalidate(); return { ok: true, checks: [] }; };
+  await f.setup.inspect();
+  assert.equal(f.setup.getState().phase, "idle");
+  assert.ok(!f.phases.includes("ready"));
+});
+
+test("readiness invalidation never starts work", async () => {
+  const f = configuredFixture(); await f.setup.inspect();
+  f.setup.invalidate(); await f.setup.resume();
+  assert.equal(f.setup.getState().phase, "idle");
+  assert.deepEqual(f.calls, ["doctor"]);
+});
+
+test("active final verification rejects changed authentication, permissions, mode and catalog", async () => {
+  for (const change of ["auth", "access", "mode", "catalog", "profile"] as const) {
+    const f = configuredFixture();
+    f.api.doctor = async () => {
+      if (change === "auth") f.current.browser!.authenticated = false;
+      if (change === "access") f.current.browser!.webAccess = { status: "paused", reason: "authorization", detectedAt: "2026-09-07", retryAt: null, incidents: 1, canResume: false };
+      if (change === "mode") f.current.state.browserInteractionMode = "manual";
+      if (change === "catalog") f.current.state.codexCatalogVerified = false;
+      if (change === "profile") f.current.profile = "development";
+      return { ok: true, checks: [] };
+    };
+    await f.setup.start();
+    assert.equal(f.setup.getState().phase, "error", change);
+    assert.ok(!f.phases.includes("ready"), change);
+  }
+});
+
+test("browser testing and live transport turns block automatic mutations", async () => {
+  for (const mode of ["browser-testing", "tab-testing", "transport-active"] as const) {
+    const f = configuredFixture();
+    if (mode === "browser-testing") f.current.browser!.status = "testing";
+    if (mode === "tab-testing") f.current.browser!.tabs = [{ status: "testing" }] as NonNullable<LauncherSnapshot["browser"]>["tabs"];
+    if (mode === "transport-active") f.api.connectionStatus = async () => ({ nativeAvailable: false, browserConnected: true, activeBrowserTurns: 1 });
+    await f.setup.start();
+    assert.equal(f.setup.getState().phase, "busy", mode);
+    assert.deepEqual(f.calls, [], mode);
+  }
+});
+
+test("concurrent read-only checks share one flight and disposal discards completion", async () => {
+  const f = configuredFixture();
+  await Promise.all([f.setup.inspect(), f.setup.inspect(), f.setup.inspect()]);
+  assert.deepEqual(f.calls, ["doctor"]);
+  f.api.doctor = async () => { f.setup.dispose(); return { ok: true, checks: [] }; };
+  f.phases.length = 0;
+  await f.setup.inspect();
+  assert.ok(!f.phases.includes("ready"));
+});

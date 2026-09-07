@@ -13,7 +13,8 @@ import { copyFor, type Copy } from "./i18n";
 import { setupRecoveryCopy, setupRecoveryKind } from "./setup-recovery";
 import { Icon, type IconName } from "./icons";
 import { MariaHome, MADE_WITH_LOVE } from "./MariaHome";
-import { GuideLoader } from "./GuideLoader";
+import { HelpCenter } from "./HelpCenter";
+import { guidedCopy } from "./guided-copy";
 import { createBootstrapOverlay } from "./bootstrap-overlay";
 import { MariaUpdates } from "./MariaUpdates";
 import { AutomaticSetup } from "./AutomaticSetup";
@@ -52,6 +53,7 @@ export function App() {
   const [operation, setOperation] = useState<OperationState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [bootAttempt, setBootAttempt] = useState(0);
+  const [beginSetup, setBeginSetup] = useState(false);
   const [repairingSetup, setRepairingSetup] = useState(false);
   const repairSetupPending = useRef(false);
   const documentLanguage = snapshot?.state.language ?? "en";
@@ -151,6 +153,7 @@ export function App() {
       <AnimatePresence mode="wait">
         {!snapshot.state.onboardingComplete ? (
           <Onboarding
+            onStart={() => setBeginSetup(true)}
             key="onboarding"
             language={language}
             setError={setError}
@@ -159,6 +162,7 @@ export function App() {
           />
         ) : (
           <LauncherShell
+            startSetupOnMount={beginSetup}
             hasError={Boolean(error)}
             browser={browser}
             copy={copy}
@@ -178,46 +182,64 @@ export function App() {
   );
 }
 
-function Onboarding({ language, setError, snapshot, updateState }: {
+function Onboarding({ language, setError, snapshot, updateState, onStart }: {
   language: Language; setError: (error: string | null) => void; snapshot: LauncherSnapshot;
-  updateState: (state: LauncherState) => void;
+  updateState: (state: LauncherState) => void; onStart: () => void;
 }) {
   const [selectedLanguage, setSelectedLanguage] = useState<Language>(language);
   const [selectedInteractionMode, setSelectedInteractionMode] = useState<BrowserInteractionMode>(
     snapshot.state.browserInteractionMode,
   );
   const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
   const localized = copyFor(selectedLanguage);
-  const s = studioCopy(selectedLanguage);
+  const text = guidedCopy(selectedLanguage);
   const finish = async () => {
+    if (submitting.current) return;
+    submitting.current = true;
     setBusy(true); setError(null);
-    try { updateState(await api!.completeOnboarding(selectedLanguage, selectedInteractionMode)); }
-    catch (cause) { setError(messageOf(cause)); }
-    finally { setBusy(false); }
+    try {
+      const next = await api!.completeOnboarding(selectedLanguage, selectedInteractionMode);
+      onStart(); updateState(next);
+    } catch (cause) { setError(messageOf(cause)); }
+    finally { submitting.current = false; setBusy(false); }
   };
-  return <motion.main className="welcome studio-welcome" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+  return <motion.main className="welcome studio-welcome guided-welcome" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
     <header className="welcome-top draggable"><div className="welcome-brand no-drag"><BrandMark small /><span>Maria</span></div><span className="welcome-version">v{snapshot.version}</span></header>
-    <div className="studio-welcome-grid">
-      <section className="studio-welcome-story"><span className="maria-eyebrow">YOUR WORK. CONNECTED.</span><CinematicMark large />
-        <KineticHeading text={s.welcomeTitle} /><p>{s.welcomeBody}</p><div className="studio-welcome-capabilities"><span><Icon name="setup" />Codex</span><i /><span><Icon name="globe" />ChatGPT</span><i /><span><McpMark />{s.tools}</span></div>
+    <div className="guided-welcome-layout">
+      <section className="guided-welcome-story">
+        <span className="maria-eyebrow">MARIA WEBGPT</span>
+        <h1>{text.welcome}</h1><p>{text.welcomeBody}</p>
+        <div className="guided-preview" aria-label={text.progress}>
+          <div className="guided-preview-title"><span className="guided-preview-mark"><Icon name="setup" /></span><strong>Maria Connect</strong><span>{text.automaticStep}</span></div>
+          <div><Icon name="browser" /><span>{text.stepAccount}</span><small>{text.yourStep}</small></div>
+          <div><Icon name="setup" /><span>{text.stepRuntime}</span><small>{text.automaticStep}</small></div>
+          <div><Icon name="check" /><span>{text.stepCheck}</span><small>{text.automaticStep}</small></div>
+        </div>
+        <p className="guided-welcome-trust"><Icon name="check" />{text.welcomeNote}</p>
       </section>
-      <section className="studio-welcome-options"><span className="maria-eyebrow">WELCOME TO MARIA</span><h2>{s.preferences}</h2><p>{s.preferencesBody}</p>
-        <fieldset disabled={busy}><legend>{s.language}</legend><div className="studio-language-picker" role="radiogroup" aria-label={localized.chooseLanguage}>
+      <section className="guided-welcome-options">
+        <span className="maria-eyebrow">01 / MARIA CONNECT</span><h2>{text.setup}</h2><p>{text.setupBody}</p>
+        <fieldset disabled={busy}><legend>{localized.language}</legend><div className="studio-language-picker" role="radiogroup" aria-label={localized.chooseLanguage}>
           {([["en", "English"], ["zh-CN", "简体中文"], ["ja", "日本語"]] as const).map(([id, label]) =>
             <button key={id} type="button" role="radio" aria-checked={selectedLanguage === id} className={selectedLanguage === id ? "is-selected" : ""}
               onClick={() => setSelectedLanguage(id)}>{label}{selectedLanguage === id ? <Icon name="check" /> : null}</button>)}
         </div></fieldset>
-        <fieldset disabled={busy}><legend>{s.behavior}</legend><InteractionModePicker className="welcome-interaction-mode-picker" copy={localized} disabled={busy}
-          mode={selectedInteractionMode} onChange={setSelectedInteractionMode} /></fieldset>
-        <button className="button-primary studio-welcome-start" disabled={busy} onClick={() => void finish()}>{busy ? localized.running : s.getStarted}<Icon name="forward" /></button>
-        <p className="studio-welcome-note"><Icon name="check" />{s.nativeAvailable}</p>
+        <fieldset disabled={busy}><legend>{localized.interactionMode}</legend>
+          <InteractionModePicker className="welcome-interaction-mode-picker" copy={localized} disabled={busy}
+            mode={selectedInteractionMode} onChange={setSelectedInteractionMode} />
+          <p className="guided-field-hint">{text.choiceHint}</p>
+        </fieldset>
+        <button type="button" className="button-primary guided-welcome-start" disabled={busy} onClick={() => void finish()}>{busy ? localized.running : text.welcomeAction}<Icon name="forward" /></button>
+        <p className="guided-field-hint">{text.preserved}</p>
       </section>
     </div>
-    <footer className="studio-welcome-footer"><span>{MADE_WITH_LOVE}</span><span>MARIA WEBGPT / {snapshot.profile === "development" ? "DEV" : "DESKTOP"}</span></footer>
+    <footer className="studio-welcome-footer"><span>{MADE_WITH_LOVE}</span><span>{snapshot.profile === "development" ? "DEV" : "DESKTOP"} / MARIA WEBGPT</span></footer>
   </motion.main>;
 }
 
 function LauncherShell({
+  startSetupOnMount,
   hasError,
   browser,
   copy,
@@ -227,6 +249,7 @@ function LauncherShell({
   snapshot,
   updateState,
 }: {
+  startSetupOnMount: boolean;
   hasError: boolean;
   browser: BrowserState | null;
   copy: Copy;
@@ -236,12 +259,17 @@ function LauncherShell({
   snapshot: LauncherSnapshot;
   updateState: (state: LauncherState) => void;
 }) {
+  const guided = guidedCopy(language);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const interactionSetupComplete = snapshot.state.coreSetupComplete === true
     && (snapshot.state.browserInteractionMode === "manual"
       || snapshot.state.codexCatalogVerified === true);
   const [surface, setSurfaceState] = useState<Surface>("home");
   const [surfaceReady, setSurfaceReady] = useState(false);
   const surfaceRef = useRef<Surface>("home");
+  useEffect(() => {
+    if (["setup", "mcp"].includes(surface)) setAdvancedOpen(true);
+  }, [surface]);
   const workspaceRef = useRef<HTMLElement | null>(null);
   const scrollPositions = useRef(new Map<Surface, number>());
   const reducedMotion = useReducedMotion();
@@ -303,7 +331,8 @@ function LauncherShell({
   const mcpOptional = snapshot.state.browserInteractionMode === "automatic"
     && snapshot.state.codexCatalogVerified === true
     && snapshot.state.mcpSetupComplete !== true;
-  const updateVisible = "version" in snapshot.update && Boolean(snapshot.update.version);
+  const updateVisible = ["available", "downloading", "installing"].includes(snapshot.update.status)
+    && "version" in snapshot.update && Boolean(snapshot.update.version);
   const updateBusy = snapshot.update.status === "downloading" || snapshot.update.status === "installing";
   const updateVersion = "version" in snapshot.update ? snapshot.update.version : null;
   const selectedManualTab = browser?.tabs.find(tab => tab.active && tab.interactionMode === "manual");
@@ -414,7 +443,7 @@ function LauncherShell({
     >
       <TitleBar
         surface={surface}
-        title={surface === "home" ? copy.overview : surface === "browser" ? copy.browser : surface === "setup" ? copy.setup : surface === "mcp" ? studio.tools : surface === "activity" ? copy.activity : surface === "settings" ? copy.settings : surface === "guide" ? copy.guide : "Updates"}
+        title={surface === "home" ? copy.overview : surface === "browser" ? copy.browser : surface === "setup" ? guided.connection : surface === "mcp" ? studio.tools : surface === "activity" ? copy.activity : surface === "settings" ? copy.settings : surface === "guide" ? guided.help : guided.updates}
         openCommands={() => setCommandOpen(true)}
         copy={copy}
         devProfile={devProfile}
@@ -457,50 +486,31 @@ function LauncherShell({
             <button className="studio-command-trigger" title={`${studio.command} (⌘ K)`} aria-label={studio.command} onClick={() => setCommandOpen(true)}><Icon name="globe" /><span>{studio.command}</span><kbd>{snapshot.platform === "darwin" ? "⌘ K" : "Ctrl K"}</kbd></button>
             <nav className="sidebar-nav" aria-label={copy.workspace}>
               <SidebarGroup label={copy.workspace}>
-                <SidebarItem active={surface === "home"} icon="globe" label={copy.overview} onClick={() => navigateSurface("home")} />
-                <SidebarItem
-                  active={surface === "browser"}
-                  badge={needsBrowser
-                    ? <ActionDot pulse tone="required" />
-                    : browser?.status === "error"
-                      ? <ActionDot tone="error" />
-                      : null}
-                  icon="browser"
-                  label={copy.browser}
-                  onClick={() => navigateSurface("browser")}
-                />
+                <SidebarItem active={surface === "home"} icon="globe" label={guided.home} onClick={() => navigateSurface("home")} />
+                <SidebarItem active={surface === "browser"} icon="browser" label={guided.chat}
+                  badge={needsBrowser ? <ActionDot tone="required" /> : browser?.status === "error" ? <ActionDot tone="error" /> : null}
+                  onClick={() => navigateSurface("browser")} />
+                <SidebarItem active={surface === "activity"} icon="activity" label={guided.activity} onClick={() => navigateSurface("activity")} />
               </SidebarGroup>
-              <SidebarGroup label={copy.configuration}>
-                <SidebarItem
-                  active={surface === "setup"}
-                  badge={needsSetup ? <ActionDot pulse tone="required" /> : null}
-                  icon="setup"
-                  label={copy.setup}
-                  onClick={() => navigateSurface("setup")}
-                />
-                <SidebarItem
-                  active={surface === "mcp"}
-                  badge={mcpOptional ? <ActionDot tone="optional" /> : null}
-                  icon="mcp"
-                  label={studio.tools}
-                  onClick={() => {
-                    setMcpTargetMode(null);
-                    navigateSurface("mcp");
-                  }}
-                />
-              </SidebarGroup>
-              <SidebarGroup label={copy.runtime}>
-                <SidebarItem active={surface === "activity"} icon="activity" label={copy.activity} onClick={() => navigateSurface("activity")} />
-                <SidebarItem active={surface === "guide"} icon="logs" label={copy.guide} onClick={() => navigateSurface("guide")} />
-              </SidebarGroup>
+              <details className="guided-advanced-nav" open={advancedOpen} onToggle={event => setAdvancedOpen(event.currentTarget.open)}>
+                <summary title={guided.advanced}><Icon name="settings" /><span>{guided.advanced}</span><Icon name="chevron" /></summary>
+                <div>
+                  <SidebarItem active={surface === "setup"} icon="setup" label={guided.connection}
+                    badge={needsSetup ? <ActionDot tone="required" /> : null} onClick={() => navigateSurface("setup")} />
+                  <SidebarItem active={surface === "mcp"} icon="mcp" label={guided.stepTools}
+                    badge={mcpOptional ? <ActionDot tone="optional" /> : null}
+                    onClick={() => { setMcpTargetMode(null); navigateSurface("mcp"); }} />
+                </div>
+              </details>
+              <SidebarItem active={surface === "guide"} icon="logs" label={guided.help} onClick={() => navigateSurface("guide")} />
             </nav>
 
             <div className="sidebar-footer">
-              <div className="studio-sidebar-status"><span className={`studio-indicator ${browser?.webAccess?.status === "paused" ? "needs-attention" : browser?.authenticated ? "is-ready" : ""}`} /><span>{connection.status?.phase === "recovering" ? "Reconnecting" : connection.status?.nativeAvailable ? studio.connected : connection.checking ? studio.checking : studio.attention}</span><small>v{snapshot.version}</small></div>
+              <div className="studio-sidebar-status"><span className={`studio-indicator ${browser?.webAccess?.status === "paused" || connection.error ? "needs-attention" : connection.status?.nativeAvailable ? "is-ready" : ""}`} /><span>{connection.status?.phase === "recovering" ? guided.recovering : connection.status?.nativeAvailable ? studio.connected : connection.checking ? studio.checking : studio.attention}</span><small>v{snapshot.version}</small></div>
                 <SidebarItem
                   active={surface === "updates"}
                   icon="update"
-                  label={updateBusy ? copy.updating : updateVisible ? `Update · v${updateVersion}` : "Updates"}
+                  label={updateBusy ? copy.updating : updateVisible ? `${guided.updates} · v${updateVersion}` : guided.updates}
                   onClick={() => navigateSurface("updates")}
                   tone={updateVisible ? "update" : undefined}
                 />
@@ -518,8 +528,8 @@ function LauncherShell({
       </LayoutGroup>
 
       <CommandPalette open={commandOpen} close={() => setCommandOpen(false)} navigate={navigateSurface} language={language} />
-      <section className="workspace" ref={workspaceRef}>
-        <AutomaticSetup snapshot={{ ...snapshot, browser, operation }} surface={surface} navigate={navigateSurface} clearError={() => setError(null)} />
+      <section className={`workspace${surface === "home" ? " is-overview" : ""}`} ref={workspaceRef}>
+        <AutomaticSetup snapshot={{ ...snapshot, browser, operation }} startOnMount={startSetupOnMount} surface={surface} navigate={navigateSurface} clearError={() => setError(null)} />
         <AnimatePresence>{operation?.status === "running" && surface !== "browser" ? <motion.aside className="runtime-operation" initial={{ opacity: 0, y: 18, scale: .94 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: .97 }} transition={SPRING} role="status"><Icon name="activity" /><span>{operation.message}</span><button onClick={() => navigateSurface("activity")}>{copy.activity}</button></motion.aside> : null}</AnimatePresence>
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
@@ -538,7 +548,7 @@ function LauncherShell({
           >
             {surface === "home" ? <MariaHome snapshot={{ ...snapshot, browser }} navigate={navigateSurface} /> : null}
             {surface === "updates" ? <MariaUpdates snapshot={{ ...snapshot, browser, operation }} install={installUpdate} /> : null}
-            {surface === "guide" ? <GuideLoader language={language} openRepository={() => void api!.openExternal(snapshot.urls.github).catch(cause => setError(messageOf(cause)))} /> : null}
+            {surface === "guide" ? <HelpCenter language={language} navigate={navigateSurface} openRepository={() => void api!.openExternal(snapshot.urls.github).catch(cause => setError(messageOf(cause)))} /> : null}
             {surface === "browser" ? (
               <BrowserSurface
                 browser={browser}
@@ -573,7 +583,7 @@ function LauncherShell({
                 interactionMode={mcpTargetMode ?? snapshot.state.browserInteractionMode}
                 onDone={() => {
                   setMcpTargetMode(null);
-                  setSurface("browser");
+                  setSurface("home");
                 }}
                 operation={operation}
                 setError={setError}
@@ -936,7 +946,7 @@ function BrowserSurface({
               : passkeyWaiting ? copy.passkeyContinueBody : copy.stepAccountBody}</p>
             <div className="browser-empty-actions">
               {!manualInteraction && browser?.authenticated !== true ? (
-                <PrimaryButton disabled={passkeyWaiting} onClick={() => setUseBrowserLogin(true)}>Use an existing browser login</PrimaryButton>
+                <SecondaryButton disabled={passkeyWaiting} onClick={() => setUseBrowserLogin(true)}>Use an existing browser login</SecondaryButton>
               ) : null}
               <PrimaryButton disabled={passkeyWaiting} onClick={() => void toggle()}>
                 {manualInteraction || browser?.authenticated ? copy.openChatgpt : copy.signIn}
@@ -1174,7 +1184,7 @@ function McpSurface({
 }) {
   const configuringInactiveMode = interactionMode !== snapshot.state.browserInteractionMode;
   const [step, setStep] = useState(
-    configuringInactiveMode ? 1 : Math.min(2, Math.max(0, snapshot.state.mcpGuideStep || 0)),
+    configuringInactiveMode ? 1 : snapshot.state.mcpGuideStep === 2 ? 2 : 1,
   );
   const [tunnelId, setTunnelId] = useState("");
   const [runtimeKey, setRuntimeKey] = useState("");
@@ -1185,6 +1195,7 @@ function McpSurface({
   );
   const [replacingCredentials, setReplacingCredentials] = useState(false);
   const [localBusy, setLocalBusy] = useState(false);
+  const formFlight = useRef(false);
   const busy = localBusy || operation?.status === "running";
   const [doctor, setDoctor] = useState<DoctorReport | null>(null);
   const manualInteraction = interactionMode === "manual";
@@ -1218,8 +1229,10 @@ function McpSurface({
       setError(messageOf(cause));
     }
   };
+  const credentialsValid = /^tunnel_[a-f0-9]{32}$/.test(tunnelId.trim()) && runtimeKey.trim().length >= 20;
   const install = async () => {
-    if (busy) return;
+    if (busy || formFlight.current || ((!credentialsConfigured || replacingCredentials) && !credentialsValid)) return;
+    formFlight.current = true;
     setLocalBusy(true);
     setError(null);
     try {
@@ -1227,7 +1240,7 @@ function McpSurface({
         interactionMode,
         ...(credentialsConfigured && !replacingCredentials
           ? { replace: false }
-          : { tunnelId, runtimeKey, replace: true }),
+          : { tunnelId: tunnelId.trim(), runtimeKey: runtimeKey.trim(), replace: true }),
       });
       setRuntimeKey("");
       setTunnelId("");
@@ -1238,11 +1251,13 @@ function McpSurface({
     } catch (cause) {
       setError(messageOf(cause));
     } finally {
+      formFlight.current = false;
       setLocalBusy(false);
     }
   };
   const verify = async () => {
-    if (busy) return;
+    if (busy || formFlight.current) return;
+    formFlight.current = true;
     setLocalBusy(true);
     setError(null);
     setDoctor(null);
@@ -1252,6 +1267,7 @@ function McpSurface({
     } catch (cause) {
       setError(messageOf(cause));
     } finally {
+      formFlight.current = false;
       setLocalBusy(false);
     }
   };
@@ -1266,8 +1282,8 @@ function McpSurface({
         <NoticeRow icon="setup" tone="warning">{copy.mcpCatalogRequired}</NoticeRow>
       ) : null}
 
-      <div className="wizard-stepper" aria-label={`${step + 1} / 3`}>
-        {steps.map((item, index) => (
+      <div className="wizard-stepper" aria-label={`${step} / 2`}>
+        {steps.slice(1).map((item, offset) => { const index = offset + 1; return (
           <button
             className={`${index === step ? "is-active" : ""}${index < step ? " is-complete" : ""}`}
             disabled={busy || index > step}
@@ -1275,10 +1291,10 @@ function McpSurface({
             onClick={() => void safeMove(index)}
             type="button"
           >
-            <span>{index < step ? <Icon name="check" /> : index + 1}</span>
+            <span>{index < step ? <Icon name="check" /> : index}</span>
             <em>{item.title}</em>
           </button>
-        ))}
+        ); })}
       </div>
 
       <div className="mcp-stage">
@@ -1298,22 +1314,21 @@ function McpSurface({
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
           >
             <header>
-              <span>0{step + 1}</span>
+              <span>0{step}</span>
               <div>
                 <h2>{steps[step]!.title}</h2>
                 <p>{steps[step]!.body}</p>
               </div>
             </header>
 
-            {step === 0 ? (
-              <div className="inline-actions">
-                <SecondaryButton icon="external" onClick={() => void openExternal(snapshot.urls.tunnels)}>
-                  {copy.openTunnels}
-                </SecondaryButton>
-                <SecondaryButton icon="external" onClick={() => void openExternal(snapshot.urls.keys)}>
-                  {copy.openKeys}
-                </SecondaryButton>
-              </div>
+            {step === 1 && (!credentialsConfigured || replacingCredentials) ? (
+              <details className="guided-credential-help" open={!credentialsConfigured ? true : undefined}>
+                <summary>{copy.mcpStepOne}</summary><p>{copy.mcpStepOneBody}</p>
+                <div className="inline-actions">
+                  <SecondaryButton icon="external" disabled={busy} onClick={() => void openExternal(snapshot.urls.tunnels)}>{copy.openTunnels}</SecondaryButton>
+                  <SecondaryButton icon="external" disabled={busy} onClick={() => void openExternal(snapshot.urls.keys)}>{copy.openKeys}</SecondaryButton>
+                </div>
+              </details>
             ) : null}
             {step === 1 ? (
               credentialsConfigured && !replacingCredentials ? (
@@ -1340,6 +1355,10 @@ function McpSurface({
                       autoCapitalize="none"
                       autoCorrect="off"
                       onChange={(event) => setTunnelId(event.target.value)}
+                      aria-invalid={tunnelId.length > 0 && !/^tunnel_[a-f0-9]{32}$/.test(tunnelId.trim())}
+                      aria-describedby="tool-credentials-hint"
+                      autoComplete="off"
+                      disabled={busy}
                       placeholder="tunnel_…"
                       spellCheck={false}
                       value={tunnelId}
@@ -1350,12 +1369,17 @@ function McpSurface({
                       autoCapitalize="none"
                       autoCorrect="off"
                       onChange={(event) => setRuntimeKey(event.target.value)}
+                      aria-invalid={runtimeKey.length > 0 && runtimeKey.trim().length < 20}
+                      aria-describedby="tool-credentials-hint"
+                      autoComplete="off"
+                      disabled={busy}
                       placeholder="sk-…"
                       spellCheck={false}
                       type="password"
                       value={runtimeKey}
                     />
                   </FieldRow>
+                  <p className="guided-field-hint" id="tool-credentials-hint">{copy.toolCredentialsFormat}</p>
                   {credentialsConfigured ? (
                     <button
                       className="text-button keep-credentials"
@@ -1414,16 +1438,15 @@ function McpSurface({
       </div>
 
       <div className="wizard-footer">
-        <button className="text-button" disabled={step === 0 || busy} onClick={() => void safeMove(step - 1)} type="button">
-          {copy.previous}
+        <button className="text-button" disabled={busy} onClick={() => step === 1 ? onDone() : void safeMove(1)} type="button">
+          {step === 1 ? guidedCopy(snapshot.state.language).backHome : copy.previous}
         </button>
-        {step === 0 ? <PrimaryButton disabled={busy} onClick={() => void safeMove(1)}>{copy.next}</PrimaryButton> : null}
         {step === 1 ? (
           <PrimaryButton
             disabled={
               busy
               || (!manualInteraction && !configuringInactiveMode && !snapshot.state.codexCatalogVerified)
-              || ((!credentialsConfigured || replacingCredentials) && (!tunnelId || !runtimeKey))
+              || ((!credentialsConfigured || replacingCredentials) && !credentialsValid)
             }
             onClick={() => void install()}
           >
@@ -1602,7 +1625,8 @@ function SettingsSurface({
 
   const studio = studioCopy(language);
   return (
-    <ContentSurface narrow title={devProfile ? copy.devSettingsTitle : copy.settingsTitle}>
+    <ContentSurface narrow title={devProfile ? copy.devSettingsTitle : copy.settingsTitle} subtitle={guidedCopy(language).preferencesBody}>
+      <details className="guided-settings-advanced"><summary>{guidedCopy(language).advanced}<Icon name="chevron" /></summary>
       <section className="studio-settings-section"><div><h2>{studio.workflow}</h2><p>{copy.interactionMode}</p></div><div>
         <InteractionModePicker copy={copy} disabled={busy} mode={snapshot.state.browserInteractionMode} onChange={(mode) => void setInteractionMode(mode)} />
         <div className="settings-list">
@@ -1617,6 +1641,7 @@ function SettingsSurface({
           </SettingRow>
         </div>
       </div></section>
+      </details>
       <section className="studio-settings-section"><div><h2>{studio.startup}</h2><p>{copy.general}</p></div><div className="settings-list">
         {!devProfile ? <SettingRow body={copy.launchAtLoginBody} label={copy.launchAtLogin}>
           <Switch label={copy.launchAtLogin} checked={snapshot.state.autoStart} disabled={busy}
@@ -1637,6 +1662,8 @@ function SettingsSurface({
         </NoticeRow>
       ) : null}
 
+      <details className="guided-settings-advanced"><summary>{guidedCopy(language).diagnostics}<Icon name="chevron" /></summary>
+      <p className="guided-field-hint">{guidedCopy(language).diagnosticsBody}</p>
       <SectionHeading label={copy.diagnostics} spaced />
       <button className="diagnostic-row" disabled={busy} onClick={() => void runDoctor()} type="button">
         <Icon name="activity" />
@@ -1663,6 +1690,7 @@ function SettingsSurface({
         <Icon name="chevron" />
       </button> : null}
       {doctor ? <DoctorSummary copy={copy} report={doctor} /> : null}
+      </details>
 
       <div className="about-row">
         <BrandMark small />

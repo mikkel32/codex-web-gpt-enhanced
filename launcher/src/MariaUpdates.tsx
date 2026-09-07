@@ -1,55 +1,57 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Icon } from "./icons";
 import type { LauncherSnapshot } from "./types";
+import { updatePresentation } from "./update-view";
+import { updatesCopy } from "./updates-copy";
+import { setupErrorDetail } from "./setup-errors";
 
 export function MariaUpdates({ snapshot, install }: { snapshot: LauncherSnapshot; install: () => Promise<void> }) {
   const api = window.codexWebLauncher!;
   const update = snapshot.update;
+  const text = updatesCopy(snapshot.state.language);
   const [token, setToken] = useState("");
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
-  const version = "version" in update ? update.version : undefined;
-  const busy = working || ["checking", "downloading", "installing"].includes(update.status);
-  const active = snapshot.browser?.status === "running" || snapshot.operation?.status === "running";
-  const title = {
-    disabled: "Your development workspace", idle: "Keep Maria close to the latest",
-    checking: "Checking our releases", "up-to-date": "You're up to date", ahead: "You're ahead of the release",
-    available: "A better Maria is ready", downloading: "Preparing your update", installing: "Installing Maria",
-    error: "Couldn't check right now", "access-required": "Connect to our private releases",
-  }[update.status];
+  const flight = useRef(false);
+  const { candidate, active, canInstall, busy: updateBusy } = updatePresentation(snapshot);
+  const busy = working || updateBusy;
   const run = async (action: () => Promise<unknown>) => {
-    setWorking(true); setError("");
-    try { await action(); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setWorking(false); }
+    if (flight.current) return;
+    flight.current = true; setWorking(true); setError("");
+    try { await action(); }
+    catch (cause) { setError(setupErrorDetail(cause instanceof Error ? cause.message : String(cause))); }
+    finally { flight.current = false; setWorking(false); }
   };
+  const checkedTime = update.checkedAt ? Date.parse(update.checkedAt) : NaN;
   return <div className="maria-page maria-updates">
-    <header className="maria-update-heading"><span className="maria-eyebrow">MARIA / RELEASES</span><h1>Updates</h1><p>Improvements from our GitHub repository, delivered at your pace.</p></header>
-    <section className={`maria-update-card ${version ? "has-update" : ""}`} aria-label="Release status">
-      <div className="studio-release-status" role="status"><span className={`studio-indicator ${update.status === "up-to-date" ? "is-ready" : ""}`} />{title}</div>
-      <div className="maria-update-version"><span className="maria-card-icon"><Icon name="update" /></span><div><span>Installed on this computer</span><strong>Maria {snapshot.version}</strong></div><span className="maria-pill">{snapshot.profile === "development" ? "DEV" : update.status === "ahead" ? "Local build" : "Release channel"}</span></div>
+    <header className="maria-update-heading"><span className="maria-eyebrow">MARIA / {text.title}</span><h1>{text.title}</h1><p>{text.body}</p></header>
+    <section className={`maria-update-card ${candidate ? "has-update" : ""}`} aria-label={text.releaseStatus}>
+      <div className="studio-release-status" role="status"><span className={`studio-indicator ${update.status === "up-to-date" ? "is-ready" : ""}`} />{text.status[update.status]}</div>
+      <div className="maria-update-version"><span className="maria-card-icon"><Icon name="update" /></span><div><span>{text.installed}</span><strong>Maria {snapshot.version}</strong></div>
+        <span className="maria-pill">{snapshot.profile === "development" ? "DEV" : snapshot.version.includes("-") ? text.preview : text.stable}</span></div>
       <div role="status" aria-live="polite">
-        {version ? <p className="maria-update-new">Update available <strong>v{version}</strong></p> : null}
-        {"latestVersion" in update && update.latestVersion ? <p>Latest published release: v{update.latestVersion}</p> : null}
-        {"message" in update ? <p>{update.message}</p> : null}
-        {update.status === "disabled" ? <p>Source and DEV installations stay isolated. Update your checkout to get the latest code.</p> : null}
-        {update.status === "available" ? <p>Maria verifies the download before installing and reopening. Your settings and ChatGPT session stay in place.</p> : null}
-        {active && version ? <p>Finish the active operation before installing.</p> : null}
+        {candidate ? <p className="maria-update-new">{text.candidate} <strong>v{candidate}</strong></p> : null}
+        {"latestVersion" in update && update.latestVersion ? <p>{text.latest}: v{update.latestVersion}</p> : null}
+        {"message" in update ? <p>{setupErrorDetail(update.message)}</p> : null}
+        {update.status === "disabled" ? <p>{text.source}</p> : null}
+        {update.status === "available" ? <p>{text.verified}</p> : null}
+        {active && candidate ? <p>{text.finish}</p> : null}
       </div>
       <div className="maria-update-actions">
-        {version ? <button className="button-primary" disabled={busy || active || update.status === "access-required"} onClick={() => void run(install)}><Icon name="update" />{update.status === "downloading" ? "Downloading…" : update.status === "installing" ? "Installing…" : `Update to ${version}`}</button> : null}
-        <button className="button-secondary" disabled={busy || update.status === "disabled"} onClick={() => void run(() => api.checkUpdates())}>{update.status === "checking" ? "Checking…" : "Check for updates"}</button>
-        <button className="text-button" onClick={() => void run(() => api.openReleases())}>Release notes & downloads <Icon name="github" /></button>
+        {candidate ? <button type="button" className="button-primary" disabled={busy || !canInstall} onClick={() => void run(install)}><Icon name="update" />{update.status === "downloading" ? text.downloading : update.status === "installing" ? text.installing : `${text.update} · ${candidate}`}</button> : null}
+        <button type="button" className="button-secondary" disabled={busy || update.status === "disabled"} onClick={() => void run(() => api.checkUpdates())}>{update.status === "checking" ? text.checking : text.check}</button>
+        <button type="button" className="text-button" disabled={working} onClick={() => void run(() => api.openReleases())}>{text.notes} <Icon name="github" /></button>
       </div>
-      <p className="maria-update-checked">{update.status === "disabled" ? "Source builds are updated from your checkout." : <>{update.checkedAt ? `Last successful check: ${new Date(update.checkedAt).toLocaleString()}` : "No successful release check yet"} · Checks automatically every four hours.</>}</p>
+      <p className="maria-update-checked">{update.status === "disabled" ? text.source : <>{Number.isFinite(checkedTime) ? `${text.last}: ${new Date(checkedTime).toLocaleString(snapshot.state.language ?? "en")}` : text.none} · {text.automatic}</>}</p>
     </section>
     {update.status !== "disabled" ? <details className="maria-update-access" open={update.status === "access-required" ? true : undefined}>
-      <summary>Private GitHub access {update.authenticated ? "· Connected" : "· Optional"}</summary>
-      <p>You can download releases using your existing GitHub browser sign-in. For automatic checks and in-app updates, use a fine-grained GitHub token limited to <strong>mikkel32/codex-web-gpt-enhanced</strong> with <strong>Contents: Read-only</strong>. Maria encrypts it with your operating system and sends it only to our repository's GitHub release API.</p>
-      <form onSubmit={event => { event.preventDefault(); const value = token; setToken(""); void run(() => api.setUpdateToken(value)); }}>
-        <label htmlFor="update-token">GitHub access token</label>
-        <div className="maria-update-token"><input id="update-token" type="password" autoComplete="off" spellCheck={false} value={token} onChange={event => setToken(event.target.value)} placeholder="github_pat_…" disabled={busy} /><button className="button-secondary" type="submit" disabled={busy || !token.trim()}>Connect & check</button></div>
+      <summary>{text.access} · {update.authenticated ? text.connected : text.optional}</summary>
+      <p>{text.accessBody}</p>
+      <form onSubmit={event => { event.preventDefault(); if (busy || !token.trim()) return; const value = token.trim(); setToken(""); void run(() => api.setUpdateToken(value)); }}>
+        <label htmlFor="update-token">{text.token}</label>
+        <div className="maria-update-token"><input id="update-token" type="password" autoComplete="off" spellCheck={false} value={token} onChange={event => setToken(event.target.value)} placeholder="github_pat_…" disabled={busy} /><button className="button-secondary" type="submit" disabled={busy || !token.trim()}>{text.connect}</button></div>
       </form>
-      {update.authenticated ? <button className="text-button" disabled={busy} onClick={() => void run(() => api.setUpdateToken(null))}>Remove saved access</button> : null}
+      {update.authenticated ? <button type="button" className="text-button" disabled={busy} onClick={() => void run(() => api.setUpdateToken(null))}>{text.remove}</button> : null}
     </details> : null}
     {error ? <p role="alert" className="maria-update-error">{error}</p> : null}
     <footer className="maria-update-source"><Icon name="github" /><span>mikkel32 / codex-web-gpt-enhanced</span></footer>
