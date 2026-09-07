@@ -4,13 +4,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Page } from "playwright-core";
 import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_STOPPED_THINKING_GRACE_MS, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptPromptAttachmentIntegrityError, ChatGptStoppedThinkingTracker, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, browserDiagnosticIncludesScreenshot, chatGptConnectorAttachmentMode, chatGptEffortSelectionRequired, chatGptNewTurnIdentity, chatGptReboundTurnIdentity, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, dismissChatGptTemporaryChatOnboarding, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, resolveChatGptWebMultipartStagingMode, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
-import { CHATGPT_STOPPED_THINKING_LABEL, ensureChatGptPersonalizedConnectorAccess } from "../src/adapters/chatgpt-web/browser-worker";
+import { chatGptConnectorActivationCanRetry, type ChatGptConnectorActivationSnapshot, CHATGPT_STOPPED_THINKING_LABEL, ensureChatGptPersonalizedConnectorAccess } from "../src/adapters/chatgpt-web/browser-worker";
 import { chatGptStoppedThinkingError } from "../src/adapters/chatgpt-web/adapter-error";
 import { CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
 import { CHATGPT_CONNECTOR_NAME, DEV_CHATGPT_CONNECTOR_NAME, defaultChromeExecutable, legacyChatGptConnectorMigrationMessage } from "../src/config";
 import { parseChatGptEffortSliderState } from "../src/chatgpt-session";
 import { ChatGptExternalTurnProgress, chatGptExternalToolCallsAreInFlight } from "../src/adapters/chatgpt-web/turn-progress";
 import type { CodexProviderConfig } from "../src/types";
+
+const idleConnectorActivation = (): ChatGptConnectorActivationSnapshot => ({
+  url: "https://chatgpt.com/?temporary-chat=true",
+  documentEpoch: 1,
+  turns: [],
+  generating: false,
+  composerTexts: [""],
+  connectorCount: 0,
+});
 
 function personalizedTemporaryChatRole(
   _role: string,
@@ -23,6 +32,73 @@ function personalizedTemporaryChatRole(
   };
   return locator;
 }
+
+test("connector activation recovery requires the same idle document and an empty unselected composer", () => {
+  const before = { ...idleConnectorActivation(), composerTexts: ["@codex"] };
+  expect(chatGptConnectorActivationCanRetry(before, idleConnectorActivation())).toBeTrue();
+  for (const change of [
+    { url: "https://chatgpt.com/c/new" },
+    { documentEpoch: 2 },
+    { turns: ["conversation-turn-1"] },
+    { generating: true },
+    { composerTexts: [] },
+    { composerTexts: ["", ""] },
+    { composerTexts: ["user draft"] },
+    { connectorCount: 1 },
+  ]) {
+    expect(chatGptConnectorActivationCanRetry(before, { ...idleConnectorActivation(), ...change })).toBeFalse();
+  }
+  expect(chatGptConnectorActivationCanRetry({ ...before, generating: true }, idleConnectorActivation())).toBeFalse();
+});
+
+test("connector activation recovers a consumed mention with one shared bounded trigger budget", async () => {
+  const selectConnector = (ChatGptBrowserWorker.prototype as unknown as {
+    selectConnector(page: unknown, capture: unknown, refresh: boolean, budget: { triggerAttempts: number }): Promise<unknown>;
+  }).selectConnector;
+  const run = async (succeedOn: number, afterChange: Partial<ChatGptConnectorActivationSnapshot> = {}, initialAttempts = 0) => {
+    let activations = 0;
+    let selected = false;
+    let cleaned = false;
+    let observations = 0;
+    const checkpoints: string[] = [];
+    const budget = { triggerAttempts: initialAttempts };
+    const timeout = Object.assign(new Error("selected chip absent"), { name: "TimeoutError" });
+    const composer = {
+      fill: async () => {},
+      focus: async () => {},
+      pressSequentially: async () => {},
+      press: async (key: string) => {
+        expect(key).toBe("Enter");
+        selected = ++activations === succeedOn;
+      },
+    };
+    const row = { waitFor: async () => {}, count: async () => 1, getAttribute: async () => "" };
+    const page = {
+      getByRole: personalizedTemporaryChatRole,
+      getByText: () => ({}),
+      locator: () => ({ filter: () => row }),
+    };
+    const result = await selectConnector.call({
+      config: { appName: "Codex Native2" },
+      activeComposer: async () => composer,
+      connectorIsSelected: async () => selected,
+      connectorActivationSnapshot: async () => ({
+        ...idleConnectorActivation(),
+        ...(observations++ % 2 === 1 ? afterChange : { composerTexts: ["@codex"] }),
+      }),
+      selectedConnectorControl: () => ({ waitFor: async () => { if (!selected) throw timeout; } }),
+      clearChatGptComposerState: async () => { cleaned = true; },
+    }, page, async (checkpoint: string) => { checkpoints.push(checkpoint); }, false, budget)
+      .then(() => "selected", error => error.message);
+    return { result, activations, cleaned, checkpoints, budget };
+  };
+  expect(await run(2)).toMatchObject({ result: "selected", activations: 2, cleaned: false, budget: { triggerAttempts: 2 } });
+  expect(await run(Infinity)).toMatchObject({ result: "selected chip absent", activations: 3, cleaned: true, budget: { triggerAttempts: 3 } });
+  expect(await run(2, {}, 2)).toMatchObject({ result: "selected chip absent", activations: 1, cleaned: true });
+  for (const change of [{ turns: ["conversation-turn-1"] }, { generating: true }, { documentEpoch: 2 }, { composerTexts: ["new draft"] }]) {
+    expect(await run(2, change)).toMatchObject({ result: "selected chip absent", activations: 1 });
+  }
+});
 
 test("browser turn orchestration retains owned prompt insertion and semantic submission", () => {
   const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
@@ -1241,6 +1317,7 @@ test("connector selection re-resolves the active composer after ChatGPT replaces
   let activeComposerCalls = 0;
   const resolved = await selectConnector.call({
     config: { appName: "Codex Native2" },
+    connectorActivationSnapshot: async () => idleConnectorActivation(),
     connectorIsSelected: async () => connectorSelected,
     selectedConnectorControl: () => selectedConnector,
     activeComposer: async () => {
@@ -1300,6 +1377,7 @@ test("connector selection moves highlight to the exact hidden-viewport row befor
 
   await expect(selectConnector.call({
     config: { appName: "Codex Native2 DEV" },
+    connectorActivationSnapshot: async () => idleConnectorActivation(),
     connectorIsSelected: async () => selected,
     selectedConnectorControl: () => selectedConnector,
     activeComposer: async () => selected ? selectedComposer : initialComposer,
@@ -1359,6 +1437,7 @@ test("connector selection retriggers the complete mention after a fresh-page hyd
   let activeComposerCalls = 0;
   await selectConnector.call({
     config: { appName: "Codex Native2" },
+    connectorActivationSnapshot: async () => idleConnectorActivation(),
     connectorIsSelected: async () => selected,
     connectorMentionRowTitles: async () => [],
     selectedConnectorControl: () => selectedConnector,
@@ -1454,6 +1533,7 @@ test("connector verification preserves the host-refreshed catalog evidence", asy
       calls.push(`prepare:${prepared}`);
     },
     activeComposer: async () => selected ? selectedComposer : initialComposer,
+    connectorActivationSnapshot: async () => idleConnectorActivation(),
     connectorIsSelected: async () => selected,
     connectorMentionFailure: prototype.connectorMentionFailure,
     connectorMentionRowTitles: prototype.connectorMentionRowTitles,
@@ -1582,6 +1662,7 @@ test("connector catalog refresh stays fail-closed for absent, legacy, and exact 
           focus: async () => {},
           pressSequentially: async () => {},
         }),
+        connectorActivationSnapshot: async () => idleConnectorActivation(),
         connectorIsSelected: async () => false,
         clearChatGptComposerState: async () => {},
         connectorMentionRowTitles: async () => visibleRows,
@@ -1697,6 +1778,7 @@ test("tool-capable prompts use the shared Playwright connector selection before 
     config: { appName: "Codex Native2" },
     selectConnector,
     insertPromptText,
+    connectorActivationSnapshot: async () => idleConnectorActivation(),
     connectorIsSelected: async () => selected,
     selectedConnectorControl: () => selectedConnector,
     activeComposer: async () => {
@@ -1776,6 +1858,7 @@ test("an aborted connector proof clears its mention before the preflight release
       expect(signal).toBeDefined();
       return composer;
     },
+    connectorActivationSnapshot: async () => idleConnectorActivation(),
     connectorIsSelected: async () => false,
     clearChatGptComposerState: prototype.clearChatGptComposerState,
   }, page, undefined, false, { triggerAttempts: 0 }, controller.signal);
@@ -1838,6 +1921,7 @@ test("an aborted real connector selection clears the typed mention before return
   const selection = prototype.selectConnector.call({
     config: { appName: "Codex Native2" },
     activeComposer: async () => composer,
+    connectorActivationSnapshot: async () => idleConnectorActivation(),
     connectorIsSelected: async () => false,
     clearChatGptComposerState: prototype.clearChatGptComposerState,
   }, page, undefined, false, { triggerAttempts: 0 }, controller.signal);
@@ -1890,6 +1974,7 @@ test("an abort after connector activation removes the selected pill before retur
   const selection = prototype.selectConnector.call({
     config: { appName: CHATGPT_CONNECTOR_NAME },
     activeComposer: async () => composer,
+    connectorActivationSnapshot: async () => idleConnectorActivation(),
     connectorIsSelected: async () => connectorSelected,
     clearChatGptComposerState: prototype.clearChatGptComposerState,
   }, page, async (checkpoint: string) => {

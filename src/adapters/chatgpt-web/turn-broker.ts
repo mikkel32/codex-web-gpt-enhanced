@@ -1015,7 +1015,7 @@ export class TurnBroker implements TurnBrokerOwner {
         throw new Error(retiredTurn !== undefined
           ? `${contract === "safe" ? "This request_id" : "This turn_token"} was issued for ${retiredTurnLabel(retiredTurn)}, which has already finished.`
           + " This Codex Native action can no longer run."
-          : `${contract === "safe" ? "request id" : "turn token"} is invalid, expired, or revoked. This is Codex task tool authorization, not ChatGPT browser sign-in. Continue the same task in Codex for fresh tool access; do not reuse this handle.`);
+          : `${contract === "safe" ? "request id" : "turn token"} is invalid, expired, or revoked. This runtime does not recognize an active task for this handle. This is Codex task tool authorization, not ChatGPT browser sign-in. If multiple runtimes share this tunnel, separate their tunnel IDs and connectors before continuing the same task in Codex for fresh tool access; do not reuse this handle.`);
       }
       if (activeChannel.safe) {
         if (contract !== "safe") throw new Error("Zero Risk request id requires the Zero Risk MCP contract");

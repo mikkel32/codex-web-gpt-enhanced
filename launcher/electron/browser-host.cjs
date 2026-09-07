@@ -2877,8 +2877,12 @@ class BrowserHost {
         appName: connectorName,
         logger: this.logger,
       });
-      this.logger.info("connector.verified", { appName: connectorName });
-      this.setState({ status: "ready", message: "ChatGPT connector is available", authenticated: true });
+      this.logger.info("connector.verified", {
+        appName: connectorName,
+        verificationScope: "composer-selection",
+        remoteToolContractVerified: false,
+      });
+      this.setState({ status: "ready", message: "ChatGPT connector selection verified", authenticated: true });
       return result;
     } catch (error) {
       this.logger.error("connector.verification_failed", {

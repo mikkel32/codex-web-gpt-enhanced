@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { setTimeout as sleep } from "node:timers/promises";
 import { chromium } from "playwright-core";
 import { selectChatGptAstraPro, assertChatGptAstraProReady } from "../src/adapters/chatgpt-web/astra-selection";
+import { verifyConnectorActivationFixture } from "./connector-activation-fixture";
 
 const browser = await chromium.connectOverCDP(process.argv[2]!);
 try {
@@ -35,4 +36,5 @@ try {
     assert(!events.includes("disabled-power"), "Pressed Power during a disabled transition");
   }
   console.log(`ASTRA_ELECTRON_PICKER_OK ${process.platform}/${process.arch} electron=${process.versions.electron} english danish-seneste structural-controls normal compact hidden-label expanded-menu model-list-only retained-compact latest-pro-no-generation already-selected rejects-nonlatest rejects-nonpro`);
+  await verifyConnectorActivationFixture(page);
 } finally { await browser.close(); }

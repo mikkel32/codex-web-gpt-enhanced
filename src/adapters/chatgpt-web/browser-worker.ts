@@ -1181,6 +1181,30 @@ interface ChatGptSubmissionDomState {
   responseIdentities: string[];
 }
 
+export interface ChatGptConnectorActivationSnapshot {
+  url: string;
+  documentEpoch: number;
+  turns: string[];
+  generating: boolean;
+  composerTexts: string[];
+  connectorCount: number;
+}
+
+export function chatGptConnectorActivationCanRetry(
+  before: ChatGptConnectorActivationSnapshot,
+  after: ChatGptConnectorActivationSnapshot,
+): boolean {
+  return before.url === after.url
+    && before.documentEpoch === after.documentEpoch
+    && !before.generating && !after.generating
+    && JSON.stringify(before.turns) === JSON.stringify(after.turns)
+    && before.composerTexts.length === 1
+    && before.connectorCount === 0
+    && after.composerTexts.length === 1
+    && after.composerTexts[0] === ""
+    && after.connectorCount === 0;
+}
+
 interface ChatGptSubmissionDomCache {
   key?: string;
   snapshot?: ChatGptSubmissionDomState;
@@ -2954,6 +2978,37 @@ export class ChatGptBrowserWorker {
     });
   }
 
+  private async connectorActivationSnapshot(
+    page: Page,
+    signal?: AbortSignal,
+  ): Promise<ChatGptConnectorActivationSnapshot> {
+    return await withBrowserTurnAbort(withChatGptBrowserObservationTimeout(page.evaluate(selectors => {
+      const visible = (element: Element) => {
+        const rect = element.getBoundingClientRect();
+        return getComputedStyle(element).visibility !== "hidden" && (rect.width > 0 || rect.height > 0);
+      };
+      const composers = [...document.querySelectorAll(selectors.composer)].filter(visible);
+      return {
+        url: location.href,
+        documentEpoch: performance.timeOrigin,
+        turns: [...document.querySelectorAll(selectors.turns)].map(element => {
+          const id = element.getAttribute("data-testid");
+          if (!id) throw new Error("ChatGPT connector activation could not identify the existing turns");
+          return id;
+        }),
+        generating: [...document.querySelectorAll(selectors.stop)].some(visible),
+        composerTexts: composers.map(element => (element.textContent ?? "").trim()),
+        connectorCount: composers.reduce((count, element) => (
+          count + element.querySelectorAll('[data-id^="plugin:"][data-keyword]').length
+        ), 0),
+      };
+    }, {
+      composer: CHATGPT_COMPOSER_SELECTOR,
+      turns: `${CHATGPT_USER_TURN_SELECTOR}, ${CHATGPT_ASSISTANT_TURN_SELECTOR}`,
+      stop: CHATGPT_STOP_BUTTON_SELECTOR,
+    })), signal);
+  }
+
   private async selectConnector(
     page: Page,
     captureDiagnostic?: (checkpoint: string) => Promise<void>,
@@ -3050,7 +3105,6 @@ export class ChatGptBrowserWorker {
             signal: abortSignal,
           });
           await capture("connector-menu-visible");
-          break;
         } catch (error) {
           if (!(error instanceof Error) || error.name !== "TimeoutError") throw error;
           const visibleRows = await this.connectorMentionRowTitles(menuRows, abortSignal);
@@ -3082,62 +3136,77 @@ export class ChatGptBrowserWorker {
               await this.connectorMentionFailure(menuRows, attemptBudget.triggerAttempts, abortSignal),
             );
           }
+          continue;
         }
-      }
-      const exactResultCount = await withBrowserTurnAbort(
-        withChatGptBrowserObservationTimeout(appResult.count()),
-        abortSignal,
-      );
-      if (exactResultCount !== 1) {
-        throw chatGptConnectorUnavailableError(
-          `ChatGPT connector menu did not expose one exact ${JSON.stringify(this.config.appName)} row`
-          + ` after ${attemptBudget.triggerAttempts} complete mention trigger attempt(s)`,
-        );
-      }
-      // Hidden launcher maintenance keeps a 1x1 Chromium viewport, so pointer activation cannot
-      // reach this menu. Require the exact row to own ChatGPT's keyboard highlight first;
-      // otherwise move the menu highlight until it does. Keep
-      // focus on the composer, activate through the menu's real keyboard owner, then prove the exact
-      // selected connector pill below.
-      const rowHighlighted = async () => await appResult.getAttribute("data-highlighted", {
-        signal: abortSignal,
-        timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
-      }) !== null;
-      if (!await rowHighlighted()) {
-        const visibleRowCount = await withBrowserTurnAbort(
-          withChatGptBrowserObservationTimeout(menuRows.filter({ visible: true }).count()),
+        const exactResultCount = await withBrowserTurnAbort(
+          withChatGptBrowserObservationTimeout(appResult.count()),
           abortSignal,
         );
-        for (let step = 0; step < visibleRowCount && !await rowHighlighted(); step += 1) {
-          await composer.press("ArrowDown", {
-            signal: abortSignal,
-            timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
-          });
+        if (exactResultCount !== 1) {
+          throw chatGptConnectorUnavailableError(
+            `ChatGPT connector menu did not expose one exact ${JSON.stringify(this.config.appName)} row`
+            + ` after ${attemptBudget.triggerAttempts} complete mention trigger attempt(s)`,
+          );
         }
+        // Use the menu's keyboard owner on both hidden and visible maintenance surfaces. Require
+        // the exact row's highlight, then prove selection in the replacement composer below.
+        const rowHighlighted = async () => await appResult.getAttribute("data-highlighted", {
+          signal: abortSignal,
+          timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
+        }) !== null;
+        if (!await rowHighlighted()) {
+          const visibleRowCount = await withBrowserTurnAbort(
+            withChatGptBrowserObservationTimeout(menuRows.filter({ visible: true }).count()),
+            abortSignal,
+          );
+          for (let step = 0; step < visibleRowCount && !await rowHighlighted(); step += 1) {
+            await composer.press("ArrowDown", {
+              signal: abortSignal,
+              timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
+            });
+          }
+        }
+        if (!await rowHighlighted()) {
+          throw new Error(`ChatGPT connector menu could not highlight ${JSON.stringify(this.config.appName)}`);
+        }
+        const activationBaseline = await this.connectorActivationSnapshot(page, abortSignal);
+        if (activationBaseline.generating) {
+          throw new Error("ChatGPT started generating before connector activation; selection stopped");
+        }
+        await composer.press("Enter", {
+          signal: abortSignal,
+          timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
+        });
+        await capture("connector-choice-activated");
+        // Selecting a connector replaces the Lexical composer subtree. Resolve the active composer
+        // again instead of returning the pre-selection locator, otherwise the real turn can focus a
+        // detached/hidden editor even though verification just succeeded.
+        const selectedComposer = await this.activeComposer(page, 30_000, abortSignal);
+        const selectedConnector = this.selectedConnectorControl(selectedComposer);
+        try {
+          await selectedConnector.waitFor({
+            state: "visible",
+            timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
+            signal: abortSignal,
+          });
+        } catch (error) {
+          throwIfPromptAttachmentAborted(abortSignal);
+          if (!(error instanceof Error) || error.name !== "TimeoutError"
+            || attemptBudget.triggerAttempts >= MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS) throw error;
+          const afterActivation = await this.connectorActivationSnapshot(page, abortSignal);
+          // Enter may consume the mention without attaching a chip during hydration. Only retrigger
+          // while the same document has no submission, generation, chip, or remaining draft text.
+          if (!chatGptConnectorActivationCanRetry(activationBaseline, afterActivation)) throw error;
+          await capture("connector-activation-empty-retry");
+          continue;
+        }
+        if (!await this.connectorIsSelected(selectedComposer, abortSignal)) {
+          throw new Error(`ChatGPT composer did not select ${JSON.stringify(this.config.appName)} connector`);
+        }
+        await capture("connector-selected");
+        return selectedComposer;
       }
-      if (!await rowHighlighted()) {
-        throw new Error(`ChatGPT connector menu could not highlight ${JSON.stringify(this.config.appName)}`);
-      }
-      await composer.press("Enter", {
-        signal: abortSignal,
-        timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
-      });
-      await capture("connector-choice-activated");
-      // Selecting a connector replaces the Lexical composer subtree. Resolve the active composer
-      // again instead of returning the pre-selection locator, otherwise the real turn can focus a
-      // detached/hidden editor even though verification just succeeded.
-      const selectedComposer = await this.activeComposer(page, 30_000, abortSignal);
-      const selectedConnector = this.selectedConnectorControl(selectedComposer);
-      await selectedConnector.waitFor({
-        state: "visible",
-        timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
-        signal: abortSignal,
-      });
-      if (!await this.connectorIsSelected(selectedComposer, abortSignal)) {
-        throw new Error(`ChatGPT composer did not select ${JSON.stringify(this.config.appName)} connector`);
-      }
-      await capture("connector-selected");
-      return selectedComposer;
+      throw chatGptConnectorUnavailableError("ChatGPT connector selection exhausted its mention attempt budget");
     } catch (error) {
       try {
         await this.clearChatGptComposerState(page);

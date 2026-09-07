@@ -118,7 +118,7 @@ const en = {
   openTunnels: "Open Tunnels",
   openKeys: "Create API key",
   mcpStepTwo: "Connect the local harness",
-  mcpStepTwoBody: "Paste the Tunnel ID and API key. The tunnel must belong to the same OpenAI account that will use the ChatGPT plugin. The key stays in private local storage and is never written to launcher logs.",
+  mcpStepTwoBody: "Paste the Tunnel ID and API key. Use a dedicated tunnel and ChatGPT connector for this runtime: Mac, Windows, and Codex's native MCP server must not share a tunnel ID. The tunnel must belong to the account using the ChatGPT plugin. The key stays in private local storage and is never written to launcher logs.",
   mcpStepTwoHint: "You can add the MCP connector in ChatGPT only after this step succeeds and the tunnel is running.",
   mcpCatalogRequired: "Connect harness is unavailable until the Codex models are installed and verified. Return to Setup, click Install models, restart Codex once, and wait for the model catalog check to complete.",
   tunnelId: "Tunnel ID",

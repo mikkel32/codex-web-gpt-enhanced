@@ -1321,6 +1321,10 @@ test("connector verification is effort-independent and works while the browser s
   const result = await BrowserHost.prototype.runConnectorVerification.call(fixture, "Codex Native2");
 
   assert.deepEqual(result, { ok: true, appName: "Codex Native2" });
+  assert.ok(calls.some(([type, event, detail]) => type === "log"
+    && event === "connector.verified"
+    && detail.verificationScope === "composer-selection"
+    && detail.remoteToolContractVerified === false));
   assert.equal(calls.some(([type]) => type === "show"), false);
   assert.deepEqual(
     calls.filter(([type]) => ["refresh", "helper"].includes(type)),

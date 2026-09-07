@@ -3114,6 +3114,8 @@ describe("ChatGPT outer-native harness v4", () => {
       });
       expect(invalid.isError).toBe(true);
       expect(JSON.stringify(invalid.content)).toContain("turn token is invalid, expired, or revoked");
+      expect(JSON.stringify(invalid.content)).toContain("If multiple runtimes share this tunnel");
+      expect(JSON.stringify(invalid.content)).toContain("separate their tunnel IDs and connectors");
 
       const execPromise = call("codex_exec", { turn_token: token, cmd: "pwd", workdir: tempRoot });
       const [execRequest] = await Promise.race([

@@ -177,6 +177,7 @@ your computer. Explicitly removing the integration stops its background connecti
 - Open MCP in Maria and use your existing saved tunnel credentials, or configure a tunnel.
 - Follow the connector instructions shown for your selected interaction mode.
 - Keep the Automatic and Manual connectors separate. Their exact names are displayed in Maria.
+- Give each runtime its own tunnel ID and ChatGPT connector, including Mac, Windows, and Codex's native MCP server. Do not run them against the same tunnel. Distinct profile names or API keys alone do not separate the endpoint. For multiple Automatic setups, configure distinct connector names such as `Codex Native2 Mac` and `Codex Native2 Windows` through setup's `--app-name` option.
 - Run Verify runtime. Native Codex tools continue to use Codex's own permissions.
 
 ## If something needs attention
@@ -184,6 +185,7 @@ your computer. Explicitly removing the integration stops its background connecti
 - **Native models missing:** use Setup to reinstall the model integration, then restart Codex.
 - **Web model unavailable:** open Maria, check browser sign-in and the model tier on your account.
 - **Manual connection timed out:** select the shown connector and check MCP status before starting a new turn.
+- **Tool not found or task authorization rejected:** check whether another runtime uses the same tunnel ID. A healthy tunnel can still reach a different tool server or task broker. After separating the endpoints, refresh the corresponding ChatGPT connector's tools. Maria's Automatic connector should expose `codex_exec`, `codex_write_stdin`, `codex_apply_patch`, `codex_view_image`, `codex_tool_inventory`, and `codex_tool_call`; a catalog of bare `exec_command`/`apply_patch` tools belongs to a different contract. Local health and successful chip selection do not prove the remote tool contract.
 - **A turn stops unexpectedly:** open Activity and export diagnostics. Check whether the browser tab closed or the connector disconnected.
 - **Switching models:** finish or cancel the current turn, then choose another model in Codex. Your Codex task remains the same.
 
