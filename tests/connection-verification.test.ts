@@ -19,7 +19,7 @@ for (const scenario of ["success", "unacknowledged", "invented-proof", "browser-
     await client.connect(transport);
     // Windows anonymous pipes are bounded. The MCP server writes per-page diagnostics;
     // leaving stderr unread can block a response even though the broker served its page.
-    transport.stderr?.resume();
+    transport.stderr?.on("data", () => {});
     let token = "";
     const controller = new AbortController();
     const other = await broker.register({ cwd: tmpdir(), roots: [tmpdir()], writableRoots: [], tools: [], sandboxPolicy: { type: "readOnly", networkAccess: false } });
