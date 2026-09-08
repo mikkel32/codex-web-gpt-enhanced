@@ -187,7 +187,7 @@ your computer. Explicitly removing the integration stops its background connecti
 - **Native models missing:** use Setup to reinstall the model integration, then restart Codex.
 - **Web model unavailable:** open Maria, check browser sign-in and the model tier on your account.
 - **Manual connection timed out:** select the shown connector and check MCP status before starting a new turn.
-- **Tool not found or task authorization rejected:** check whether another runtime uses the same tunnel ID. A healthy tunnel can still reach a different tool server or task broker. After separating the endpoints, refresh the corresponding ChatGPT connector's tools. Maria's Automatic connector should expose `codex_exec`, `codex_write_stdin`, `codex_apply_patch`, `codex_view_image`, `codex_tool_inventory`, and `codex_tool_call`; a catalog of bare `exec_command`/`apply_patch` tools belongs to a different contract. Local health and successful chip selection do not prove the remote tool contract.
+- **Tool not found or task authorization rejected:** check whether another runtime uses the same tunnel ID. A healthy tunnel can still reach a different tool server or task broker. After separating the endpoints, refresh the corresponding ChatGPT connector's tools. Maria's Automatic connector should expose `codex_exec`, `codex_write_stdin`, `codex_apply_patch`, `codex_view_image`, `codex_tool_inventory`, `codex_tool_call`, and `codex_context_read`; a catalog of bare `exec_command`/`apply_patch` tools belongs to a different contract. Local health and successful chip selection do not prove the remote tool contract.
 - **A turn stops unexpectedly:** open Activity and export diagnostics. Check whether the browser tab closed or the connector disconnected.
 - **Switching models:** finish or cancel the current turn, then choose another model in Codex. Your Codex task remains the same.
 
@@ -253,3 +253,9 @@ context that preserves work performed by native Codex models.
 onboarding, and keeps the native connection alive independently of the window.
 The 5.0.2 foundation added reversible provider repair, native catalog fallback,
 SSE completion handling, and more practical Manual-mode deadlines.
+
+### Canonical task context
+
+Automatic Full-mode ordinary tasks retrieve large context through `codex_context_read`, a read-only, task-bound tool. It serves bounded pages from the active broker rather than uploading JSON documents to ChatGPT. Every page must be retrieved before work tools or final completion are allowed. Context remains subject to the model input budget and is retired with the task capability.
+
+After upgrading from a version without this tool, refresh the Automatic connector in ChatGPT and confirm that `codex_context_read` is listed. Its permission is read-only; the execution gateway retains its existing write/destructive annotations. Image uploads, read-only mode, and explicit multipart compaction retain their existing transports.

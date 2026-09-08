@@ -26,6 +26,7 @@ const BRIDGE_TOOL_NAMES = new Set([
   "codex_view_image",
   "codex_tool_inventory",
   "codex_tool_call",
+  "codex_context_read",
   "codex_turn_complete",
 ]);
 
@@ -840,6 +841,25 @@ export async function runChatGptMcpServer(options: {
         });
       },
     ),
+  );
+
+  if (contract === "native") server.registerTool(
+    "codex_context_read",
+    {
+      title: "Read this Codex task's context",
+      description: "Read one bounded page of canonical context already supplied to this active Codex task. This tool cannot read arbitrary files, execute commands, modify data, or access another task. Follow next_offset until null for every named context file before doing the task.",
+      inputSchema: {
+        ...turnReferenceInput(contract),
+        name: z.string().regex(/^codex-context-[1-3]-of-[23]\.json$/),
+        offset: z.number().int().min(0).max(50_000_000),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input, extra) => withClaimedTurn("codex_context_read", turnReference(contract, input), extra,
+      async claimed => result(await callTurnBroker(options.brokerSocketPath, {
+        method: "read_context", bindingId: claimed.bindingId,
+        contextName: input.name, contextOffset: input.offset,
+      }, 10_000, extra.signal))),
   );
 
   server.registerTool(

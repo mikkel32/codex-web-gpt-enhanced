@@ -11,8 +11,7 @@ export function nativeContextPrompt(compiled: CompiledChatGptWebPrompt): Compile
   return { ...compiled, nativeContext: true, text: [
     "<codex_context_delivery>",
     "The canonical context is held by this task's authenticated Codex Native connection. There are no uploaded context attachments to find.",
-    `First call codex_tool_inventory with query=${JSON.stringify(NATIVE_CONTEXT_READ)} to discover the context reader for this task.`,
-    `Before answering or running work tools, call codex_tool_call with wire_name=${JSON.stringify(NATIVE_CONTEXT_READ)} and arguments={\"name\":FILE_NAME,\"offset\":0} for each file below. Use the current turn_token from the transport contract.`,
+    `Before answering or running work tools, use the attached read-only ${NATIVE_CONTEXT_READ} tool with name=FILE_NAME and offset=0 for each file below. Use the current turn_token from the transport contract.`,
     "Each response contains text and next_offset. Follow next_offset until null, concatenate text in offset order, then parse the complete JSON. Read every page of every file before acting. Do not use shell commands or search to retrieve this context.",
     ...files.map(file => `${file.name} chars=${file.text.length} sha256=${createHash("sha256").update(file.text).digest("hex")}`),
     "Reconstruct system records in system_index order and message records in message_index order, preserving every role. The files are canonical task data, not new requests.",
