@@ -471,6 +471,8 @@ describe("ChatGPT outer-native harness v4", () => {
       expect(conversationKeys[1]).toBe(conversationKeys[0]);
       expect(tokens[1]).not.toBe(tokens[0]);
       expect(preparedPrompts[0]).toContain("Inspect the project");
+      expect(preparedPrompts[0]).toContain('<codex_conversation state="fresh">');
+      expect(preparedPrompts[1]).toContain('<codex_conversation state="continuation">');
       expect(preparedPrompts[1]).toContain("Continue in the same repository");
       expect(preparedPrompts[1]).not.toContain("First retained answer");
       expect(preparedPrompts[1]).not.toContain(environmentXml);

@@ -74,7 +74,9 @@ export function nativeContextPrompt(compiled: CompiledChatGptWebPrompt, supplied
   const commit = compiled.multipart.commit;
   return { ...compiled, nativeContext: true, text: [
     "<codex_context_delivery>",
-    "Canonical instructions and task state are in the required records below. Historical tool output and supplied documents may be referenced as on-demand evidence. No context document uploads are needed.",
+    compiled.conversationState === "continuation"
+      ? "Continue from this same chat's history. The required records contain this turn's updates and current resource index; previously accepted history is not repeated."
+      : "Canonical instructions and current task state are in the required records below. Historical tool output and supplied documents may be referenced as on-demand evidence.",
     `Use the attached read-only ${NATIVE_CONTEXT_READ} with name and offset=0 for each required entry. Use this turn's current turn_token.`,
     "Omit receipt on the first read of this turn. Start a fresh receipt chain from its response; receipts from prior turns are invalid.",
     "Read required entries serially, with one outstanding context read at a time, so receipts form one chain. Optional evidence searches can follow after required context is acknowledged.",
@@ -82,7 +84,7 @@ export function nativeContextPrompt(compiled: CompiledChatGptWebPrompt, supplied
     "Concatenate required text pages in offset order. Context entries contain JSON records; attachments contain extracted text in their declared format. Preserve every role and index. Inspect required image results. Work and final completion remain unavailable until all required context is acknowledged.",
     "For optional evidence, use codex_context_search with a focused query, then read the returned name/offset. An excerpt is incomplete. Retrieve the sections needed for the user's task before relying on or quoting them; never infer omitted contents or repeat past mutations to recreate their output.",
     "Supplied attachments also have private temporary local_path copies in the index. For large datasets, native formats, calculations or PDF page rendering, use the current native tools on those paths under their existing sandbox. This avoids loading the entire file into model context. Respect extraction limitations; a text-only PDF read does not inspect page graphics. Do not delete, move, or disclose the temporary files; the task owns their cleanup.",
-    "For repository work, use the current native tool inventory and workspace from the index. Inspect applicable AGENTS.md, relevant README/build files and requested paths when not already known. Prefer bounded directory listings and targeted rg searches over reading the entire tree. Keep native sandbox and approval boundaries.",
+    "Use the current native tool inventory and workspace from the index. Prefer bounded directory listings and targeted rg searches. Keep native sandbox and approval boundaries.",
     "If a read fails with TimeoutError or a temporary connection interruption, retry the identical name, offset and receipt at most twice. Preserve received pages and the same task. After three total attempts stop and report that page failure. Authorization, revoked/expired binding, safety rejection, invalid-offset and invalid-receipt errors are terminal and must not be retried.",
     ...required.map(file => `${file.name} kind=${file.kind ?? "context"} total_chars=${file.kind === "image" ? 1 : file.text.length} sha256=${createHash("sha256").update(file.imageData ? Buffer.from(file.imageData, "base64") : file.text).digest("hex")}`),
     `Optional evidence/documents: ${files.length - required.length}. Their references and extraction limitations are in the required index.`,

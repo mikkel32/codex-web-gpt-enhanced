@@ -66,6 +66,22 @@ test("compaction, edited ancestors, ambiguous answers, and missing cursors prese
   expect(store.resume(key, missingParent).mode).toBe("snapshot");
 });
 
+test("continuations omit proven unchanged system context but retain new or unproven instructions", () => {
+  const store = new ChatGptConversationCursors();
+  const source = input();
+  source.context.systemPrompt = ["Keep all changes read-only", "s".repeat(80_000)];
+  commit(store, source);
+  const followup = next();
+  followup.context.systemPrompt = [...source.context.systemPrompt];
+  expect(store.resume(key, followup).parsed.context.systemPrompt).toEqual([]);
+  expect(followup.context.systemPrompt).toEqual(source.context.systemPrompt);
+  followup.context.systemPrompt = ["New constraint: inspect only the README"];
+  expect(store.resume(key, followup).parsed.context.systemPrompt).toEqual(followup.context.systemPrompt);
+  followup.context.messages[0] = { role: "user", content: "Compacted task state", timestamp: 1 };
+  expect(store.resume(key, followup).parsed).toBe(followup);
+  expect(new ChatGptConversationCursors().resume(key, next()).mode).toBe("snapshot");
+});
+
 test("same wording from a different native turn cannot erase intervening work", () => {
   const store = new ChatGptConversationCursors();
   commit(store);

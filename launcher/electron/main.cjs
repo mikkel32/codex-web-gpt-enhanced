@@ -31,6 +31,7 @@ const {
   registerLoggedIpc,
 } = require("./logging.cjs");
 const { RuntimeHost } = require("./runtime.cjs");
+const { connectionVerificationIdentity, connectionVerificationStale } = require("./connection-verification.cjs");
 const { ensurePackagedRuntime, waitForPackagedRuntimeSource } = require("./runtime-install.cjs");
 const { RuntimeSupervisor } = require("./runtime-supervisor.cjs");
 const { DEVELOPMENT_PROFILE, resolveLauncherProfile } = require("./profile.cjs");
@@ -632,8 +633,14 @@ function registerIpc({ logger, stateStore }) {
     }
     try {
       publishOperation({ name: operationName, status: "running", message: "Checking ChatGPT connector" });
+      const identity = connectionVerificationIdentity(runtimeHost.runtimeConfigSnapshot().config);
       await browserHost.verifyConnector(runtimeHost.mcpConnectorName());
-      const state = stateStore.update({ mcpSetupComplete: true });
+      publishOperation({ name: operationName, status: "running", message: "Testing context delivery and native tool connection" });
+      const proof = await runtimeHost.verifyConnection();
+      if (!identity || identity !== connectionVerificationIdentity(runtimeHost.runtimeConfigSnapshot().config)) {
+        throw new Error("The runtime connection changed during verification; run the check again");
+      }
+      const state = stateStore.update({ mcpSetupComplete: true, mcpVerificationIdentity: identity, mcpVerificationTraceId: proof.traceId });
       send("launcher:state-changed", state);
       const successMessage = IS_DEV_PROFILE
         ? "DEV harness and connector verified"
@@ -645,7 +652,8 @@ function registerIpc({ logger, stateStore }) {
           ? {
               id: "connector",
               status: "ok",
-              message: `ChatGPT connector ${JSON.stringify(runtimeHost.mcpConnectorName())} is available`,
+              message: `ChatGPT connector ${JSON.stringify(runtimeHost.mcpConnectorName())} delivered context and completed a native tool round trip`,
+              detail: `Verification ${proof.traceId}; normal tasks retain their own sandbox and approvals`,
             }
           : check),
       };
@@ -1158,6 +1166,7 @@ async function start() {
       coreSetupComplete: Boolean(config),
       codexCatalogVerified: Boolean(config),
       mcpRuntimeInstalled: config?.mode === "full",
+      ...(connectionVerificationStale(stateStore.read(), config) ? { mcpSetupComplete: false } : {}),
       ...(config?.mode !== "full" ? { mcpSetupComplete: false, mcpGuideStep: 0 } : {}),
       codexRestartRequired: false,
       autoStart: false,
@@ -1229,6 +1238,7 @@ async function start() {
       const patch = {
         coreSetupComplete: true,
         mcpRuntimeInstalled: config.mode === "full",
+        ...(connectionVerificationStale(current, config) ? { mcpSetupComplete: false } : {}),
         experimentalBiggerContext: config.experimentalBiggerContext === true,
         zeroRiskProEnabled: config.zeroRiskProEnabled === true,
         ...(runtime.bridgeRouteChanged ? {

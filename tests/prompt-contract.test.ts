@@ -10,6 +10,8 @@ import {
 import { CHATGPT_WEB_LUNA_MODEL_ID, CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
 import { biggerContextPartCount } from "../src/adapters/chatgpt-web/usage";
 import type { CodexParsedRequest } from "../src/types";
+import { SUMMARY_PREFIX } from "../src/responses/compaction";
+import { nativeContextPrompt } from "../src/adapters/chatgpt-web/native-context";
 
 function request(reasoning: "low" | "medium" | "high" | "xhigh" | "max"): CodexParsedRequest {
   return {
@@ -25,6 +27,34 @@ function request(reasoning: "low" | "medium" | "high" | "xhigh" | "max"): CodexP
     options: { reasoning },
   };
 }
+
+test("fresh, proven continuation and checkpoint resync prompts preserve the current task and transport", () => {
+  const capabilities = { localToolsEnabled: true, solAvailable: true, proAvailable: true };
+  for (const state of ["fresh", "continuation", "resync"] as const) {
+    const parsed = request("xhigh");
+    if (state === "resync") parsed.context.messages.unshift({ role: "user", content: `${SUMMARY_PREFIX}\nWidget fixed; tests pending. Never deploy.`, timestamp: 0 });
+    for (const multipart of [false, true]) {
+      const compiled = compileChatGptWebPrompt(parsed, capabilities, "turn_current_handle", {
+        conversationState: state, nativeRetrieval: true, ...(multipart ? { experimentalMultipartParts: 2 } : {}),
+      });
+      const delivered = multipart ? nativeContextPrompt(compiled) : compiled;
+      expect(delivered.text).toContain(`<codex_conversation state="${state}">`);
+      expect(delivered.text).toContain("turn_token turn_current_handle");
+      expect(delivered.text).toContain("Codex coordinates durable compaction");
+      const records = multipart ? compiled.multipart!.parts.join("") : compiled.text;
+      expect(records).toContain("preserve-system");
+      expect(records).toContain("preserve-developer");
+      if (state === "continuation") expect(delivered.text).toContain("previously accepted history is not repeated");
+      if (state === "resync") {
+        expect(delivered.text).toContain("Codex has compacted earlier history");
+        expect(records).toContain("Never deploy");
+      }
+    }
+  }
+  const compact = request("xhigh");
+  compact._compactionRequest = true;
+  expect(compileChatGptWebPrompt(compact, capabilities, "turn_current_handle").text).not.toContain("<codex_conversation");
+});
 
 test("large Automatic Full context uses two atomic files without enabling a larger context window", () => {
   const parsed = request("high");

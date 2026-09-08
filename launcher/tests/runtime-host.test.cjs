@@ -32,6 +32,22 @@ function hostFor(existingConfig, interactionMode = "automatic") {
   return { host, invocation: () => invocation };
 }
 
+test("automatic verification requires received context and a native round trip before setup succeeds", async () => {
+  const { host } = hostFor({ mode: "full" });
+  host.run = async () => ({ stdout: JSON.stringify({ ok: true, appName: "Codex Native2" }) });
+  await assert.rejects(host.verifyConnection(), /did not prove/);
+  const proof = { ok: true, traceId: `connection_${"a".repeat(32)}`, scope: ["required-context-receipts", "evidence-retrieval", "native-tool-round-trip"] };
+  host.run = async (name, args, options) => {
+    assert.equal(name, "mcp-verification");
+    assert.deepEqual(args, ["verify-connection"]);
+    assert.equal(options.deferCompletion, true);
+    return { stdout: JSON.stringify(proof) };
+  };
+  assert.deepEqual(await host.verifyConnection(), proof);
+  host.run = async () => { throw new Error("Remote tool catalog is stale"); };
+  await assert.rejects(host.verifyConnection(), /catalog is stale/);
+});
+
 function devHostFor(existingConfig, interactionMode = "automatic") {
   const host = new RuntimeHost({
     app: {

@@ -758,6 +758,22 @@ class RuntimeHost {
     }
   }
 
+  async verifyConnection() {
+    const result = await this.run("mcp-verification", ["verify-connection"], {
+      message: "Testing context delivery and native tool connection",
+      timeoutMs: 210_000,
+      deferCompletion: true,
+    });
+    const proof = JSON.parse(result.stdout);
+    const required = ["required-context-receipts", "evidence-retrieval", "native-tool-round-trip"];
+    if (proof?.ok !== true || !/^connection_[a-f0-9]{32}$/.test(proof.traceId)
+      || !Array.isArray(proof.scope) || required.some(scope => !proof.scope.includes(scope))) {
+      throw new Error("The connector did not prove context delivery and native tool access");
+    }
+    this.logger.info("connector.round_trip_verified", proof);
+    return proof;
+  }
+
   async devDoctor() {
     if (this.launcherProfile !== "development") {
       throw new Error("DEV harness diagnostics require the isolated DEV launcher profile");

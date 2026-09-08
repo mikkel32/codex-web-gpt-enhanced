@@ -33,6 +33,7 @@ import { installRuntimeKeyBytes, managedRuntimeKeyPath, stopTunnel, tunnelStatus
 import { getTunnelServiceStatus, restartTunnelService, startTunnelService, stopTunnelService, uninstallTunnelService } from "./tunnel-service";
 import { VERSION } from "./version";
 import { runDevCommand } from "./dev-chat/cli";
+import { verifyConfiguredConnection } from "./connection-verification";
 
 const HELP = `codex-chatgpt-web ${VERSION}
 
@@ -43,6 +44,7 @@ Usage:
   codex-chatgpt-web setup --full --tunnel-id ID --runtime-key-file PATH [options]
   codex-chatgpt-web login
   codex-chatgpt-web doctor [--json]
+  codex-chatgpt-web verify-connection
   codex-chatgpt-web route <status|connect|disconnect>
   codex-chatgpt-web subagents <status|compatibility-v1|native>
   codex-chatgpt-web browser check
@@ -568,6 +570,12 @@ async function main(): Promise<void> {
   else if (command === "setup") await setupCommand(args);
   else if (command === "login") await loginCommand(args);
   else if (command === "doctor" || command === "status") await doctorCommand(args);
+  else if (command === "verify-connection") {
+    assertNoArgs(args);
+    // Keep machine-readable output separate from the existing redacted runtime diagnostics.
+    console.info = console.warn = (...values) => process.stderr.write(`${values.join(" ")}\n`);
+    stdout.write(`${JSON.stringify(await verifyConfiguredConnection(loadConfig()))}\n`);
+  }
   else if (command === "route") await routeCommand(args);
   else if (command === "subagents") await subagentsCommand(args);
   else if (command === "browser") {

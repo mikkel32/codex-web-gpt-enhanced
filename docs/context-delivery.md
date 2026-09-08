@@ -60,3 +60,69 @@ that every future network, model, file-format or account condition will succeed.
 The unused staged ACK formatters and staging-effort selector, the duplicate context-read path through the write gateway, the synthetic automatic context-window multiplier, and the dormant 3x-context recommendation modal were removed. Current connector schemas, same-task identity, native permissions, and explicit manual boundaries remain authoritative.
 
 PDF text support uses the maintained unpdf serverless build (https://github.com/unjs/unpdf), with per-page sequential extraction rather than unbounded parallel page processing. This is an implementation dependency, not evidence that every malformed or visual PDF can be understood.
+
+## Fresh tasks, continuing tasks and compaction
+
+The actual browser preparation path selects the prompt. A new ChatGPT conversation starts
+from the current user request and supplied task records, with focused workspace discovery
+when local evidence is needed. A proven retained conversation receives a continuation
+instruction: use this same chat's existing history together with the new Codex updates.
+The cursor verifies the accepted prefix, native turn and emitted final-answer message ID
+before omitting anything. Unchanged system records can also be omitted after their digest
+matches that accepted turn. Changed instructions, missing provenance and legacy cursors
+preserve the supplied records. Only hashes and IDs are saved, not another transcript.
+
+When a safe delta cannot be established, the retained chat receives a resync instruction
+and the canonical current records. A readable checkpoint is identified as task state,
+with completed work, pending work, constraints and references. A missing retained chat
+still fails explicitly rather than silently moving the task elsewhere. Attachments are
+rehydrated from canonical input with current paths and fresh receipts on every relevant turn.
+
+During Codex compaction, outstanding accepted tool results remain canonical. A newly
+requested tool intercepted at the compaction boundary is explicitly marked unexecuted.
+The Web response settles, then the same retained conversation receives one structured
+handoff request. The bridge accepts only the matching checkpoint after physical settlement.
+Codex owns the replacement history and the next request. Compaction does not complete,
+restart or replay work, reset a goal, or renew old tool tokens. Failure retains the task
+for diagnosis instead of manufacturing an empty successful handoff.
+
+The ordinary prompt asks the model to maintain concise working state and distinguish
+verified completion from pending or uncertain work. It does not request a second private
+summary every turn or let Web independently replace Codex history. The existing explicit
+Luna rolling-checkpoint and manual Zero Risk protocols remain separate.
+
+OpenAI's [current model guidance](https://developers.openai.com/api/docs/guides/latest-model)
+supports clear task scope, follow-through, and explicit handling of conflicting instruction
+files. The [Instruction Hierarchy paper](https://arxiv.org/html/2404.13208v1) studies role
+priority and treating third-party content as lower-priority input; it is a training paper,
+not a recipe that guarantees perfect prompts. The bridge therefore preserves role labels
+and user corrections instead of flattening everything into a generated system summary.
+Our application of these sources is an engineering choice verified by regression and live
+tests, not an assertion about undocumented ChatGPT internals. OpenAI's
+[compaction guidance](https://developers.openai.com/api/docs/guides/compaction) also requires
+preserving the returned canonical window. A visible old chat is useful context but cannot
+substitute for current constraints or evidence that is no longer available to the model.
+
+## Automatic setup verification
+
+Automatic Full setup checks local health and connector selection, then performs a real
+read-only connection test before setting `mcpSetupComplete`. The test sends a disposable
+task with paginated required context, receipt acknowledgements, separately searchable
+evidence and one inert native probe discovered through the current tool inventory. Its
+answer must reproduce independently generated values from all three sources. It exposes
+no shell or repository tools, does not change permissions, and does not join an existing
+user task. A selected chip, a locally served page, or a model's claim of success is insufficient.
+
+The check uses Extra High where available, High for other Sol accounts, or Luna for
+Luna-only accounts; it never chooses Pro. Current live acceptance uses Extra High only.
+Failures and timeouts are terminal for that check, carry a `connection_...` trace ID, and
+retire only its capability. Existing launcher Activity and sanitized log export retain
+the diagnostic trail. Saved proof is invalidated when release, connector, tunnel, broker
+or browser profile changes. Run `codex-chatgpt-web verify-connection` to reproduce the
+round trip; source checkouts additionally require `--allow-production` for production data.
+
+This proves the tested context and native gateway route. Each real task still supplies
+its own tool inventory, sandbox and approvals. Initial account sign-in, tunnel credentials
+and ChatGPT consent must be available; setup does not invent authorization or disable
+approval enforcement. Manual Zero Risk verification remains a local health check with
+manual connector selection and Send.

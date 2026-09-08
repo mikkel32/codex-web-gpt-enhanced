@@ -13,5 +13,5 @@ export function sourceCommandNeedsProductionOptIn({ entry, configHome, codexHome
   if (["help", "doctor", "status", "dev", "open"].includes(command)) return false;
   if (["route", "service", "tunnel", "subagents"].includes(command) && action === "status") return false;
   if (command === "login") return productionCore;
-  return ["setup", "serve", "guard", "uninstall", "route", "service", "tunnel", "subagents", "hook"].includes(command);
+  return ["setup", "serve", "guard", "uninstall", "route", "service", "tunnel", "subagents", "hook", "verify-connection"].includes(command);
 }

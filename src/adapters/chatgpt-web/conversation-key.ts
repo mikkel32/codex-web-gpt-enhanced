@@ -27,7 +27,7 @@ const answerText = (message: CodexMessage) => message.role === "assistant"
   ? message.content.filter(part => part.type === "text").map(part => part.text).join("").trim()
   : "";
 
-export interface ConversationCursor { count: number; prefix: string; answer: string; updatedAt: number; sourceTurnId?: string; answerItemIds?: string[] }
+export interface ConversationCursor { count: number; prefix: string; answer: string; updatedAt: number; systemDigest?: string; sourceTurnId?: string; answerItemIds?: string[] }
 const validItemId = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 256;
 
 /** Trim only a proven accepted prefix and its unique final answer. Native turns after it survive. */
@@ -49,7 +49,10 @@ export function retainedConversationResumeRequest(parsed: CodexParsedRequest, cu
   // A new instruction or notification may not have reached the running Web turn.
   // Never discard that gap merely because a later answer matches the cursor.
   if (messages.slice(cursor.count, match).some(message => message.role !== "assistant" && message.role !== "toolResult")) return undefined;
-  return { ...parsed, context: { ...parsed.context, messages: messages.slice(match + 1) } };
+  const sameSystem = cursor.systemDigest === digest(JSON.stringify(parsed.context.systemPrompt ?? []));
+  return { ...parsed, context: { ...parsed.context, messages: messages.slice(match + 1),
+    ...(sameSystem ? { systemPrompt: [] } : {}),
+  } };
 }
 
 /** Metadata only: Codex owns the history; ChatGPT owns its saved document. No third transcript. */
@@ -73,7 +76,9 @@ export class ChatGptConversationCursors {
         const sourceTurnId = typeof cursor.sourceTurnId === "string" && cursor.sourceTurnId.trim() ? cursor.sourceTurnId : undefined;
         const answerItemIds = Array.isArray(cursor.answerItemIds) && cursor.answerItemIds.length <= 8 && cursor.answerItemIds.every(validItemId)
           ? cursor.answerItemIds : undefined;
+        const systemDigest = typeof cursor.systemDigest === "string" && /^[a-f0-9]{64}$/.test(cursor.systemDigest) ? cursor.systemDigest : undefined;
         return [[key, { count: cursor.count, prefix: cursor.prefix, answer: cursor.answer, updatedAt: cursor.updatedAt,
+          ...(systemDigest ? { systemDigest } : {}),
           ...(sourceTurnId ? { sourceTurnId } : {}), ...(answerItemIds ? { answerItemIds } : {}) }]];
       })) as Record<string, ConversationCursor>;
     } catch { this.cursors = {}; }
@@ -94,7 +99,8 @@ export class ChatGptConversationCursors {
     if (!answer.trim()) return;
     this.read();
     const sourceTurnId = extractChatGptTurnIdentity(parsed).turnId;
-    this.cursors[key] = { count: parsed.context.messages.length, prefix: historyDigest(parsed.context.messages), answer: digest(answer.trim()), updatedAt: Date.now(), ...(sourceTurnId ? { sourceTurnId } : {}) };
+    this.cursors[key] = { count: parsed.context.messages.length, prefix: historyDigest(parsed.context.messages), answer: digest(answer.trim()),
+      systemDigest: digest(JSON.stringify(parsed.context.systemPrompt ?? [])), updatedAt: Date.now(), ...(sourceTurnId ? { sourceTurnId } : {}) };
     this.cursors = Object.fromEntries(Object.entries(this.cursors).sort((a, b) => b[1].updatedAt - a[1].updatedAt).slice(0, 256));
     this.write(key);
   }

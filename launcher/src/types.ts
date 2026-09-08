@@ -18,6 +18,8 @@ export interface LauncherState {
   coreSetupComplete?: boolean;
   codexCatalogVerified?: boolean;
   mcpSetupComplete?: boolean;
+  mcpVerificationIdentity?: string;
+  mcpVerificationTraceId?: string;
   mcpRuntimeInstalled?: boolean;
   codexRestartRequired?: boolean;
   mcpGuideStep: number;

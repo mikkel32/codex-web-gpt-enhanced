@@ -728,7 +728,7 @@ export function createChatGptWebAdapter(
     let tokenSettled = false;
     let activeToken: string | undefined;
     let releaseContextPlan: () => void = () => {};
-    const prepareWith = async (input: CodexParsedRequest) => {
+    const prepareWith = async (input: CodexParsedRequest, conversationState: "fresh" | "continuation" | "resync" = "fresh") => {
       const turnToken = activeToken ?? await broker.register(
         environment,
         timeoutMs === undefined ? undefined : timeoutMs + 60_000,
@@ -744,11 +744,12 @@ export function createChatGptWebAdapter(
         return prepared;
       };
       try {
+        console.info(`[chatgpt-web] context delivery trace=${traceId} state=${conversationState} systemRecords=${input.context.systemPrompt?.length ?? 0} messages=${input.context.messages.length}`);
         let compiled = compileChatGptWebPrompt(
           input,
           turnCapabilities,
           turnToken,
-          compileOptionsFor(input),
+          { ...compileOptionsFor(input), conversationState },
         );
         if (!input._compactionRequest && broker.setContextFiles) {
           const assets = canonicalAttachmentAssets(checkpointInput.parsed.context.messages);
@@ -759,7 +760,7 @@ export function createChatGptWebAdapter(
           };
           mergeAssets();
           if (!compiled.multipart && (compiled.images.length || compiled.files?.length)) {
-            compiled = compileChatGptWebPrompt(input, turnCapabilities, turnToken, { ...compileOptionsFor(input), experimentalMultipartParts: 2 });
+            compiled = compileChatGptWebPrompt(input, turnCapabilities, turnToken, { ...compileOptionsFor(input), conversationState, experimentalMultipartParts: 2 });
             mergeAssets();
           }
           if (compiled.multipart) {
@@ -792,7 +793,7 @@ export function createChatGptWebAdapter(
       reasoning: parsed.options.reasoning,
       capabilities: turnCapabilities,
       prepare: () => prepareWith(checkpointInput.parsed),
-      ...(resumeInput ? { prepareResume: () => prepareWith(resumeInput) } : {}),
+      ...(resumeInput ? { prepareResume: () => prepareWith(resumeInput, resumePlan?.mode === "delta" ? "continuation" : "resync") } : {}),
       ...(retainConversation ? { retainConversation: true, conversationKey } : {}),
       abortSignal: browserAbort.signal,
       ...(parsed._compactionRequest ? { compaction: true } : {}),
