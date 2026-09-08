@@ -83,7 +83,9 @@ async function main() {
       const page = await context.newPage(), errors = []; page.setDefaultTimeout(15000);
       page.on('pageerror', error => errors.push(error.message));
       await page.goto(pageUrl); console.log('Opened fixture page');
-      await page.getByRole('button', { name: 'Open ChatGPT', exact: true }).waitFor(); await page.waitForTimeout(1200);
+      await page.getByRole('button', { name: 'Open ChatGPT', exact: true }).waitFor();
+      await page.locator('.guided-setup.is-ready').waitFor();
+      await page.waitForFunction(() => document.getAnimations().every(animation => animation.playState !== 'running'), undefined, { timeout: 5000 });
       assert.equal(await page.evaluate(() => document.getAnimations().filter(animation => animation.playState === 'running').length), 0, 'overview should settle when idle');
       assert.equal(await page.evaluate(() => window.testListeners.onLog?.size ?? 0), 0, 'overview must not subscribe to raw logs');
       assert.equal(await page.evaluate(() => window.testMutations), 0, 'setup must require user intent');

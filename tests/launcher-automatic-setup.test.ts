@@ -251,6 +251,30 @@ test("invalidating an in-flight read-only check discards its late result", async
   assert.ok(!f.phases.includes("ready"));
 });
 
+for (const paused of [false, true]) test(`invalidated inspection rechecks once and respects pause=${paused}`, async () => {
+  const f = configuredFixture();
+  let release!: () => void;
+  let entered!: () => void;
+  const waiting = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let calls = 0;
+  f.api.doctor = async () => {
+    calls += 1;
+    if (calls === 1) { entered(); await gate; }
+    return { ok: true, checks: [] };
+  };
+  const first = f.setup.inspect(); await waiting;
+  f.setup.invalidate();
+  const second = f.setup.inspect();
+  const duplicate = f.setup.inspect();
+  if (paused) f.setup.pause();
+  release();
+  await Promise.all([first, second, duplicate]);
+  assert.equal(f.setup.getState().phase, paused ? "paused" : "ready");
+  assert.equal(calls, paused ? 1 : 2);
+  assert.equal(f.calls.some(call => ["core", "mcp", "login", "verify-mcp"].includes(call)), false);
+});
+
 test("readiness invalidation never starts work", async () => {
   const f = configuredFixture(); await f.setup.inspect();
   f.setup.invalidate(); await f.setup.resume();

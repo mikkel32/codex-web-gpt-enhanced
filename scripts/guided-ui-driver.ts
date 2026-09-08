@@ -72,6 +72,17 @@ try {
   await page.locator(".guided-setup.is-idle").waitFor();
   assert.equal(await page.evaluate(() => (window as unknown as GuidedFixtureWindow).guidedFixture.calls.filter(x => x === "setupCore").length), 1, "Invalidating evidence must not reinstall");
 
+  for (let repetition = 0; repetition < 5; repetition += 1) {
+    await open("onboarding");
+    await page.getByRole("button", { name: "Connect my workspace", exact: true }).click();
+    await page.waitForFunction(() => (window as unknown as GuidedFixtureWindow).guidedFixture.calls.includes("openLogin"));
+    await page.evaluate(() => (window as unknown as GuidedFixtureWindow).guidedFixture.signIn(true));
+    await page.locator(".guided-setup.is-codex").waitFor();
+    await page.evaluate(() => (window as unknown as GuidedFixtureWindow).guidedFixture.catalog());
+    await page.locator(".guided-setup.is-ready").waitFor();
+    assert.equal(await page.evaluate(() => (window as unknown as GuidedFixtureWindow).guidedFixture.calls.filter(x => x === "setupCore").length), 1);
+  }
+
   await open("clean");
   await page.getByRole("radio", { name: /^ChatGPT \+ local tools/ }).check();
   await page.getByRole("button", { name: "Set up my workspace", exact: true }).dblclick();
@@ -105,7 +116,7 @@ try {
   // Verify idle and high-volume Activity behavior in the same actual Electron renderer.
   await open("ready");
   await page.locator(".guided-setup.is-ready").waitFor();
-  await page.waitForTimeout(900);
+  await page.waitForFunction(() => document.getAnimations().every(animation => animation.playState !== "running"), undefined, { timeout: 5000 });
   assert.equal(await page.evaluate(() => document.getAnimations().filter(animation => animation.playState === "running").length), 0, "Idle workspace must have no continuous animations");
   await page.evaluate(() => {
     const fixture = (window as unknown as GuidedFixtureWindow).guidedFixture;
@@ -152,4 +163,18 @@ try {
   await screenshot("setup-error");
   assert.deepEqual(errors, [], "Renderer JavaScript errors");
   console.log(`GUIDED_RENDERER_OK ${process.platform}/${process.arch} electron=${process.versions.electron} scenarios=${scenarios} locales=en,ja,zh-CN widths=1180,700,390 onboarding-event-race core-before-tools single-flight safe-errors no-false-update idle-animations-zero bounded-activity-300 hidden-activity-detached native-manual-boundaries`);
+} catch (error) {
+  const page = browser.contexts()[0]?.pages()[0];
+  if (page) {
+    const diagnostic = await page.evaluate(() => {
+      const fixture = (window as unknown as GuidedFixtureWindow).guidedFixture;
+      return { phase: document.querySelector(".guided-setup")?.className,
+        calls: fixture?.calls, nativeReady: fixture?.nativeReady,
+        coreComplete: fixture?.snapshot.state.coreSetupComplete,
+        catalogVerified: fixture?.snapshot.state.codexCatalogVerified,
+        restartRequired: fixture?.snapshot.state.codexRestartRequired };
+    }).catch(() => ({ unavailable: true }));
+    console.error("GUIDED_UI_FAILURE", JSON.stringify(diagnostic));
+  }
+  throw error;
 } finally { await browser.close(); }

@@ -70,6 +70,27 @@ function loopbackHealthBaseURL(value) {
   }
 }
 
+function managedProfileHealthBaseURL(tunnel) {
+  if (!tunnel || !path.isAbsolute(tunnel.profileDir || "")
+    || !/^[A-Za-z0-9._-]+$/.test(tunnel.profileName || "")
+    || typeof tunnel.tunnelId !== "string") return null;
+  try {
+    const profilePath = path.join(tunnel.profileDir, `${tunnel.profileName}.yaml`);
+    const profileStat = fs.lstatSync(profilePath);
+    if (!profileStat.isFile() || profileStat.size > 64 * 1024) return null;
+    // Managed tunnel-client profiles are JSON-compatible YAML. Never inspect key contents.
+    const profile = JSON.parse(fs.readFileSync(profilePath, "utf8"));
+    if (profile.control_plane?.tunnel_id !== tunnel.tunnelId) return null;
+    const urlFile = profile.health?.url_file;
+    if (typeof urlFile !== "string" || !path.isAbsolute(urlFile)) return null;
+    const urlStat = fs.lstatSync(urlFile);
+    if (!urlStat.isFile() || urlStat.size > 4096) return null;
+    return loopbackHealthBaseURL(fs.readFileSync(urlFile, "utf8").trim());
+  } catch {
+    return null;
+  }
+}
+
 function readJson(pathname) {
   return JSON.parse(fs.readFileSync(pathname, "utf8"));
 }
@@ -674,7 +695,8 @@ class RuntimeSupervisor {
       const liveRuntime = entry.live_runtime && typeof entry.live_runtime === "object"
         ? entry.live_runtime
         : {};
-      const healthBaseUrl = loopbackHealthBaseURL(liveRuntime.base_url);
+      const healthBaseUrl = loopbackHealthBaseURL(liveRuntime.base_url)
+        || (runtimeState !== "stopped" ? managedProfileHealthBaseURL(tunnel) : null);
       if (healthBaseUrl) this.tunnelHealthBaseUrl = healthBaseUrl;
       const pid = Number.isInteger(liveRuntime.system?.pid) && liveRuntime.system.pid > 0
         ? liveRuntime.system.pid
@@ -819,17 +841,20 @@ class RuntimeSupervisor {
   }
 
   async waitForTunnelMcpTransport(config, timeoutMs = 10_000) {
-    if (!this.tunnelHealthBaseUrl) await this.discoverTunnelHealthBaseUrl(config);
     const deadline = Date.now() + timeoutMs;
-    let health;
+    let health = { observed: false, ok: false, fatal: false, detail: "local tunnel health URL is not known" };
     do {
-      health = await this.probeTunnelMcpTransport();
+      if (!this.tunnelHealthBaseUrl) {
+        try { await this.discoverTunnelHealthBaseUrl(config); }
+        catch (error) { health = { observed: false, ok: false, fatal: false, detail: errorMessage(error) }; }
+      }
+      if (this.tunnelHealthBaseUrl) health = await this.probeTunnelMcpTransport();
       if (health.observed && health.ok) return health;
       if (health.fatal) {
         throw new Error(`Fresh tunnel MCP transport is unhealthy: ${health.detail}`);
       }
       if (Date.now() >= deadline) break;
-      await sleep(TUNNEL_HEALTH_POLL_INTERVAL_MS);
+      await sleep(Math.min(TUNNEL_HEALTH_POLL_INTERVAL_MS, Math.max(1, deadline - Date.now())));
     } while (Date.now() < deadline);
     throw new Error(
       `Fresh tunnel MCP transport could not be verified within ${timeoutMs}ms:`
@@ -2055,7 +2080,7 @@ class RuntimeSupervisor {
     }
     this.nativeRecovery?.pause();
     const config = this.readConfig();
-    if (config && !this.daemon && this.nativeRecovery) await this.adoptBackgroundNative(config, { resume: false });
+    if (config && !this.daemon) await this.adoptBackgroundNative(config, { resume: false });
     this.stopping = true;
     this.stopTunnelMonitor();
     for (const name of ["daemon", "tunnel"]) {

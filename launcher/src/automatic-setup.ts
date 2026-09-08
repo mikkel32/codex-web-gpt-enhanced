@@ -33,6 +33,9 @@ export function createAutomaticSetup({ api, publish, navigate }: {
 }) {
   let state: AutomaticSetupState = { phase: "idle", active: false };
   let flight: Promise<void> | null = null;
+  let flightGeneration = 0;
+  let queuedInspection: Promise<void> | null = null;
+  let queuedInspectionGeneration = 0;
   let queuedStart: Promise<void> | null = null;
   let replay = false;
   let disposed = false;
@@ -180,6 +183,7 @@ export function createAutomaticSetup({ api, publish, navigate }: {
     if (disposed || !state.active) return Promise.resolve();
     if (flight) { replay = true; return flight; }
     const ticket = generation;
+    flightGeneration = ticket;
     // Assign the single-flight guard before any observer can re-enter.
     flight = Promise.resolve().then(() => run(ticket)).finally(() => {
       flight = null;
@@ -195,8 +199,20 @@ export function createAutomaticSetup({ api, publish, navigate }: {
     getState: () => state,
     inspect(): Promise<void> {
       // Returning users get a read-only health check, not another installation.
-      if (disposed || state.active || flight) return flight ?? Promise.resolve();
+      if (disposed || state.active) return flight ?? Promise.resolve();
+      if (flight) {
+        if (state.phase !== "idle" || generation === flightGeneration) return flight;
+        queuedInspectionGeneration = generation;
+        if (queuedInspection) return queuedInspection;
+        queuedInspection = flight.then(() => {
+          queuedInspection = null;
+          if (disposed || state.active || state.phase !== "idle" || generation !== queuedInspectionGeneration) return;
+          return this.inspect();
+        });
+        return queuedInspection;
+      }
       const ticket = ++generation;
+      flightGeneration = ticket;
       const alive = () => !disposed && ticket === generation;
       flight = Promise.resolve().then(async () => {
         if (!alive()) return;
