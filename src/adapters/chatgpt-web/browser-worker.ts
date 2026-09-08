@@ -2695,11 +2695,24 @@ export class ChatGptBrowserWorker {
     return (await this.responseDomSnapshot(locator, {})).visibleText;
   }
 
-  private async captureSubmissionBaseline(page: Page): Promise<ChatGptSubmissionBaseline> {
+  private async captureSubmissionBaseline(
+    page: Page,
+    retained = false,
+    signal?: AbortSignal,
+  ): Promise<ChatGptSubmissionBaseline> {
+    await this.activeComposer(page, 30_000, signal);
     const userTurns = page.locator(CHATGPT_USER_TURN_SELECTOR);
     const responseTurns = page.locator(CHATGPT_ASSISTANT_TURN_SELECTOR);
+    if (retained) {
+      // A restored tab can expose its URL before React has restored the previous answer. An empty
+      // baseline at that point would count the old answer as an additional response after Send.
+      await responseTurns.last().waitFor({ state: "visible", timeout: 30_000, signal });
+    }
     const domCache: ChatGptSubmissionDomCache = {};
-    const state = await this.submissionDomState(page, domCache);
+    const state = await this.submissionDomState(page, domCache, signal);
+    if (retained && (state.assistantTurnCount === 0 || state.visibleStopButtonCount > 0)) {
+      throw new Error("ChatGPT retained conversation has not restored an idle previous response; no prompt was sent");
+    }
     return {
       userTurns,
       responseTurns,
@@ -3015,6 +3028,7 @@ export class ChatGptBrowserWorker {
     catalogRefreshAvailable = false,
     attemptBudget: ChatGptConnectorAttemptBudget = { triggerAttempts: 0 },
     abortSignal?: AbortSignal,
+    savedConversation = false,
   ): Promise<Locator> {
     const capture = async (checkpoint: string): Promise<void> => {
       throwIfPromptAttachmentAborted(abortSignal);
@@ -3026,7 +3040,7 @@ export class ChatGptBrowserWorker {
     const appResult = menuRows.filter({
       has: page.getByText(this.config.appName, { exact: true }),
     });
-    await ensureChatGptPersonalizedConnectorAccess(
+    if (!savedConversation) await ensureChatGptPersonalizedConnectorAccess(
       page,
       capture,
       async (personalizationSignal) => {
@@ -3229,6 +3243,7 @@ export class ChatGptBrowserWorker {
     catalogRefreshAvailable = false,
     connectorAttemptBudget?: ChatGptConnectorAttemptBudget,
     reuseConnector = false,
+    savedConversation = false,
   ): Promise<void> {
     throwIfPromptAttachmentAborted(abortSignal);
     const connectorMode = chatGptConnectorAttachmentMode(localTools, reuseConnector);
@@ -3252,6 +3267,7 @@ export class ChatGptBrowserWorker {
         catalogRefreshAvailable,
         connectorAttemptBudget,
         abortSignal,
+        savedConversation,
       );
       // selectConnector owns and rolls back every mutation until it returns. From this point the
       // attachment owns the selected pill and prompt text as one transaction.
@@ -3425,6 +3441,7 @@ export class ChatGptBrowserWorker {
     catalogRefreshAvailable = false,
     connectorAttemptBudget?: ChatGptConnectorAttemptBudget,
     reuseConnector = false,
+    savedConversation = false,
   ): Promise<void> {
     let retryAvailable = compaction;
     for (;;) {
@@ -3438,6 +3455,7 @@ export class ChatGptBrowserWorker {
           catalogRefreshAvailable,
           connectorAttemptBudget,
           reuseConnector,
+          savedConversation,
         );
         return;
       } catch (error) {
@@ -4282,7 +4300,7 @@ export class ChatGptBrowserWorker {
       const finalPrompt = prepared.multipart
         ? formatChatGptWebMultipartFileCommit(prepared.multipart) : prepared.text;
 
-      let submissionBaseline = await this.captureSubmissionBaseline(page);
+      let submissionBaseline = await this.captureSubmissionBaseline(page, reuseConversation, turn.abortSignal);
       let catalogRefreshAvailable = mode.localTools && !reuseConversation && !prepared.multipart;
       const connectorAttemptBudget: ChatGptConnectorAttemptBudget = { triggerAttempts: 0 };
       for (;;) {
@@ -4306,6 +4324,7 @@ export class ChatGptBrowserWorker {
                 catalogRefreshAvailable,
                 connectorAttemptBudget,
                 reuseConversation,
+                turn.retainConversation === true,
               );
             },
             chatGptSuspensionClock,

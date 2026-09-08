@@ -17,6 +17,7 @@ import { findTopLevelAssignment } from "../../codex-integration-document";
 import type { CodexTool } from "../../types";
 import type {
   ChatGptThreadSpawnLineage,
+  ChatGptResumedRootTurn,
   ChatGptTurnEnvironment,
 } from "./environment";
 
@@ -515,7 +516,7 @@ function environmentFromTurnContext(
 }
 
 function validateMetadataConsistency(
-  lineage: ChatGptThreadSpawnLineage,
+  lineage: Pick<ChatGptThreadSpawnLineage, "sandboxType" | "workspaceRoots">,
   environment: ChatGptTurnEnvironment,
 ): void {
   // Request sandbox/workspace fields are diagnostic only. They narrow a rollout-derived authority
@@ -532,6 +533,43 @@ function validateMetadataConsistency(
   )))) {
     throw new Error("ChatGPT Web subagent workspace metadata conflicts with its Codex rollout roots");
   }
+}
+
+export function resolveCurrentCodexRootRolloutEnvironment(options: {
+  codexHome: string;
+  lineage: ChatGptResumedRootTurn;
+  tools?: readonly CodexTool[];
+}): ChatGptTurnEnvironment {
+  const { codexHome, lineage, tools } = options;
+  if (!CODEX_ID.test(lineage.threadId) || !CODEX_ID.test(lineage.turnId)) {
+    throw new Error("Codex resumed root turn contains an invalid native identifier");
+  }
+  const matching: ChatGptTurnEnvironment[] = [];
+  for (const candidate of scanCanonicalRollouts(codexHome, lineage.threadId)) {
+    const path = validateRolloutPath(codexHome, candidate, lineage.threadId);
+    const fd = openSync(path, "r");
+    try {
+      const size = fstatSync(fd).size;
+      const first = firstRolloutRecord(fd, size);
+      const meta = record(first.payload);
+      if (first.type !== "session_meta" || meta?.id !== lineage.threadId
+        || meta.thread_source !== "user" || typeof meta.source !== "string"
+        || meta.parent_thread_id || (meta.agent_path && meta.agent_path !== "/root")) {
+        throw new Error("Codex rollout does not authenticate the requested root task");
+      }
+      const latest = latestTurnContext(fd, size);
+      if (!latest || latest.turn_id !== lineage.turnId) continue;
+      const environment = environmentFromTurnContext(latest, lineage.turnId, tools);
+      validateMetadataConsistency(lineage, environment);
+      matching.push(environment);
+    } finally {
+      closeSync(fd);
+    }
+  }
+  if (matching.length !== 1) {
+    throw new Error(`Codex resumed root task requires one current canonical rollout; found ${matching.length}`);
+  }
+  return matching[0]!;
 }
 
 export function resolveCurrentCodexChildRolloutEnvironment(options: {
