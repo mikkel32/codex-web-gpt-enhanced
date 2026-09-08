@@ -60,9 +60,10 @@ export function AutomaticSetup({ snapshot, surface, navigate, clearError, startO
     const setup = controller.current;
     if (lastEvidence.current !== evidence) {
       lastEvidence.current = evidence;
-      setup?.invalidate();
+      const proven = setup?.getState().snapshot;
+      if (!proven || setupEvidenceKey(proven) !== evidence) setup?.invalidate();
     }
-    if (!startOnMount && snapshot.state.coreSetupComplete && setup?.getState().phase === "idle") {
+    if ((!startOnMount || initialIntentConsumed.current) && snapshot.state.coreSetupComplete && setup?.getState().phase === "idle") {
       void setup.inspect();
     }
   }, [evidence, startOnMount, snapshot.state.coreSetupComplete]);
@@ -70,8 +71,12 @@ export function AutomaticSetup({ snapshot, surface, navigate, clearError, startO
   useEffect(() => {
     if (stale || connectionError || (status && (!status.nativeAvailable || status.activeBrowserTurns > 0) && snapshot.profile !== "development")) {
       controller.current?.invalidate();
+    } else if (status && snapshot.state.coreSetupComplete
+      && (!startOnMount || initialIntentConsumed.current)
+      && controller.current?.getState().phase === "idle") {
+      void controller.current.inspect();
     }
-  }, [status, stale, connectionError, snapshot.profile]);
+  }, [status, stale, connectionError, snapshot.profile, snapshot.state.coreSetupComplete, startOnMount]);
 
   // Recovery may finish without a browser event. Never resume a paused controller.
   useEffect(() => {
