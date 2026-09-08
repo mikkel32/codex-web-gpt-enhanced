@@ -2080,7 +2080,7 @@ class RuntimeSupervisor {
     }
     this.nativeRecovery?.pause();
     const config = this.readConfig();
-    if (config && !this.daemon && this.nativeRecovery) await this.adoptBackgroundNative(config, { resume: false });
+    if (config && !this.daemon) await this.adoptBackgroundNative(config, { resume: false });
     this.stopping = true;
     this.stopTunnelMonitor();
     for (const name of ["daemon", "tunnel"]) {

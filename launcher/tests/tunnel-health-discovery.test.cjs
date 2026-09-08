@@ -63,3 +63,23 @@ test("health discovery shares the bounded MCP readiness retry deadline", async t
   await f.supervisor.waitForTunnelMcpTransport(f.config, 1200);
   assert.equal(probes, 2);
 });
+
+test("custom profiles adopt and drain the background daemon before stopping their tunnel", async t => {
+  const f = fixture(t);
+  const calls = [];
+  const s = f.supervisor;
+  assert.equal(s.nativeRecovery, null);
+  s.readConfig = () => ({ ...f.config, mode: "full" });
+  s.readState = () => null;
+  s.proxyHealth = async () => true;
+  s.adoptBackgroundNative = async (_config, options) => {
+    assert.equal(options.resume, false);
+    calls.push("adopt-daemon"); s.daemon = { pid: process.pid }; return true;
+  };
+  s.adoptConfiguredTunnelForStop = async () => { calls.push("adopt-tunnel"); s.tunnel = { managed: true }; };
+  s.acquireDrain = async () => { calls.push("drain"); return true; };
+  s.stopTunnelGracefully = async () => { calls.push("stop-tunnel"); s.tunnel = null; };
+  s.shutdownDaemon = async () => { calls.push("shutdown-daemon"); s.daemon = null; };
+  await s.stopForSetup();
+  assert.deepEqual(calls, ["adopt-daemon", "adopt-tunnel", "drain", "stop-tunnel", "shutdown-daemon"]);
+});
