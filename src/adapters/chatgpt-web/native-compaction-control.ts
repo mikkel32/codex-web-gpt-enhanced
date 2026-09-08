@@ -3,13 +3,27 @@ import type { CompactionTransactionHandle } from "./compaction-transaction";
 
 export const CODEX_COMPACTION_CONTROL_WIRE_NAME = "codex.control.compaction_handoff";
 export const CODEX_ACTIVE_COMPACTION_REQUEST_MARKER = "CODEX_ACTIVE_COMPACTION_REQUEST";
+export const COMPACTION_HANDOFF_BEGIN = "CODEX_COMPACTION_HANDOFF_BEGIN";
+export const COMPACTION_HANDOFF_END = "CODEX_COMPACTION_HANDOFF_END";
 
 /** Only the final answer of this exact checkpoint request can use the text return channel. */
 export function parseCompactionFinalHandoff(text: string, handoffId: string): string | undefined {
   const trimmed = text.trim();
-  const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/i.exec(trimmed);
+  const fenced = /^```(?:json|text|markdown)?\s*\n([\s\S]*?)\n```$/i.exec(trimmed);
+  const content = (fenced?.[1] ?? trimmed).replace(/\r\n/g, "\n");
+  const start = `${COMPACTION_HANDOFF_BEGIN} ${handoffId}\n`;
+  const end = `\n${COMPACTION_HANDOFF_END} ${handoffId}`;
+  if (content.startsWith(start) && content.endsWith(end)) {
+    const summary = content.slice(start.length, -end.length).trim();
+    // Reject duplicate/nested envelopes and unrelated surrounding text. Do not repair JSON,
+    // strip Markdown inside the summary, or accept an answer from a different transaction.
+    if (!summary || summary === "<complete checkpoint summary>"
+      || summary.split("\n").some(line => /^CODEX_COMPACTION_HANDOFF_(?:BEGIN|END)\b/.test(line.trim()))) return undefined;
+    return summary;
+  }
   try {
-    const value: unknown = JSON.parse(fenced?.[1] ?? trimmed);
+    // Older retained conversations may still emit the original valid JSON envelope.
+    const value: unknown = JSON.parse(content);
     if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
     const record = value as Record<string, unknown>;
     if (record.type !== "codex_compaction_handoff" || record.handoff_id !== handoffId
@@ -81,10 +95,13 @@ export function structuredCompactionHandoffInstruction(
 ): string {
   return [
     "Automatic Codex context compaction has started. Stop ordinary task work and do not call any more work tools.",
+    "This response is private checkpoint control. Preserve earlier user-facing answer-format requirements inside the summary; they do not change this handoff's format.",
     COMPACT_PROMPT,
     ...compactionControlBinding(transaction),
-    "If the attached control tool is unavailable or cannot submit the checkpoint, return the checkpoint in your final answer using exactly this JSON object instead (replace only summary with the complete checkpoint):",
-    JSON.stringify({ type: "codex_compaction_handoff", handoff_id: transaction.handoffId, summary: "<complete checkpoint summary>" }),
+    "If the attached control tool is unavailable or cannot submit the checkpoint, return the complete summary between these exact boundary lines. Write ordinary text or Markdown inside; do not encode the summary as a JSON string. Include no text outside the boundaries:",
+    `${COMPACTION_HANDOFF_BEGIN} ${transaction.handoffId}`,
+    "<complete checkpoint summary>",
+    `${COMPACTION_HANDOFF_END} ${transaction.handoffId}`,
     "The handoff_id must match this request exactly. Do not return an acknowledgment, ordinary task answer, or a checkpoint from an earlier request.",
     "After the control call returns submitted=true, call no more tools. The bridge will close this one-purpose Web response after accepting the checkpoint.",
     "The outer bridge accepts compaction only after the structured checkpoint is valid and its owned browser turn has physically settled.",

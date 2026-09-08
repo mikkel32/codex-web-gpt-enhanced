@@ -367,6 +367,7 @@ export async function requestRetainedCompactionHandoff(
     const browserHandoff = browser.then(async answer => {
       const checkpoint = parseCompactionFinalHandoff(answer, expectedHandoffId);
       if (checkpoint !== undefined) return checkpoint;
+      console.warn(`[chatgpt-web] checkpoint text rejected trace=${traceId} answerChars=${answer.length}; awaiting an already-sent control handoff`);
       // A control IPC response can arrive just after the browser finishes. Give that
       // already-sent handoff a bounded grace period, never another browser submission.
       let timer: ReturnType<typeof setTimeout> | undefined;

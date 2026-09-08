@@ -7,6 +7,20 @@ import type { BrowserTurn } from "../src/adapters/chatgpt-web/browser-worker";
 import { ChatGptBrowserWorker } from "../src/adapters/chatgpt-web/browser-worker";
 import { ChatGptWebAdapterError, chatGptRetainedConversationUnavailableError } from "../src/adapters/chatgpt-web/adapter-error";
 import { parseCompactionFinalHandoff } from "../src/adapters/chatgpt-web/native-compaction-control";
+
+test("plain-text compaction framing preserves quotes, Markdown and Unicode without JSON escaping", () => {
+  const summary = 'Completed: `schema`.\nLast answer: {"next":"report"}.\nPending: report.\nDanish correction: kun rapporten mangler.\n```json\n{"checked":true}\n```';
+  const framed = `CODEX_COMPACTION_HANDOFF_BEGIN current\n${summary}\nCODEX_COMPACTION_HANDOFF_END current`;
+  expect(parseCompactionFinalHandoff(framed, "current")).toBe(summary);
+  expect(parseCompactionFinalHandoff(framed.replaceAll("\n", "\r\n"), "current")).toBe(summary);
+  expect(parseCompactionFinalHandoff(`\u0060\u0060\u0060text\n${framed}\n\u0060\u0060\u0060`, "current")).toBe(summary);
+  for (const value of [framed.replaceAll("current", "old"), `extra\n${framed}`, `${framed}\nextra`,
+    framed.replace(summary, ""), framed.replace(summary, "<complete checkpoint summary>"),
+    framed.replace(summary, framed), framed.replace("HANDOFF_END current", "HANDOFF_END wrong")]) {
+    expect(parseCompactionFinalHandoff(value, "current")).toBeUndefined();
+  }
+  expect(parseCompactionFinalHandoff('{"type":"codex_compaction_handoff","handoff_id":"current","summary":"Last JSON: {"next":"report"}"}', "current")).toBeUndefined();
+});
 import {
   MAX_COMPACTION_HANDOFF_TIMEOUT_MS,
   compactionHandoffFailure,
@@ -405,8 +419,8 @@ test("retained compaction accepts a final checkpoint bound to its exact handoff 
     runs++;
     expect(turn.requireRetainedConversation).toBeTrue();
     const prepared = await turn.prepareResume!();
-    expect(prepared.text).toContain('"type":"codex_compaction_handoff"');
-    return JSON.stringify({ type: "codex_compaction_handoff", handoff_id: handoffId, summary: "Keep the existing task and observe job 42; do not launch it again." });
+    expect(prepared.text).toContain(`CODEX_COMPACTION_HANDOFF_BEGIN ${handoffId}`);
+    return `CODEX_COMPACTION_HANDOFF_BEGIN ${handoffId}\nKeep the existing task and observe job 42; do not launch it again.\nCODEX_COMPACTION_HANDOFF_END ${handoffId}`;
   } };
   const broker = {
     beginCompactionTransaction: async () => ({ token: "control_test", handoffId }),

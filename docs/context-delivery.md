@@ -86,6 +86,14 @@ Codex owns the replacement history and the next request. Compaction does not com
 restart or replay work, reset a goal, or renew old tool tokens. Failure retains the task
 for diagnosis instead of manufacturing an empty successful handoff.
 
+The preferred handoff remains the one-shot native control tool. Its final-text fallback
+uses exact `CODEX_COMPACTION_HANDOFF_BEGIN` and `CODEX_COMPACTION_HANDOFF_END` lines carrying
+the current handoff ID. The summary between them is ordinary text/Markdown, so quoted JSON,
+paths and code do not need JSON-string escaping. A repeated live test exposed that escaping
+failure in the earlier JSON-only fallback. Wrong IDs, partial or nested boundaries, empty
+summaries and extra surrounding text are rejected. Valid older JSON envelopes remain
+readable; malformed JSON is never repaired or guessed into an accepted checkpoint.
+
 The ordinary prompt asks the model to maintain concise working state and distinguish
 verified completion from pending or uncertain work. It does not request a second private
 summary every turn or let Web independently replace Codex history. The existing explicit

@@ -1145,7 +1145,11 @@ export function createChatGptWebAdapter(
               const handoffError = error instanceof Error ? error : new Error(String(error));
               const failure = compactionHandoffFailure(handoffError);
               const retainedUnavailable = failure.code === "compaction_source_unavailable";
-              console.error("[chatgpt-web] structured context handoff failed:", handoffError);
+              console.error("[chatgpt-web] structured context handoff failed:", JSON.stringify({
+                name: handoffError instanceof Error ? handoffError.name : "Error",
+                message: handoffError instanceof Error ? handoffError.message : String(handoffError),
+                ...(handoffError instanceof ChatGptWebAdapterError ? { code: handoffError.code } : {}),
+              }));
               emit({
                 type: "error",
                 message: retainedUnavailable
