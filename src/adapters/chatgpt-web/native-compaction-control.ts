@@ -11,14 +11,17 @@ export function parseCompactionFinalHandoff(text: string, handoffId: string): st
   const trimmed = text.trim();
   const fenced = /^```(?:json|text|markdown)?\s*\n([\s\S]*?)\n```$/i.exec(trimmed);
   const content = (fenced?.[1] ?? trimmed).replace(/\r\n/g, "\n");
-  const start = `${COMPACTION_HANDOFF_BEGIN} ${handoffId}\n`;
-  const end = `\n${COMPACTION_HANDOFF_END} ${handoffId}`;
-  if (content.startsWith(start) && content.endsWith(end)) {
-    const summary = content.slice(start.length, -end.length).trim();
+  const lines = content.trim().split("\n");
+  // The DOM-to-Markdown renderer escapes literal underscores in paragraph text.
+  // Normalize only the two protocol lines; the summary remains byte-for-byte Markdown.
+  const boundary = (line: string | undefined) => line?.replaceAll("\\_", "_");
+  if (boundary(lines[0]) === `${COMPACTION_HANDOFF_BEGIN} ${handoffId}`
+    && boundary(lines.at(-1)) === `${COMPACTION_HANDOFF_END} ${handoffId}`) {
+    const summary = lines.slice(1, -1).join("\n").trim();
     // Reject duplicate/nested envelopes and unrelated surrounding text. Do not repair JSON,
     // strip Markdown inside the summary, or accept an answer from a different transaction.
     if (!summary || summary === "<complete checkpoint summary>"
-      || summary.split("\n").some(line => /^CODEX_COMPACTION_HANDOFF_(?:BEGIN|END)\b/.test(line.trim()))) return undefined;
+      || summary.split("\n").some(line => /^CODEX_COMPACTION_HANDOFF_(?:BEGIN|END)\b/.test(boundary(line.trim())!))) return undefined;
     return summary;
   }
   try {

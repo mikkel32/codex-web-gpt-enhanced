@@ -93,6 +93,8 @@ paths and code do not need JSON-string escaping. A repeated live test exposed th
 failure in the earlier JSON-only fallback. Wrong IDs, partial or nested boundaries, empty
 summaries and extra surrounding text are rejected. Valid older JSON envelopes remain
 readable; malformed JSON is never repaired or guessed into an accepted checkpoint.
+The two boundary lines normalize the renderer's literal underscore escapes before exact
+comparison. This does not unescape, rewrite or strip formatting from the summary itself.
 
 The ordinary prompt asks the model to maintain concise working state and distinguish
 verified completion from pending or uncertain work. It does not request a second private

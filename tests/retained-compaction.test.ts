@@ -7,6 +7,19 @@ import type { BrowserTurn } from "../src/adapters/chatgpt-web/browser-worker";
 import { ChatGptBrowserWorker } from "../src/adapters/chatgpt-web/browser-worker";
 import { ChatGptWebAdapterError, chatGptRetainedConversationUnavailableError } from "../src/adapters/chatgpt-web/adapter-error";
 import { parseCompactionFinalHandoff } from "../src/adapters/chatgpt-web/native-compaction-control";
+import { chatGptHtmlToMarkdown } from "../src/adapters/chatgpt-web/markdown";
+
+test("rendered checkpoint boundaries survive the actual DOM-to-Markdown converter", () => {
+  const id = "handoff_a9c0bac759c3ff0955c2d13bee8db263";
+  const body = '<h2>Pending state</h2><p>Only <code>report</code> remains. Last answer: {"next":"report"}.</p>';
+  const html = `<p>CODEX_COMPACTION_HANDOFF_BEGIN ${id}</p>${body}<p>CODEX_COMPACTION_HANDOFF_END ${id}</p>`;
+  const markdown = chatGptHtmlToMarkdown(html);
+  expect(markdown).toContain("CODEX\\_COMPACTION\\_HANDOFF\\_BEGIN");
+  expect(parseCompactionFinalHandoff(markdown, id)).toBe(chatGptHtmlToMarkdown(body));
+  expect(parseCompactionFinalHandoff(markdown, "handoff_other")).toBeUndefined();
+  const nested = `<p>CODEX_COMPACTION_HANDOFF_BEGIN ${id}</p>${html}<p>CODEX_COMPACTION_HANDOFF_END ${id}</p>`;
+  expect(parseCompactionFinalHandoff(chatGptHtmlToMarkdown(nested), id)).toBeUndefined();
+});
 
 test("plain-text compaction framing preserves quotes, Markdown and Unicode without JSON escaping", () => {
   const summary = 'Completed: `schema`.\nLast answer: {"next":"report"}.\nPending: report.\nDanish correction: kun rapporten mangler.\n```json\n{"checked":true}\n```';
