@@ -6,7 +6,7 @@ import { namespacedToolName, type CodexTool } from "../../types";
 import { VERSION } from "../../version";
 import type { ChatGptTurnEnvironment } from "./environment";
 import { CODEX_COMPACTION_CONTROL_WIRE_NAME } from "./native-compaction-control";
-import { NATIVE_CONTEXT_READ } from "./native-context";
+import { NATIVE_CONTEXT_READ, nativeContextResult, type NativeContextPage } from "./native-context";
 import { callTurnBroker, TurnBrokerTimeoutError, type BrokerToolResult } from "./turn-broker";
 
 interface ClaimedTurn {
@@ -855,11 +855,23 @@ export async function runChatGptMcpServer(options: {
       },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async (input, extra) => withClaimedTurn("codex_context_read", turnReference(contract, input), extra,
-      async claimed => result(await callTurnBroker(options.brokerSocketPath, {
-        method: "read_context", bindingId: claimed.bindingId,
-        contextName: input.name, contextOffset: input.offset,
-      }, 10_000, extra.signal))),
+    async (input, extra) => {
+      const started = performance.now();
+      const detail = { tokenHash: scopeHash(turnReference(contract, input)), name: input.name, offset: input.offset };
+      console.error(`[chatgpt-web-mcp] context-read started ${JSON.stringify(detail)}`);
+      try {
+        const response = await withClaimedTurn("codex_context_read", turnReference(contract, input), extra,
+          async claimed => nativeContextResult(await callTurnBroker<NativeContextPage>(options.brokerSocketPath, {
+            method: "read_context", bindingId: claimed.bindingId,
+            contextName: input.name, contextOffset: input.offset,
+          }, 10_000, extra.signal)));
+        console.error(`[chatgpt-web-mcp] context-read completed ${JSON.stringify({ ...detail, elapsedMs: Math.round(performance.now() - started), resultBytes: Buffer.byteLength(JSON.stringify(response), "utf8") })}`);
+        return response;
+      } catch (error) {
+        console.error(`[chatgpt-web-mcp] context-read failed ${JSON.stringify({ ...detail, elapsedMs: Math.round(performance.now() - started), error: error instanceof Error ? error.name : "Error" })}`);
+        throw error;
+      }
+    },
   );
 
   server.registerTool(
@@ -904,7 +916,7 @@ export async function runChatGptMcpServer(options: {
             || !Number.isSafeInteger(args?.offset) || (args!.offset as number) < 0) {
             throw new Error("Native context retrieval requires structured name and nonnegative integer offset");
           }
-          return result(await callTurnBroker(options.brokerSocketPath, {
+          return nativeContextResult(await callTurnBroker<NativeContextPage>(options.brokerSocketPath, {
             method: "read_context", bindingId: claimed.bindingId,
             contextName: args.name, contextOffset: args.offset as number,
           }, 10_000, extra.signal));

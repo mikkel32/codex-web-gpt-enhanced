@@ -3,7 +3,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, unlinkSync } from "node:fs
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { isWindowsPipeEndpoint } from "../../config";
-import { NATIVE_CONTEXT_PAGE_CHARS, type NativeContextFile } from "./native-context";
+import { nativeContextPage, nativeContextResult, type NativeContextFile } from "./native-context";
 import {
   CompactionTransactionStore,
   type CompactionTransactionHandle,
@@ -1148,10 +1148,12 @@ export class TurnBroker implements TurnBrokerOwner {
         || offset! > (channel.contextReadOffsets?.get(file.name) ?? 0)) {
         throw new Error("Requested context file or sequential offset is unavailable in this turn");
       }
-      const end = Math.min(offset! + NATIVE_CONTEXT_PAGE_CHARS, file.text.length);
+      const page = nativeContextPage(file, offset!);
+      const end = offset! + page.text.length;
       channel.contextReadOffsets!.set(file.name, Math.max(end, channel.contextReadOffsets!.get(file.name)!));
-      console.info(`[chatgpt-web] broker trace=${channel.traceId} context-read file=${file.name} offset=${offset} chars=${end - offset!} complete=${end === file.text.length}`);
-      return { name: file.name, offset, text: file.text.slice(offset, end), next_offset: end < file.text.length ? end : null, total_chars: file.text.length };
+      const resultBytes = Buffer.byteLength(JSON.stringify(nativeContextResult(page)), "utf8");
+      console.info(`[chatgpt-web] broker trace=${channel.traceId} context-read file=${file.name} offset=${offset} chars=${end - offset!} complete=${end === file.text.length} resultBytes=${resultBytes}`);
+      return page;
     }
     if (binding.channel.compactionRequested) {
       const result = binding.channel.compactionResult;
