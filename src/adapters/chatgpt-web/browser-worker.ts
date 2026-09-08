@@ -1773,6 +1773,14 @@ class ChatGptBrowserDiagnostics {
               visibleCount: composers.length,
               textChars: composers.map(element => (element.textContent ?? "").length),
               selectedConnectors: rows('[data-id^="plugin:"][data-keyword]', 20),
+              // Record attachment presence, never file contents or arbitrary user filenames.
+              attachments: composers.map(element => [...(element.closest("form")?.querySelectorAll('[role="group"][aria-label]') ?? [])]
+                .filter(rendered)
+                .map(group => ({
+                  contextFile: /^codex-context-[1-3]-of-[23]\.json$/.test(group.getAttribute("aria-label") ?? "")
+                    ? group.getAttribute("aria-label") : null,
+                  busy: group.getAttribute("aria-busy") === "true" || !!group.querySelector('[role="progressbar"], [aria-busy="true"]'),
+                }))),
             },
             effortControls: rows(effortControlSelector, 10),
             effortItems: rows(effortItemSelector, 20),
@@ -3346,6 +3354,7 @@ export class ChatGptBrowserWorker {
     submissionLifecycle?: Pick<BrowserTurn, "onSendActivated" | "onSubmitted"> & Partial<Pick<BrowserTurn, "modelId">>,
     completionTracker?: ChatGptCompletionTracker,
     recoverObservation?: ChatGptObservationRecovery,
+    expectedFileNames: readonly string[] = [],
   ): Promise<ChatGptSubmissionEvidence> {
     const composer = await this.activeComposer(page);
     const sendButton = composer
@@ -3373,6 +3382,7 @@ export class ChatGptBrowserWorker {
       await assertChatGptAstraProReady(control, abortSignal, page);
     }
     const initialToolBatchRevision = externalProgress?.snapshot().lastToolBatchRevision ?? 0;
+    if (expectedFileNames.length > 0) await this.assertPromptFilesReady(page, expectedFileNames, abortSignal);
     await submissionLifecycle?.onSendActivated?.();
     await sendButton.press("Enter", {
       noWaitAfter: true,
@@ -3534,13 +3544,35 @@ export class ChatGptBrowserWorker {
     return { authenticated: true, temporary: true, url, ...capabilities };
   }
 
-  private async attachFiles(page: Page, prompt: CompiledChatGptWebPrompt): Promise<void> {
+  private async assertPromptFilesReady(page: Page, names: readonly string[], abortSignal?: AbortSignal): Promise<void> {
+    if (names.length === 0) return;
+    throwIfPromptAttachmentAborted(abortSignal);
+    const composer = await this.activeComposer(page, 30_000, abortSignal);
+    const form = composer.locator("xpath=ancestor::form[1]");
+    const missing: string[] = [];
+    for (const name of names) {
+      const card = form.getByRole("group", { name, exact: true });
+      if (!await card.isVisible()
+        || await card.getAttribute("aria-busy") === "true"
+        || await card.locator('[role="progressbar"], [aria-busy="true"]').count() > 0) missing.push(name);
+    }
+    throwIfPromptAttachmentAborted(abortSignal);
+    if (missing.length > 0) {
+      throw new Error(`ChatGPT prompt attachments are missing or still uploading: ${missing.join(", ")}. No prompt was sent.`);
+    }
+  }
+
+  private async attachFiles(page: Page, prompt: CompiledChatGptWebPrompt, abortSignal?: AbortSignal): Promise<void> {
     const files = chatGptPromptFilePayloads(prompt);
     if (files.length === 0) return;
-    const composer = await this.activeComposer(page);
+    throwIfPromptAttachmentAborted(abortSignal);
+    const composer = await this.activeComposer(page, 30_000, abortSignal);
     const composerForm = composer.locator("xpath=ancestor::form[1]");
-    const input = page.locator('input[data-testid="upload-photos-input"]');
+    // The photos picker accepts only image/* and may discard JSON after showing transient
+    // filename cards. Use the active composer's unrestricted document picker for the whole batch.
+    const input = composerForm.locator('input[type="file"]:not([accept]), input[type="file"][accept=""]').first();
     await input.waitFor({ state: "attached", timeout: 20_000 });
+    throwIfPromptAttachmentAborted(abortSignal);
     await input.setInputFiles(files);
     try {
       await Promise.all(files.map(file => (
@@ -3559,7 +3591,11 @@ export class ChatGptBrowserWorker {
     const send = composerForm.getByTestId("send-button");
     const deadline = Date.now() + 60_000;
     while (Date.now() < deadline) {
-      if (await send.isEnabled().catch(() => false)) return;
+      throwIfPromptAttachmentAborted(abortSignal);
+      if (await send.isEnabled().catch(() => false)) {
+        await this.assertPromptFilesReady(page, files.map(file => file.name), abortSignal);
+        return;
+      }
       await new Promise(resolveSleep => setTimeout(resolveSleep, 100));
     }
     throw new Error("ChatGPT accepted the prompt attachments but did not make the message ready to send");
@@ -4361,8 +4397,8 @@ export class ChatGptBrowserWorker {
         }
       }
       await diagnostics.capture(page, "prompt-attachment-complete");
-      await this.runStage(turn.traceId, "file_attachment", browserStageTimeouts.fileAttachment, () => (
-        this.attachFiles(page, prepared)
+      await this.runStage(turn.traceId, "file_attachment", browserStageTimeouts.fileAttachment, (stageSignal) => (
+        this.attachFiles(page, prepared, turn.abortSignal ? AbortSignal.any([stageSignal, turn.abortSignal]) : stageSignal)
       ));
       await diagnostics.capture(page, "file-attachment-complete");
       const completionTracker = new ChatGptCompletionTracker();
@@ -4385,7 +4421,8 @@ export class ChatGptBrowserWorker {
               submissionBaseline = recovered.baseline;
               return recovered;
             }
-            : undefined,
+          : undefined,
+          chatGptPromptFilePayloads(prepared).map(file => file.name),
         ),
       );
       console.info(`[chatgpt-web] browser turn ${turn.traceId} submission accepted evidence=${finalSubmissionEvidence}`);
