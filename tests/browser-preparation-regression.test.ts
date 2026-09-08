@@ -19,12 +19,23 @@ test("restored chat baseline waits for the old answer after composer hydration",
 
 test("restored chat cannot take a baseline while the previous answer is running", async () => {
   const capture = (ChatGptBrowserWorker.prototype as unknown as {
-    captureSubmissionBaseline(page: unknown, retained: boolean): Promise<unknown>;
+    captureSubmissionBaseline(page: unknown, retained: boolean, signal?: AbortSignal, timeout?: number): Promise<unknown>;
   }).captureSubmissionBaseline;
   await expect(capture.call({
     activeComposer: async () => {},
     submissionDomState: async () => ({ assistantTurnCount: 1, visibleStopButtonCount: 1 }),
-  }, { locator: () => ({ last: () => ({ waitFor: async () => {} }) }) }, true)).rejects.toThrow("no prompt was sent");
+  }, { locator: () => ({ last: () => ({ waitFor: async () => {} }) }) }, true, undefined, 5)).rejects.toThrow("no prompt was sent");
+});
+
+test("an immediate post-compaction follow-up waits for the old response to finish", async () => {
+  const capture = (ChatGptBrowserWorker.prototype as any).captureSubmissionBaseline;
+  let observations = 0;
+  const result = await capture.call({ activeComposer: async () => {}, submissionDomState: async () => ({
+    assistantTurnCount: 1, userTurnCount: 1, visibleStopButtonCount: observations++ === 0 ? 1 : 0,
+    responseIdentities: ["previous-answer"], userIdentities: ["previous-user"],
+  }) }, { locator: () => ({ last: () => ({ waitFor: async () => {} }) }) }, true, undefined, 1000);
+  expect(observations).toBe(2);
+  expect(result.initialResponseTurnIdentities).toEqual(["previous-answer"]);
 });
 
 test("saved chats select their connector without attempting a Temporary Chat personalization toggle", async () => {

@@ -284,6 +284,25 @@ function canonicalJson(value: unknown): string {
 }
 
 describe("ChatGPT outer-native harness v4", () => {
+  test("preparation failures keep their actual cause instead of racing a revoked token", async () => {
+    const socketPath = brokerTestEndpoint(`cgw-prepare-fail-${process.pid}-${Date.now()}`);
+    const provider: CodexProviderConfig = { adapter: "chatgpt-web", baseUrl: `browser://prepare-failure-${Date.now()}`,
+      chatgptWeb: { brokerSocketPath: socketPath, localToolsEnabled: true, solAvailable: true, proAvailable: true } };
+    const worker = ChatGptBrowserWorker.forProvider(provider);
+    const original = worker.run.bind(worker);
+    (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = async turn => {
+      await turn.prepare(); throw new Error("Preparation unexpectedly succeeded");
+    };
+    try {
+      const request = rawWireRequest(environmentXml);
+      request.context.messages.unshift({ role: "developer", content: [{ type: "file", filename: "missing.pdf", fileId: "file-unavailable" }], timestamp: 0 });
+      const events: AdapterEvent[] = [];
+      await createChatGptWebAdapter(provider).runTurn(request, { headers: new Headers() }, event => events.push(event));
+      const failure = events.find(event => event.type === "error");
+      expect(failure).toMatchObject({ type: "error", code: "context_preparation_failed" });
+      expect(failure && "message" in failure ? failure.message : "").toContain("no supplied bytes");
+    } finally { worker.run = original; await TurnBroker.forSocket(socketPath).close(); }
+  });
   test("extracts authoritative environment, tool registry, and turn identity from the Codex wire envelope", () => {
     const request = rawWireRequest(environmentXml);
     expect(extractChatGptTurnEnvironment(request)).toEqual({

@@ -735,11 +735,14 @@ export function createChatGptWebAdapter(
         traceId,
       );
       activeToken = turnToken;
-      observeCapabilityRetirement(turnToken, externalProgress);
-      if (!tokenSettled) {
-        tokenSettled = true;
-        token.resolve(turnToken);
-      }
+      const ready = <T>(prepared: T): T => {
+        if (!tokenSettled) {
+          observeCapabilityRetirement(turnToken, externalProgress);
+          tokenSettled = true;
+          token.resolve(turnToken);
+        }
+        return prepared;
+      };
       try {
         let compiled = compileChatGptWebPrompt(
           input,
@@ -770,12 +773,12 @@ export function createChatGptWebAdapter(
             releaseContextPlan();
             releaseContextPlan = plan.release;
             console.info(`[chatgpt-web] context-plan trace=${traceId} ${JSON.stringify(plan.stats)}`);
-            return { ...nativeContextPrompt(plan.compiled, plan.files), release: plan.release };
+            return ready({ ...nativeContextPrompt(plan.compiled, plan.files), release: plan.release });
           }
           await broker.setContextFiles(turnToken, []);
           releaseContextPlan();
         }
-        return { ...compiled, release: () => {} };
+        return ready({ ...compiled, release: () => {} });
       } catch (error) {
         await broker.revoke(turnToken);
         releaseContextPlan();

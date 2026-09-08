@@ -4,6 +4,7 @@ import { nativeContextPrompt } from "../src/adapters/chatgpt-web/native-context"
 import { compiledChatGptWebMessages, estimateCompiledChatGptWebInputTokens } from "../src/adapters/chatgpt-web/input-tokens";
 import { parseRequest } from "../src/responses/parser";
 import { compileChatGptWebPrompt } from "../src/adapters/chatgpt-web/prompt";
+import { estimateChatGptWebInputTokens } from "../src/adapters/chatgpt-web/usage";
 import type { ChatGptTurnEnvironment } from "../src/adapters/chatgpt-web/environment";
 
 const environment: ChatGptTurnEnvironment = { cwd: "/fixture/project", roots: ["/fixture/project"], writableRoots: [], sandboxPolicy: { type: "readOnly", networkAccess: false }, tools: [] };
@@ -57,4 +58,11 @@ test("unavailable file IDs produce an explicit preparation failure rather than a
   const request = parseRequest({ model: "gpt-5.6-sol", input: [{ role: "user", content: [{ type: "input_file", file_id: "file-unavailable", filename: "report.pdf" }] }] });
   const compiled = compileChatGptWebPrompt(request, { localToolsEnabled: true, solAvailable: true, proAvailable: true }, "turn_abcdefghijklmnopqrstuvwx", { nativeRetrieval: true, experimentalMultipartParts: 2 });
   await expect(buildContextPlan(compiled, environment)).rejects.toThrow("no supplied bytes");
+});
+
+test("usage estimation accepts Full-mode documents without expanding their base64 into tokens", () => {
+  const request = parseRequest({ model: "gpt-5.6-sol", input: [{ role: "user", content: [{ type: "input_file", filename: "large.csv", file_data: Buffer.from("row,1\n".repeat(50000)).toString("base64") }] }] });
+  const tokens = estimateChatGptWebInputTokens(request, { localToolsEnabled: true, solAvailable: true, proAvailable: true });
+  expect(tokens).toBeGreaterThan(32000);
+  expect(tokens).toBeLessThan(50000);
 });

@@ -44,12 +44,16 @@ export function estimateChatGptWebInputTokens(
     mode.localTools ? ESTIMATE_TURN_TOKEN : undefined,
     {
       ...(manual ? { manualControl: true as const } : {}),
+      ...(!manual && mode.localTools && !parsed._compactionRequest ? { nativeRetrieval: true as const } : {}),
       captureLunaCheckpoint: parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID
         && !parsed._compactionRequest
         && Boolean(identity.threadId && identity.turnId),
     },
   );
-  return estimateCompiledChatGptWebInputTokens(compiled, parsed.modelId);
+  // Documents are queried or processed locally rather than pasted as base64. Reserve the
+  // bounded retrieval allowance here; the prepared plan separately checks required text/images.
+  return estimateCompiledChatGptWebInputTokens(compiled, parsed.modelId)
+    + (compiled.files?.length && !parsed._compactionRequest ? 32_000 : 0);
 }
 
 /**

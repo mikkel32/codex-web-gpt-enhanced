@@ -2666,19 +2666,23 @@ export class ChatGptBrowserWorker {
     page: Page,
     retained = false,
     signal?: AbortSignal,
+    timeoutMs = 30_000,
   ): Promise<ChatGptSubmissionBaseline> {
-    await this.activeComposer(page, 30_000, signal);
+    const deadline = Date.now() + timeoutMs;
+    await this.activeComposer(page, timeoutMs, signal);
     const userTurns = page.locator(CHATGPT_USER_TURN_SELECTOR);
     const responseTurns = page.locator(CHATGPT_ASSISTANT_TURN_SELECTOR);
     if (retained) {
       // A restored tab can expose its URL before React has restored the previous answer. An empty
       // baseline at that point would count the old answer as an additional response after Send.
-      await responseTurns.last().waitFor({ state: "visible", timeout: 30_000, signal });
+      await responseTurns.last().waitFor({ state: "visible", timeout: Math.max(1, deadline - Date.now()), signal });
     }
     const domCache: ChatGptSubmissionDomCache = {};
-    const state = await this.submissionDomState(page, domCache, signal);
-    if (retained && (state.assistantTurnCount === 0 || state.visibleStopButtonCount > 0)) {
-      throw new Error("ChatGPT retained conversation has not restored an idle previous response; no prompt was sent");
+    let state = await this.submissionDomState(page, domCache, signal);
+    while (retained && (state.assistantTurnCount === 0 || state.visibleStopButtonCount > 0)) {
+      if (Date.now() >= deadline) throw new Error("ChatGPT retained conversation did not settle to an idle response before the deadline; no prompt was sent");
+      await withBrowserTurnAbort(new Promise(resolve => setTimeout(resolve, Math.min(250, Math.max(1, deadline - Date.now())))), signal);
+      state = await this.submissionDomState(page, domCache, signal);
     }
     return {
       userTurns,
