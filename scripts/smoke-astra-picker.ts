@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "no
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createRequire } from "node:module";
+import { waitForElectronDebugger } from "./electron-debugger-readiness";
 
 const root = resolve(import.meta.dir, "..");
 const home = mkdtempSync(join(tmpdir(), "maria-astra-electron-"));
@@ -16,26 +17,7 @@ const child = Bun.spawn(args, { cwd: root, env: environment, stdin: "ignore", st
 const stderr = new Response(child.stderr).text();
 let completed = false;
 try {
-  const portFile = join(home, "DevToolsActivePort"), deadline = Date.now() + 30_000;
-  let exited = false;
-  void child.exited.then(() => { exited = true; });
-  while (!existsSync(portFile) && !exited && Date.now() < deadline) await Bun.sleep(50);
-  assert(existsSync(portFile), "Electron did not publish its CDP port");
-  const port = Number(readFileSync(portFile, "utf8").split("\n")[0]);
-  const endpoint = `http://127.0.0.1:${port}`;
-  let ready = false;
-  let websocket = "";
-  while (!exited && Date.now() < deadline) {
-    try {
-      const response = await fetch(`${endpoint}/json/version`, { signal: AbortSignal.timeout(1_000) });
-      if (response.ok) {
-        const metadata = await response.json() as { webSocketDebuggerUrl?: unknown };
-        if (typeof metadata.webSocketDebuggerUrl === "string") { websocket = metadata.webSocketDebuggerUrl; ready = true; break; }
-      }
-    } catch { /* A port file can precede debugger readiness. */ }
-    await Bun.sleep(50);
-  }
-  assert(ready, `Electron debugger did not become ready (exit=${child.exitCode})`);
+  const websocket = await waitForElectronDebugger(join(home, "DevToolsActivePort"), () => child.exitCode === null);
   const driverPath = join(home, "driver.mjs");
   const build = await Bun.build({ entrypoints: [join(root, "scripts/astra-picker-driver.ts")], target: "node", format: "esm", outdir: home, naming: "driver.mjs" });
   assert(build.success, `Picker driver build failed: ${build.logs.join("\n")}`);
