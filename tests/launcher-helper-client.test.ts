@@ -181,7 +181,10 @@ test("launcher helper protocol preserves multipart context and the compaction fl
     compaction: true,
     prepare: async () => ({
       text: "commit",
-      images: [],
+      images: [{ ref: "native-image", imageUrl: "data:image/png;base64,DO_NOT_FORWARD" }],
+      nativeImages: true,
+      contextReserveTokens: 32000,
+      contextRequiredTokens: 99,
       multipart: { parts: ["{\"part\":1}", "{\"part\":2}", "{\"part\":3}"], commit: "commit" },
       trimmedCompactionMessages: 4,
       nativeContext: true,
@@ -203,8 +206,13 @@ test("launcher helper protocol preserves multipart context and the compaction fl
         multipart: { parts: ["{\"part\":1}", "{\"part\":2}", "{\"part\":3}"], commit: "commit" },
         trimmedCompactionMessages: 4,
         nativeContext: true,
+        nativeImages: true,
+        contextReserveTokens: 32000,
+        contextRequiredTokens: 99,
+        images: [{ ref: "native-image", imageUrl: "" }],
     },
   });
+  expect(JSON.stringify(sent)).not.toContain("DO_NOT_FORWARD");
 });
 
 test("an abort dispatched during run submission cannot overtake the run frame", async () => {

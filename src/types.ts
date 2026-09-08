@@ -90,7 +90,16 @@ export interface CodexImageContent {
 }
 
 /** A user/developer message content part: text or an image (vision). */
-export type CodexContentPart = CodexTextContent | CodexImageContent;
+export interface CodexFileContent {
+  type: "file";
+  sourceType?: "input_file" | "input_image";
+  filename?: string;
+  fileData?: string;
+  fileId?: string;
+  fileUrl?: string;
+  detail?: string;
+}
+export type CodexContentPart = CodexTextContent | CodexImageContent | CodexFileContent;
 
 export interface CodexThinkingContent {
   type: "thinking";

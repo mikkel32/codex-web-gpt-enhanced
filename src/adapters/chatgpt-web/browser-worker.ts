@@ -918,53 +918,11 @@ export function assertChatGptWebMultipartInputWithinLimits(
   } else {
     assertMessageBoundary("stage", estimatedMessageTokens, maxMessageChars, effort);
   }
-  const experimentalContextWindow = baseContextWindow * partCount;
+  const experimentalContextWindow = baseContextWindow;
   if (estimatedInputTokens < experimentalContextWindow) return;
   const partLabel = partCount === 2 ? "two-part" : "three-part";
   throw new ChatGptWebAdapterError(
-    `This Bigger Context transaction is estimated at ${estimatedInputTokens.toLocaleString("en-US")} input tokens, which exceeds its experimental ${experimentalContextWindow.toLocaleString("en-US")}-token ${partLabel} ceiling. Run /compact, then retry.`,
-    { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
-  );
-}
-
-/** Select the cheapest account-visible mode that can carry every inert multipart stage. */
-export function resolveChatGptWebMultipartStagingMode(
-  modelId: string,
-  capabilities: ChatGptWebCapabilities,
-  requestedEffort: ChatGptWebModelMode["effort"],
-  maxStageMessageTokens: number,
-  maxStageChars: number,
-): ChatGptWebModelMode {
-  if (modelId === CHATGPT_WEB_LUNA_MODEL_ID || !capabilities.solAvailable) {
-    throw new ChatGptWebAdapterError(
-      "Bigger Context staging is unavailable for a Luna-only account.",
-      { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
-    );
-  }
-  if (modelId !== CHATGPT_WEB_MODEL_ID && modelId !== CHATGPT_WEB_ASTRA_MODEL_ID) {
-    throw new Error(`ChatGPT Bigger Context staging mode is not defined for model: ${modelId}`);
-  }
-  const efforts: readonly ChatGptWebModelMode["effort"][] = modelId === CHATGPT_WEB_ASTRA_MODEL_ID ? ["max"] : capabilities.proAvailable
-    ? ["low", "medium", "max"]
-    : ["low", "medium"];
-  const requestedContextWindow = resolveChatGptWebContextLimits(
-    modelId,
-    requestedEffort,
-    capabilities,
-  ).contextWindow;
-  for (const effort of efforts) {
-    const mode = resolveChatGptWebModelMode(modelId, effort, capabilities);
-    const contextWindow = resolveChatGptWebContextLimits(modelId, effort, capabilities).contextWindow;
-    if (contextWindow < requestedContextWindow) continue;
-    const limits = resolveChatGptWebTransportLimits(modelId, effort, capabilities);
-    const tokenFits = limits.browserMessageTokenLimit === undefined
-      || maxStageMessageTokens <= limits.browserMessageTokenLimit;
-    const charsFit = limits.browserComposerCharLimit === undefined
-      || maxStageChars <= limits.browserComposerCharLimit;
-    if (tokenFits && charsFit) return mode;
-  }
-  throw new ChatGptWebAdapterError(
-    `No ChatGPT effort available to this account can carry a Bigger Context stage with ${maxStageMessageTokens.toLocaleString("en-US")} estimated tokens and ${maxStageChars.toLocaleString("en-US")} characters.`,
+    `This Bigger Context transaction is estimated at ${estimatedInputTokens.toLocaleString("en-US")} input tokens, which exceeds the actual ${experimentalContextWindow.toLocaleString("en-US")}-token model ceiling; ${partLabel} delivery does not increase model capacity. Run /compact, then retry.`,
     { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
   );
 }
@@ -1898,9 +1856,10 @@ const imageExtensions = new Map([
   ["image/webp", "webp"],
 ]);
 
-export function chatGptImageFilePayloads(images: ChatGptWebPromptImage[]): Array<{ name: string; mimeType: string; buffer: Buffer }> {
-  if (images.length > CHATGPT_MAX_INPUT_IMAGES) {
-    throw new Error(`ChatGPT web accepts at most ${CHATGPT_MAX_INPUT_IMAGES} input images per Codex turn`);
+export function chatGptImageFilePayloads(images: ChatGptWebPromptImage[], transport: "upload" | "native" = "upload"): Array<{ name: string; mimeType: string; buffer: Buffer }> {
+  const limit = transport === "native" ? 32 : CHATGPT_MAX_INPUT_IMAGES;
+  if (images.length > limit) {
+    throw new Error(`ChatGPT ${transport} accepts at most ${limit} input images per Codex turn`);
   }
   let totalBytes = 0;
   return images.map(image => {
@@ -1926,7 +1885,7 @@ export function chatGptPromptFilePayloads(
   const context = prompt.multipart && !prompt.nativeContext ? chatGptContextFiles(prompt.multipart).map(file => ({
     name: file.name, mimeType: "application/json", buffer: Buffer.from(file.text, "utf8"),
   })) : [];
-  const files = [...context, ...chatGptImageFilePayloads(prompt.images)];
+  const files = [...context, ...(prompt.nativeImages ? [] : chatGptImageFilePayloads(prompt.images))];
   if (files.length > 10) throw new Error("ChatGPT accepts at most 10 attachments per message, including context files. Reduce the attachments before sending.");
   if (files.some(file => file.buffer.length > 20_000_000) || files.reduce((sum, file) => sum + file.buffer.length, 0) > 50_000_000) {
     throw new Error("ChatGPT attachments exceed Maria's 20 MB per-file or 50 MB per-turn budget");

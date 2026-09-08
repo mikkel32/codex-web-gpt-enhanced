@@ -25,8 +25,9 @@ import { ChatGptBrowserWorker } from "./browser-worker";
 import { conversationProfileNamespace } from "./conversation-profile";
 import { chatGptEnvironmentProvenanceCounts, extractChatGptTurnEnvironment, extractChatGptTurnIdentity, priorChatGptAbortedTurnIds } from "./environment";
 import { CHATGPT_WEB_LUNA_MODEL_ID, resolveChatGptWebModelMode, type ChatGptWebCapabilities } from "./model";
-import { chatGptContextFiles, chatGptReadOnlyContextWarning, compileChatGptWebPrompt } from "./prompt";
+import { canonicalAttachmentAssets, chatGptReadOnlyContextWarning, compileChatGptWebPrompt } from "./prompt";
 import { nativeContextPrompt } from "./native-context";
+import { buildContextPlan } from "./context-plan";
 import { createChatGptStructuredOutputValidator } from "./output-validation";
 import { chatGptWebTurnRetryPolicy } from "./retry-policy";
 import { TurnBroker, type BrokerToolRequest, type BrokerToolResult, type TurnBrokerOwner } from "./turn-broker";
@@ -234,6 +235,7 @@ function brokerContent(content: string | CodexContentPart[]): unknown[] {
   if (typeof content === "string") return [{ type: "text", text: content }];
   return content.map(part => {
     if (part.type === "text") return { type: "text", text: part.text };
+    if (part.type === "file") throw new Error("Document data must be supplied as an attachment, not an opaque tool result");
     const parsed = parseDataUrl(part.imageUrl);
     if (parsed) return { type: "image", data: parsed.base64, mimeType: parsed.mediaType };
     return { type: "resource_link", uri: part.imageUrl, name: "Codex tool image", mimeType: "image/*" };
@@ -453,6 +455,7 @@ export function createChatGptWebAdapter(
         : undefined;
       return {
         captureLunaCheckpoint,
+        ...(mode.localTools && broker.setContextFiles && !input._compactionRequest ? { nativeRetrieval: true as const } : {}),
         ...(experimentalMultipartParts !== undefined
           ? { experimentalMultipartParts }
           : {}),
@@ -724,6 +727,7 @@ export function createChatGptWebAdapter(
     const externalProgress = new ChatGptExternalTurnProgress();
     let tokenSettled = false;
     let activeToken: string | undefined;
+    let releaseContextPlan: () => void = () => {};
     const prepareWith = async (input: CodexParsedRequest) => {
       const turnToken = activeToken ?? await broker.register(
         environment,
@@ -737,19 +741,44 @@ export function createChatGptWebAdapter(
         token.resolve(turnToken);
       }
       try {
-        const compiled = compileChatGptWebPrompt(
+        let compiled = compileChatGptWebPrompt(
           input,
           turnCapabilities,
           turnToken,
           compileOptionsFor(input),
         );
-        if (compiled.multipart && !input._compactionRequest && broker.setContextFiles) {
-          await broker.setContextFiles(turnToken, chatGptContextFiles(compiled.multipart));
-          return { ...nativeContextPrompt(compiled), release: () => {} };
+        if (!input._compactionRequest && broker.setContextFiles) {
+          const assets = canonicalAttachmentAssets(checkpointInput.parsed.context.messages);
+          const currentImages = new Set(compiled.images.map(image => image.ref));
+          const mergeAssets = () => {
+            compiled.files = assets.files;
+            compiled.images = assets.images.map(image => ({ ...image, required: currentImages.has(image.ref) }));
+          };
+          mergeAssets();
+          if (!compiled.multipart && (compiled.images.length || compiled.files?.length)) {
+            compiled = compileChatGptWebPrompt(input, turnCapabilities, turnToken, { ...compileOptionsFor(input), experimentalMultipartParts: 2 });
+            mergeAssets();
+          }
+          if (compiled.multipart) {
+            let plan;
+            try { plan = await buildContextPlan(compiled, environment, browserAbort.signal); }
+            catch (error) { if (browserAbort.signal.aborted) throw error; throw new ChatGptWebAdapterError(error instanceof Error ? error.message : "Context preparation failed", {
+              status: 400, errorType: "invalid_request_error", code: "context_preparation_failed", retryable: false, cause: error,
+            }); }
+            try { await broker.setContextFiles(turnToken, plan.files, plan.options); }
+            catch (error) { plan.release(); throw error; }
+            releaseContextPlan();
+            releaseContextPlan = plan.release;
+            console.info(`[chatgpt-web] context-plan trace=${traceId} ${JSON.stringify(plan.stats)}`);
+            return { ...nativeContextPrompt(plan.compiled, plan.files), release: plan.release };
+          }
+          await broker.setContextFiles(turnToken, []);
+          releaseContextPlan();
         }
         return { ...compiled, release: () => {} };
       } catch (error) {
         await broker.revoke(turnToken);
+        releaseContextPlan();
         activeToken = undefined;
         throw error;
       }
@@ -771,13 +800,22 @@ export function createChatGptWebAdapter(
       externalProgress,
       completionFence: {
         begin: async () => broker.beginCompletionFence(await token.promise),
-        commit: async revision => broker.commitCompletionFence(await token.promise, revision),
+        commit: async revision => {
+          try { return await broker.commitCompletionFence(await token.promise, revision); }
+          catch (error) {
+            if (error instanceof Error && error.message.startsWith("Required context delivery incomplete:")) throw new ChatGptWebAdapterError(error.message, {
+              status: 409, errorType: "invalid_request_error", code: "context_delivery_incomplete", retryable: false, cause: error,
+            });
+            throw error;
+          }
+        },
       },
       ...(captureLunaCheckpoint ? {
         captureLunaCheckpoint: true,
         onLunaCheckpoint: captureCheckpoint,
       } : {}),
     }))), browserAbort);
+    void browserTurn.physicalSettlement.then(() => releaseContextPlan(), () => releaseContextPlan());
     void browserTurn.browser.catch(error => {
       if (!tokenSettled) {
         tokenSettled = true;

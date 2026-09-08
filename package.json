@@ -1,6 +1,6 @@
 {
   "name": "codex-chatgpt-web",
-  "version": "5.14.0-alpha.12",
+  "version": "5.15.0-alpha.1",
   "private": true,
   "description": "A focused local Responses bridge that runs Codex tasks through a user-authenticated ChatGPT web session.",
   "repository": {
@@ -67,6 +67,7 @@
     "tiktoken": "1.0.22",
     "turndown": "7.2.0",
     "turndown-plugin-gfm": "1.0.2",
+    "unpdf": "1.8.1",
     "zod": "4.4.3"
   },
   "devDependencies": {

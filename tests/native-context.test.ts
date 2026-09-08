@@ -45,16 +45,14 @@ test("context retrieval is paginated, immutable after claim, task-isolated, and 
     {name:"codex-context-2-of-2.json",text:JSON.stringify({marker:randomUUID()})}];
   await remote.setContextFiles(token,files);
   const earlyRevision=await remote.beginCompletionFence(token);
-  await expect(remote.commitCompletionFence(token,earlyRevision!)).rejects.toThrow("before retrieving every required native context page");
+  await expect(remote.commitCompletionFence(token,earlyRevision!)).rejects.toThrow("Required context delivery incomplete");
   const client=new Client({name:"context-test",version:"1"});
   await client.connect(new StdioClientTransport({command:process.execPath,args:["src/cli.ts","mcp","--broker-socket",socket],cwd:process.cwd(),stderr:"pipe"}));
   const read=(handle: string,name: string,offset: number) => client.callTool({name:NATIVE_CONTEXT_READ,arguments:{turn_token:handle,name,offset}});
   try {
     expect((await client.listTools()).tools.find(tool => tool.name === NATIVE_CONTEXT_READ)?.annotations)
       .toMatchObject({readOnlyHint:true,destructiveHint:false,openWorldHint:false});
-    const inventory=await client.callTool({name:"codex_tool_inventory",arguments:{turn_token:token,query:NATIVE_CONTEXT_READ}});
-    expect(inventory.structuredContent).toMatchObject({tools:[{wire_name:NATIVE_CONTEXT_READ}],total:1});
-    expect(JSON.stringify(inventory)).not.toContain(files[1]!.text);
+    expect((await client.listTools()).tools.find(tool => tool.name === "codex_context_search")?.annotations?.readOnlyHint).toBe(true);
     expect((await read(other,files[0]!.name,0)).isError).toBe(true);
     const first=await read(token,files[0]!.name,0);
     expect(first.isError).not.toBe(true);

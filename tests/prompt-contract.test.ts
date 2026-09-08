@@ -5,8 +5,6 @@ import {
   chatGptPromptJsonBytes,
   chatGptReadOnlyContextWarning,
   compileChatGptWebPrompt,
-  formatChatGptWebMultipartCommit,
-  formatChatGptWebMultipartStage,
   formatChatGptWebMultipartFileCommit,
 } from "../src/adapters/chatgpt-web/prompt";
 import { CHATGPT_WEB_LUNA_MODEL_ID, CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
@@ -134,7 +132,7 @@ test("Full-mode Pro prompts pass one stable turn token directly to native action
   expect(transportOnly).toContain("do not repeat the same call unless its inputs or observable state changed.");
   expect(transportOnly).toContain("Continue using the available tools until the requested work is complete and verified.");
   expect(transportOnly).toContain("Write the user-facing final answer only after the last required tool result has settled.");
-  expect(transportOnly).toContain(`The task context is complete. Pass turn_token ${token} unchanged to every Codex Native call in this response, including continuations after tool results; do not expose it in the answer. Execute the latest active user request now.`);
+  expect(transportOnly).toContain(`The task context is complete. Pass turn_token ${token} unchanged to every Codex Native call in this response, including continuations after tool results; do not expose it in the answer. Execute the latest active user request after that context is available.`);
   expect(transportOnly).not.toMatch(/codex_bind_turn|binding_id|outer_tool_gateway|command_tool/);
   expect(transportOnly).not.toMatch(/codex_exec|codex_write_stdin|codex_apply_patch|codex_view_image|codex_tool_inventory|codex\.control\.turn_complete/);
   expect(transportOnly).not.toMatch(/expired|invalid|revoked|blocked|safety|security layer|permission gate/i);
@@ -207,30 +205,10 @@ test("Bigger Context sends three semantic record envelopes and starts work from 
   expect(compiled.text).toBe(compiled.multipart!.commit);
   expect(compiled.text).not.toContain("<codex_context_json>");
 
-  const transactionId = `ctx_${"a".repeat(32)}`;
-  const stages = compiled.multipart!.parts.slice(0, -1).map((part, index) => (
-    formatChatGptWebMultipartStage(part, transactionId, index + 1)
-  ));
-  expect(stages).toHaveLength(2);
-  for (const [index, stage] of stages.entries()) {
-    expect(stage.text).toContain(`part: ${index + 1}/3`);
-    expect(stage.text).toContain(stage.sha256);
-    expect(stage.acknowledgement).toBe(
-      `CODEX_MULTIPART_ACK ${transactionId} ${index + 1}/3 ${stage.sha256}`,
-    );
-    expect(stage.text).toContain("```json\n");
-    expect(stage.text).toContain("<codex_multipart_stage_end>");
-    expect(stage.text).toEndWith("</codex_multipart_stage_end>");
-    expect(stage.text.lastIndexOf(stage.acknowledgement)).toBeGreaterThan(
-      stage.text.indexOf("</codex_context_part_json>"),
-    );
-  }
-  const commit = formatChatGptWebMultipartCommit(compiled.multipart!, transactionId);
-  expect(commit).toContain(`transaction_id: ${transactionId}`);
-  expect(commit).toContain("acknowledged_parts: 2/3");
-  expect(commit).toContain("The final part is included in this same message and starts the task");
-  expect(commit).toContain(compiled.multipart!.parts[2]!);
-  expect(commit).toContain("latest-request");
+  const commit = formatChatGptWebMultipartFileCommit(compiled.multipart!);
+  expect(commit).toContain("codex-context-1-of-3.json");
+  expect(commit).not.toContain("CODEX_MULTIPART_ACK");
+  expect(compiled.multipart!.parts.join("\n")).toContain("latest-request");
   expect(commit.match(new RegExp(token, "g"))).toHaveLength(1);
 });
 
@@ -248,16 +226,7 @@ test("Bigger Context uses the minimum transport and reserves three stages for co
     { experimentalMultipartParts: 2 },
   );
   expect(compiled.multipart?.parts).toHaveLength(2);
-  const transactionId = `ctx_${"b".repeat(32)}`;
-  const stages = compiled.multipart!.parts.slice(0, -1).map((part, index) => (
-    formatChatGptWebMultipartStage(part, transactionId, index + 1, 2)
-  ));
-  expect(stages).toHaveLength(1);
-  expect(stages.map(stage => stage.acknowledgement)).toEqual([
-    `CODEX_MULTIPART_ACK ${transactionId} 1/2 ${stages[0]!.sha256}`,
-  ]);
-  expect(formatChatGptWebMultipartCommit(compiled.multipart!, transactionId))
-    .toContain("acknowledged_parts: 1/2");
+  expect(formatChatGptWebMultipartFileCommit(compiled.multipart!)).toContain("codex-context-2-of-2.json");
 });
 
 test("browser-only Medium directs users to the full harness", () => {
@@ -351,10 +320,7 @@ test("Bigger Context compaction preserves history above the retired inline byte 
 
   expect(multipart.trimmedCompactionMessages).toBeUndefined();
   expect(multipart.multipart?.parts).toHaveLength(3);
-  const transactionId = `ctx_${"0".repeat(32)}`;
-  const stageBytes = multipart.multipart!.parts.map((payload, index) => chatGptPromptJsonBytes(
-    formatChatGptWebMultipartStage(payload, transactionId, index + 1).text,
-  ));
+  const stageBytes = multipart.multipart!.parts.map(payload => chatGptPromptJsonBytes(payload));
   expect(Math.max(...stageBytes)).toBeGreaterThan(CHATGPT_COMPACTION_PROMPT_JSON_BYTE_BUDGET);
   const staged = multipart.multipart!.parts.join("\n");
   for (let index = 1; index <= 6; index += 1) {

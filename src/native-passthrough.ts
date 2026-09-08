@@ -1,8 +1,10 @@
 import { readJsonRequestBody } from "./http-body";
 import {
   BRIDGE_COMPACTION_PREFIX,
+  BRIDGE_FILE_COMPACTION_PREFIX,
   SUMMARY_PREFIX,
-  decodeCompactionSummary,
+  readCompactionCheckpoint,
+  compactionFileMessages,
 } from "./responses/compaction";
 import { BRIDGE_REASONING_PREFIX } from "./responses/reasoning-envelope";
 
@@ -72,7 +74,7 @@ function isBridgeCompactionItem(value: unknown): value is BridgeCompactionItem {
   return isObject(value)
     && value.type === "compaction"
     && typeof value.encrypted_content === "string"
-    && value.encrypted_content.startsWith(BRIDGE_COMPACTION_PREFIX);
+    && (value.encrypted_content.startsWith(BRIDGE_COMPACTION_PREFIX) || value.encrypted_content.startsWith(BRIDGE_FILE_COMPACTION_PREFIX));
 }
 
 /**
@@ -95,13 +97,13 @@ export function scrubBridgeArtifactsForNative(value: unknown): { value: unknown;
     const clean = { ...item };
     delete clean.id;
     if (isBridgeCompactionItem(clean)) {
-      const summary = decodeCompactionSummary(clean.encrypted_content);
+      const { summary, files } = readCompactionCheckpoint(clean.encrypted_content);
       if (summary === null) throw new Error("Invalid ChatGPT Web compaction checkpoint");
       return [{
         type: "message",
         role: "user",
         content: [{ type: "input_text", text: `${SUMMARY_PREFIX}\n\n${summary}` }],
-      }];
+      }, ...compactionFileMessages(files)];
     }
     if (clean.type !== "reasoning") return [clean];
 

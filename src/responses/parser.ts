@@ -13,7 +13,7 @@ import type {
 } from "../types";
 import { namespacedToolName } from "../types";
 import { responsesRequestSchema } from "./schema";
-import { compactionItemToText } from "./compaction";
+import { readCompactionCheckpoint } from "./compaction";
 import { previousResponseReplayPrefixLength } from "./state";
 import { decodeReasoningEnvelope } from "./reasoning-envelope";
 import { recordNativeMessageTurn } from "./message-provenance";
@@ -39,7 +39,7 @@ type InputBlock =
   | { type: "input_text"; text: string }
   | { type: "text"; text: string }
   | { type: "input_image"; image_url?: string; file_id?: string; detail?: string }
-  | { type: "input_file"; file_id?: string; filename?: string };
+  | { type: "input_file"; file_id?: string; filename?: string; file_data?: string; file_url?: string; detail?: string };
 
 function inputContentParts(blocks: unknown[] | string | undefined): string | CodexContentPart[] {
   if (typeof blocks === "string") return blocks;
@@ -56,11 +56,11 @@ function inputContentParts(blocks: unknown[] | string | undefined): string | Cod
         // NEVER inline the (often base64 data-URL) image_url as text: that explodes the token count.
         parts.push({ type: "image", imageUrl: b.image_url, ...(b.detail ? { detail: normalizeImageDetail(b.detail) } : {}) });
       } else {
-        parts.push({ type: "text", text: `[image: ${b.file_id ?? "?"}]` }); // file_id ref → no inline data
+        parts.push({ type: "file", sourceType: "input_image", filename: "image-reference", fileId: b.file_id, detail: b.detail });
       }
     } else if (block.type === "input_file") {
-      const ref = (block as { file_id?: string; filename?: string }).file_id ?? (block as { filename?: string }).filename ?? "?";
-      parts.push({ type: "text", text: `[file: ${ref}]` });
+      parts.push({ type: "file", filename: block.filename, fileId: block.file_id,
+        fileData: block.file_data, fileUrl: block.file_url, detail: block.detail });
     }
   }
   // Collapse to a plain string only for a single TEXT part; images must stay structured.
@@ -359,11 +359,15 @@ export function parseRequest(body: unknown): CodexParsedRequest {
         const encrypted = (item as { encrypted_content?: unknown }).encrypted_content;
         if (effectiveType === "context_compaction" && typeof encrypted !== "string") continue;
         pendingReasoning.length = 0;
+        const checkpoint = readCompactionCheckpoint(typeof encrypted === "string" ? encrypted : undefined);
         messages.push({
           role: "user",
-          content: compactionItemToText(typeof encrypted === "string" ? encrypted : undefined),
+          content: checkpoint.text,
           timestamp: now,
         });
+        for (const attachment of checkpoint.files) {
+          messages.push({ role: attachment.role, content: [attachment.file], timestamp: now });
+        }
         continue;
       }
 
@@ -403,6 +407,7 @@ export function parseRequest(body: unknown): CodexParsedRequest {
           case "system": {
             pendingReasoning.length = 0;
             const text = inputContentParts(msg.content as unknown[] | string | undefined);
+            if (Array.isArray(text) && text.some(part => part.type === "file")) throw new Error("System-message file attachments are unsupported; supply documents as user attachments so their content and provenance can be preserved");
             const flat = typeof text === "string" ? text : text.map(p => (p.type === "text" ? p.text : "")).join("");
             if (flat.length > 0) systemPrompt.push(flat);
             break;

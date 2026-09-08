@@ -16,6 +16,8 @@ const inputFileBlockSchema = z.object({
   file_id: z.string().optional(),
   filename: z.string().optional(),
   file_data: z.string().optional(),
+  file_url: z.string().optional(),
+  detail: z.enum(["auto", "low", "high"]).optional(),
 });
 const outputTextSchema = z.object({ type: z.literal("output_text"), text: z.string() });
 const outputRefusalSchema = z.object({ type: z.literal("refusal"), refusal: z.string() });

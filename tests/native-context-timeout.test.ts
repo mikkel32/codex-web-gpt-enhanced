@@ -18,7 +18,7 @@ test("a lost response at offset 48000 times out and the identical read safely re
     sandboxPolicy: { type: "readOnly", networkAccess: false }, tools: [] }, 60000);
   const files = [{ name: "codex-context-1-of-2.json", text: JSON.stringify({ data: "x".repeat(80000) }) },
     { name: "codex-context-2-of-2.json", text: '{"end":true}' }];
-  broker.setContextFiles(token, files);
+  broker.setContextFiles(token, files, { requireReceipts: true });
   const sockets = new Set<Socket>();
   let dropped = false;
   const proxy = createServer(downstream => {
@@ -50,24 +50,28 @@ test("a lost response at offset 48000 times out and the identical read safely re
   const client = new Client({ name: "context-loss-test", version: "1" });
   await client.connect(new StdioClientTransport({ command: process.execPath,
     args: ["src/cli.ts", "mcp", "--broker-socket", address("proxy")], cwd: process.cwd(), stderr: "pipe" }));
-  const read = (name: string, offset: number) => client.callTool({ name: "codex_context_read", arguments: { turn_token: token, name, offset } });
+  const read = (name: string, offset: number, receipt?: string) => client.callTool({ name: "codex_context_read", arguments: { turn_token: token, name, offset, ...(receipt ? { receipt } : {}) } });
   const page = (response: unknown) => JSON.parse((response as { content: Array<{ text: string }> }).content[0]!.text) as NativeContextPage;
   try {
     let reconstructed = "";
-    for (const offset of [0, 12000, 24000, 36000]) reconstructed += page(await read(files[0]!.name, offset)).text;
-    const failed = await read(files[0]!.name, 48000);
+    let receipt: string | undefined;
+    for (const offset of [0, 12000, 24000, 36000]) { const next = page(await read(files[0]!.name, offset, receipt)); reconstructed += next.text; receipt = next.receipt; }
+    const failed = await read(files[0]!.name, 48000, receipt);
     expect(failed.isError).toBe(true);
     expect(JSON.stringify(failed)).toMatch(/timeout|timed out/i);
-    const recovered = await read(files[0]!.name, 48000);
+    const recovered = await read(files[0]!.name, 48000, receipt);
     expect(recovered.isError).not.toBe(true);
     let current = page(recovered);
     reconstructed += current.text;
     while (current.next_offset !== null) {
-      current = page(await read(files[0]!.name, current.next_offset));
+      current = page(await read(files[0]!.name, current.next_offset, current.receipt));
       reconstructed += current.text;
     }
     expect(reconstructed).toBe(files[0]!.text);
-    expect(page(await read(files[1]!.name, 0)).text).toBe(files[1]!.text);
+    const last = page(await read(files[1]!.name, 0, current.receipt));
+    expect(last.text).toBe(files[1]!.text);
+    expect(() => broker.commitCompletionFence(token, broker.beginCompletionFence(token)!)).toThrow("Required context delivery incomplete");
+    expect(page(await read(files[1]!.name, last.total_chars, last.receipt)).acknowledged).toBe(true);
     const revision = broker.beginCompletionFence(token);
     expect(broker.commitCompletionFence(token, revision!)).toBe(true);
     expect(dropped).toBe(true);

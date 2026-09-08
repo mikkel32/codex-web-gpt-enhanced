@@ -131,20 +131,11 @@ test("macOS passkey sign-in is additive to the unchanged embedded login action",
   assert.match(browserHostSource, /await this\.waitForAuthenticated\(60_000\)[\s\S]*?runSessionInspection\(false\)/);
 });
 
-test("Bigger Context stays optional without interrupting startup and retains its settings transaction", () => {
-  assert.match(
-    appSource,
-    /const \[biggerContextRecommendationOpen, setBiggerContextRecommendationOpen\] = useState\(false\)/,
-  );
-  assert.match(appSource, /&& !biggerContextRecommendationOpen[\s\S]*?&& !commandOpen[\s\S]*?&& !overlayPresent;/);
+test("compatibility context settings remain without the retired capacity recommendation", () => {
+  assert.doesNotMatch(appSource, /BiggerContextRecommendation|biggerContextRecommendationOpen/);
   assert.match(appSource, /updateState\(await api!\.setBiggerContext\(enabled\)\)/);
-  assert.match(
-    appSource,
-    /<BiggerContextRecommendation[\s\S]*?checked=\{snapshot\.state\.experimentalBiggerContext\}[\s\S]*?onClose=\{\(\) => setBiggerContextRecommendationOpen\(false\)\}/,
-  );
-  assert.match(appSource, /<Switch label=\{copy\.biggerContext\} checked=\{checked\} disabled=\{busy\} onChange=\{onChange\} \/>/);
-  assert.match(stylesSource, /\.bigger-context-recommendation-backdrop\s*\{[^}]*position:\s*fixed;/s);
-  assert.doesNotMatch(stylesSource, /\.bigger-context-recommendation-backdrop\s*\{[^}]*backdrop-filter:/s);
+  assert.match(appSource, /copy\.biggerContextBody/);
+  assert.match(appSource, /&& !commandOpen[\s\S]*?&& !overlayPresent;/);
 });
 
 test("Zero Risk is selectable during onboarding and later switches transactionally without automating its tab DOM", () => {

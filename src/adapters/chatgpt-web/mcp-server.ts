@@ -6,11 +6,11 @@ import { namespacedToolName, type CodexTool } from "../../types";
 import { VERSION } from "../../version";
 import type { ChatGptTurnEnvironment } from "./environment";
 import { CODEX_COMPACTION_CONTROL_WIRE_NAME } from "./native-compaction-control";
-import { NATIVE_CONTEXT_READ, nativeContextResult, type NativeContextPage } from "./native-context";
+import { nativeContextResult, nativeContextTextResult, type NativeContextPage } from "./native-context";
+import { CONTEXT_FILE_NAME } from "./context-store";
 import { callTurnBroker, TurnBrokerTimeoutError, type BrokerToolResult } from "./turn-broker";
 
 interface ClaimedTurn {
-  contextAvailable?: boolean;
   bindingId: string;
   activityId: string;
   environment: ChatGptTurnEnvironment & { expiresAt?: number };
@@ -27,6 +27,7 @@ const BRIDGE_TOOL_NAMES = new Set([
   "codex_tool_inventory",
   "codex_tool_call",
   "codex_context_read",
+  "codex_context_search",
   "codex_turn_complete",
 ]);
 
@@ -769,12 +770,7 @@ export async function runChatGptMcpServer(options: {
         const { query, offset, limit, include_schema } = input;
         const bound = claimed.environment;
         const needle = query?.trim().toLowerCase();
-        const contextTools: CodexTool[] = claimed.contextAvailable && contract === "native" ? [{
-          name: NATIVE_CONTEXT_READ,
-          description: "Read a page of this task's canonical context. Follow next_offset until null for every file before work.",
-          parameters: { type: "object", properties: { name: { type: "string" }, offset: { type: "integer", minimum: 0 } }, required: ["name", "offset"], additionalProperties: false },
-        }] : [];
-        const directMatches = [...contextTools, ...safeVisibleTools(bound, contract)].filter(tool => !needle || [
+        const directMatches = safeVisibleTools(bound, contract).filter(tool => !needle || [
           wireName(tool),
           tool.name,
           tool.namespace ?? "",
@@ -790,7 +786,7 @@ export async function runChatGptMcpServer(options: {
         }));
         let nestedTotal = 0;
         let nestedPage: Array<Record<string, unknown>> = [];
-        const gateway = needle === NATIVE_CONTEXT_READ && claimed.contextAvailable ? undefined : execGateway(bound);
+        const gateway = execGateway(bound);
         if (gateway) {
           const excludedGatewayNames = bound.tools.map(wireName);
           const nestedOffset = Math.max(0, offset - directMatches.length);
@@ -847,11 +843,12 @@ export async function runChatGptMcpServer(options: {
     "codex_context_read",
     {
       title: "Read this Codex task's context",
-      description: "Read one bounded page of canonical context already supplied to this active Codex task. This tool cannot read arbitrary files, execute commands, modify data, or access another task. Follow next_offset until null for every named context file before doing the task.",
+      description: "Read a bounded page or image already supplied to this active Codex task. Pass each returned receipt on the next read; acknowledge the last page with offset=total_chars and its receipt. Read required core records before work; use codex_context_search for optional evidence. Cannot read arbitrary filesystem paths or another task, or execute work.",
       inputSchema: {
         ...turnReferenceInput(contract),
-        name: z.string().regex(/^codex-context-[1-3]-of-[23]\.json$/),
+        name: z.string().regex(CONTEXT_FILE_NAME),
         offset: z.number().int().min(0).max(50_000_000),
+        receipt: z.string().min(40).max(128).optional(),
       },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
@@ -864,6 +861,7 @@ export async function runChatGptMcpServer(options: {
           async claimed => nativeContextResult(await callTurnBroker<NativeContextPage>(options.brokerSocketPath, {
             method: "read_context", bindingId: claimed.bindingId,
             contextName: input.name, contextOffset: input.offset,
+            contextReceipt: input.receipt,
           }, 10_000, extra.signal)));
         console.error(`[chatgpt-web-mcp] context-read completed ${JSON.stringify({ ...detail, elapsedMs: Math.round(performance.now() - started), resultBytes: Buffer.byteLength(JSON.stringify(response), "utf8") })}`);
         return response;
@@ -873,6 +871,17 @@ export async function runChatGptMcpServer(options: {
       }
     },
   );
+
+  if (contract === "native") server.registerTool("codex_context_search", {
+    title: "Search this task's archived evidence",
+    description: "Search immutable historical tool output and supplied documents after required context is acknowledged. Returns bounded excerpts and exact names/offsets for codex_context_read. Searches only this task's stored evidence, not the filesystem or other tasks.",
+    inputSchema: { ...turnReferenceInput(contract), query: z.string().min(1).max(500),
+      offset: z.number().int().min(0).max(512).default(0), limit: z.number().int().min(1).max(20).default(10) },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, async (input, extra) => withClaimedTurn("codex_context_search", turnReference(contract, input), extra,
+    async claimed => nativeContextTextResult(await callTurnBroker<Record<string, unknown>>(options.brokerSocketPath, {
+      method: "search_context", bindingId: claimed.bindingId, query: input.query, contextOffset: input.offset, limit: input.limit,
+    }, 10_000, extra.signal))));
 
   server.registerTool(
     "codex_tool_call",
@@ -911,16 +920,6 @@ export async function runChatGptMcpServer(options: {
         return result({ submitted: true });
       }
       return withClaimedTurn("codex_tool_call", requestId, extra, async claimed => {
-        if (contract === "native" && wire_name === NATIVE_CONTEXT_READ) {
-          if (input !== undefined || typeof args?.name !== "string"
-            || !Number.isSafeInteger(args?.offset) || (args!.offset as number) < 0) {
-            throw new Error("Native context retrieval requires structured name and nonnegative integer offset");
-          }
-          return nativeContextResult(await callTurnBroker<NativeContextPage>(options.brokerSocketPath, {
-            method: "read_context", bindingId: claimed.bindingId,
-            contextName: args.name, contextOffset: args.offset as number,
-          }, 10_000, extra.signal));
-        }
         const bound = claimed.environment;
         const tool = safeVisibleTools(bound, contract)
           .find(candidate => wireName(candidate) === wire_name);

@@ -47,5 +47,5 @@ export function estimateCompiledChatGptWebInputTokens(
   const messageTokens = compiledChatGptWebMessages(compiled)
     .reduce((total, message) => total + estimateTokens(message, modelId), 0);
   const contextFileTokens = compiled.multipart?.parts.reduce((total, payload) => total + estimateTokens(payload, modelId), 0) ?? 0;
-  return CHATGPT_WEB_PLATFORM_RESERVE_TOKENS + messageTokens + contextFileTokens + imageTokens;
+  return CHATGPT_WEB_PLATFORM_RESERVE_TOKENS + messageTokens + contextFileTokens + imageTokens + (compiled.contextReserveTokens ?? 0) + (compiled.contextRequiredTokens ?? 0);
 }

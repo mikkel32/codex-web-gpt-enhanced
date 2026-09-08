@@ -80,6 +80,12 @@ if (!browserHelperBuild.success) {
   throw new Error(`Browser helper bundle failed: ${browserHelperBuild.logs.map(log => log.message).join("; ")}`);
 }
 
+const documentBuild = await Bun.build({
+  entrypoints: [join(root, "src", "adapters", "chatgpt-web", "document-worker.ts")],
+  target: "bun", minify: true, packages: "external", outdir: appDir, naming: "document-worker.js",
+});
+if (!documentBuild.success) throw new Error(`Document worker bundle failed: ${documentBuild.logs.map(log => log.message).join("; ")}`);
+
 copyFileSync(join(root, "package.json"), join(appDir, "package.json"));
 copyFileSync(join(root, "bun.lock"), join(appDir, "bun.lock"));
 const install = Bun.spawnSync([process.execPath, "install", "--production", "--frozen-lockfile", "--ignore-scripts"], {

@@ -1,6 +1,6 @@
 import type { AdapterEvent, CodexMessagePhase, CodexProviderContinuationState, CodexUsage } from "./types";
 import { adapterFailureFromMessage, classifyError, type CodexErrorPayload } from "./lib/errors";
-import { encodeCompactionSummary } from "./responses/compaction";
+import { encodeCompactionSummary, type CompactionFile } from "./responses/compaction";
 import { encodeReasoningEnvelope, type ReasoningEnvelope } from "./responses/reasoning-envelope";
 import { resolveStallTimeoutSec } from "./stall-timeout";
 import { usageDisplayTotalTokens } from "./usage/totals";
@@ -99,6 +99,7 @@ export function bridgeToResponsesSSE(
      * response.completed — codex-rs collect_compaction_output requires exactly one.
      */
     compaction?: boolean;
+    compactionFiles?: CompactionFile[];
     /** One-shot: first non-empty text/thinking/raw-reasoning delta observed (WP4 TTFT). */
     onFirstOutput?: () => void;
     onTerminal?: (status: ResponsesTerminalStatus) => void;
@@ -601,7 +602,7 @@ export function bridgeToResponsesSSE(
                 // Exactly one compaction item per turn; codex-rs takes the first and fatals on 0.
                 const item = {
                   type: "compaction", id: `cmp_${uuid()}`,
-                  encrypted_content: encodeCompactionSummary(compactionText),
+                  encrypted_content: encodeCompactionSummary(compactionText, options?.compactionFiles),
                 };
                 emit("response.output_item.done", { output_index: outputIndex, item });
                 finishedItems.push(item as OutputItem);
@@ -871,6 +872,7 @@ export function buildResponseJSON(
     toolSearchToolNames?: Set<string>;
     /** Remote compaction v2 turn — append one synthetic compaction output item (see bridgeToResponsesSSE). */
     compaction?: boolean;
+    compactionFiles?: CompactionFile[];
     onProviderState?: (state: CodexProviderContinuationState) => void;
   },
 ): Record<string, unknown> {
@@ -1060,7 +1062,7 @@ export function buildResponseJSON(
   // A truncated turn must never become replacement history. Emit a compaction item only after
   // authoritative turn completion.
   if (options?.compaction && !errorEvent && !incompleteEvent && stopReason !== "max_tokens") {
-    output.push({ type: "compaction", id: `cmp_${uuid()}`, encrypted_content: encodeCompactionSummary(compactionText) });
+    output.push({ type: "compaction", id: `cmp_${uuid()}`, encrypted_content: encodeCompactionSummary(compactionText, options?.compactionFiles) });
   }
 
   const failure = errorEvent ? adapterFailureFromEvent(errorEvent) : undefined;

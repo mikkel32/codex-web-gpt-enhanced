@@ -348,8 +348,7 @@ svg { flex-shrink: 0; }
 .command-results button.is-selected { background: #bce4ca12; color: #e0f5e7; }
 .command-palette footer { border-color: #ffffff15; color: #99b0a1; }
 kbd { color: #a9c0b2; border-color: #ffffff23; }
-.session-refresh-reminder, .bigger-context-recommendation { background: #1d2b22; border-color: #bce4ca30; }
-.bigger-context-recommendation-body { font-size: 14px; line-height: 1.8; color: #b9cdbf; }
+.session-refresh-reminder { background: #1d2b22; border-color: #bce4ca30; }
 .studio-inline-error, .maria-update-error { color: #edb5ac; font-size: 13px; line-height: 1.7; }
 
 @media (max-width: 1050px) {

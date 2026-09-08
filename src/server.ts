@@ -37,6 +37,9 @@ import {
 import { forwardNativeCodexRequest, type NativeFetch } from "./native-passthrough";
 import {
   buildCompactV1Output,
+  collectCompactionFiles,
+  decodeCompactionFiles,
+  compactionFileMessages,
   COMPACT_PROMPT,
   decodeCompactionSummary,
   extractCompactUserMessages,
@@ -631,7 +634,7 @@ export async function responseRequest(
         ...(provider.chatgptWeb?.stallTimeoutSec !== undefined
           ? { stallTimeoutSec: provider.chatgptWeb.stallTimeoutSec }
           : {}),
-        ...(compaction ? (encodedCompaction ? { compaction: true } : {}) : {
+        ...(compaction ? (encodedCompaction ? { compaction: true, compactionFiles: collectCompactionFiles(parsed.context.messages) } : {}) : {
           ...(options.rememberState === false ? {} : {
             onCompletedResponse: rememberWebResponse,
           }),
@@ -655,7 +658,7 @@ export async function responseRequest(
     toolNsMap: maps.toolNsMap,
     freeformToolNames: maps.freeformToolNames,
     toolSearchToolNames: maps.toolSearchToolNames,
-    ...(encodedCompaction ? { compaction: true } : {}),
+    ...(encodedCompaction ? { compaction: true, compactionFiles: collectCompactionFiles(parsed.context.messages) } : {}),
   });
   if (!compaction && options.rememberState !== false) {
     rememberWebResponse(json);
@@ -780,7 +783,18 @@ export async function compactRequest(
   if (!summary?.trim()) {
     return formatErrorResponse(502, "invalid_response_error", "Compaction turn produced an empty summary");
   }
-  return Response.json({ output: buildCompactV1Output(extractCompactUserMessages(input), summary) });
+  const userMessages = extractCompactUserMessages(input);
+  const restored = decodeCompactionFiles(items[0]!.encrypted_content);
+  const rawFiles = compactionFileMessages(restored);
+  const fileKey = (value: unknown): string => {
+    const file = value as Record<string, unknown>;
+    return JSON.stringify([file.type, file.filename ?? null, file.file_data ?? null, file.file_id ?? null, file.file_url ?? null, file.image_url ?? null, file.detail ?? null]);
+  };
+  const alreadyRetained = new Set(userMessages.flatMap(message => Array.isArray(message.content)
+    ? message.content.filter(block => block && typeof block === "object" && ["input_file", "input_image"].includes(String((block as { type?: string }).type))).map(fileKey) : []));
+  const extraUserFiles = rawFiles.filter(message => message.role === "user" && !alreadyRetained.has(fileKey((message.content as unknown[])[0])));
+  const developerFiles = rawFiles.filter(message => message.role === "developer");
+  return Response.json({ output: [...developerFiles, ...buildCompactV1Output([...userMessages, ...extraUserFiles], summary, config.mode === "full" && config.browserInteractionMode !== "manual" ? 32 : 10)] });
 }
 
 export function startServer(

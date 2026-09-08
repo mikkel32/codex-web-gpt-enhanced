@@ -490,8 +490,11 @@ export class LauncherBrowserHelperClient {
               id: message.id,
               prepared: {
                 text: prepared.text,
-                images: prepared.images,
+                images: prepared.nativeImages ? prepared.images.map(image => ({ ...image, imageUrl: "" })) : prepared.images,
                 ...(prepared.nativeContext ? { nativeContext: true as const } : {}),
+                ...(prepared.nativeImages ? { nativeImages: true as const } : {}),
+                ...(prepared.contextReserveTokens ? { contextReserveTokens: prepared.contextReserveTokens } : {}),
+                ...(prepared.contextRequiredTokens ? { contextRequiredTokens: prepared.contextRequiredTokens } : {}),
                 ...(prepared.multipart ? { multipart: prepared.multipart } : {}),
                 ...(prepared.trimmedCompactionMessages !== undefined
                   ? { trimmedCompactionMessages: prepared.trimmedCompactionMessages }

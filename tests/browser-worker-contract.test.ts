@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Page } from "playwright-core";
-import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_STOPPED_THINKING_GRACE_MS, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptPromptAttachmentIntegrityError, ChatGptStoppedThinkingTracker, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, browserDiagnosticIncludesScreenshot, chatGptConnectorAttachmentMode, chatGptEffortSelectionRequired, chatGptNewTurnIdentity, chatGptReboundTurnIdentity, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, dismissChatGptTemporaryChatOnboarding, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, resolveChatGptWebMultipartStagingMode, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
+import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_STOPPED_THINKING_GRACE_MS, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptPromptAttachmentIntegrityError, ChatGptStoppedThinkingTracker, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, browserDiagnosticIncludesScreenshot, chatGptConnectorAttachmentMode, chatGptEffortSelectionRequired, chatGptNewTurnIdentity, chatGptReboundTurnIdentity, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, dismissChatGptTemporaryChatOnboarding, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
 import { chatGptConnectorActivationCanRetry, type ChatGptConnectorActivationSnapshot, CHATGPT_STOPPED_THINKING_LABEL, ensureChatGptPersonalizedConnectorAccess } from "../src/adapters/chatgpt-web/browser-worker";
 import { chatGptStoppedThinkingError } from "../src/adapters/chatgpt-web/adapter-error";
 import { CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
@@ -2918,7 +2918,7 @@ test("browser preflight separates model context from one-message transport limit
   )).toThrow("104,000-token ChatGPT browser message boundary");
 });
 
-test("Bigger Context preflight expands only the total context ceiling and keeps each message boundary", () => {
+test("Bigger Context preflight preserves the actual model ceiling and keeps each message boundary", () => {
   const plus = {
     localToolsEnabled: false,
     solAvailable: true,
@@ -2932,7 +2932,7 @@ test("Bigger Context preflight expands only the total context ceiling and keeps 
     experimentalBiggerContext: true,
   };
   expect(() => assertChatGptWebMultipartInputWithinLimits(
-    333_578,
+    111_192,
     95_000,
     "gpt-5.6-sol",
     "high",
@@ -2941,16 +2941,16 @@ test("Bigger Context preflight expands only the total context ceiling and keeps 
     3,
   )).not.toThrow();
   expect(() => assertChatGptWebMultipartInputWithinLimits(
-    333_579,
+    111_193,
     95_000,
     "gpt-5.6-sol",
     "high",
     pro,
     900_000,
     3,
-  )).toThrow("three-part ceiling");
+  )).toThrow("111,193-token model ceiling");
   expect(() => assertChatGptWebMultipartInputWithinLimits(
-    222_385,
+    111_192,
     95_000,
     "gpt-5.6-sol",
     "high",
@@ -2959,16 +2959,16 @@ test("Bigger Context preflight expands only the total context ceiling and keeps 
     2,
   )).not.toThrow();
   expect(() => assertChatGptWebMultipartInputWithinLimits(
-    222_386,
+    111_193,
     95_000,
     "gpt-5.6-sol",
     "high",
     pro,
     900_000,
     2,
-  )).toThrow("two-part ceiling");
+  )).toThrow("111,193-token model ceiling");
   expect(() => assertChatGptWebMultipartInputWithinLimits(
-    269_999,
+    89_999,
     80_000,
     "gpt-5.6-sol",
     "high",
@@ -2977,23 +2977,23 @@ test("Bigger Context preflight expands only the total context ceiling and keeps 
     3,
   )).not.toThrow();
   expect(() => assertChatGptWebMultipartInputWithinLimits(
-    270_000,
+    90_000,
     80_000,
     "gpt-5.6-sol",
     "high",
     plus,
     900_000,
     3,
-  )).toThrow("270,000-token three-part ceiling");
+  )).toThrow("90,000-token model ceiling");
   expect(() => assertChatGptWebMultipartInputWithinLimits(
-    180_000,
+    90_000,
     80_000,
     "gpt-5.6-sol",
     "high",
     plus,
     900_000,
     2,
-  )).toThrow("180,000-token two-part ceiling");
+  )).toThrow("90,000-token model ceiling");
   expect(() => assertChatGptWebMultipartInputWithinLimits(
     280_000,
     103_001,
@@ -3014,38 +3014,6 @@ test("Bigger Context preflight expands only the total context ceiling and keeps 
   )).toThrow("unavailable for Luna");
 });
 
-test("Bigger Context stages use the lowest account mode that can carry the stage", () => {
-  const plus = { localToolsEnabled: false, solAvailable: true, proAvailable: false };
-  const pro = { localToolsEnabled: false, solAvailable: true, proAvailable: true };
-  expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", plus, "medium", 30_000, 200_000).effort).toBe("medium");
-  expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", plus, "high", 30_000, 300_000).effort).toBe("medium");
-  expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", pro, "medium", 100_000, 500_000).effort).toBe("low");
-  expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", pro, "medium", 100_000, 600_000).effort).toBe("medium");
-  expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", pro, "max", 104_000, 1_200_000).effort).toBe("max");
-  expect(() => resolveChatGptWebMultipartStagingMode(
-    "gpt-5.6-luna",
-    { localToolsEnabled: false, solAvailable: false, proAvailable: false },
-    "low",
-    10_000,
-    20_000,
-  )).toThrow("Luna-only");
-  expect(() => assertChatGptWebMultipartInputWithinLimits(
-    100_000,
-    30_000,
-    "gpt-5.6-sol",
-    "low",
-    plus,
-    300_000,
-    3,
-    {
-      stagingEffort: "medium",
-      maxStageMessageTokens: 30_000,
-      maxStageChars: 300_000,
-      finalMessageTokens: 1_000,
-      finalMessageChars: 4_000,
-    },
-  )).not.toThrow();
-});
 
 test("browser diagnostics redact context envelopes and capability values", () => {
   const diagnostic = redactChatGptUiDiagnostic(

@@ -15,7 +15,63 @@
  * routed models get a short "history was compacted" note instead.
  */
 
+import { gzipSync, gunzipSync } from "node:zlib";
+import type { CodexFileContent, CodexImageContent, CodexMessage } from "../types";
+
 export const BRIDGE_COMPACTION_PREFIX = "ocx1:";
+export const BRIDGE_FILE_COMPACTION_PREFIX = "ocx2:";
+export interface CompactionFile { role: "user" | "developer"; file: CodexFileContent | CodexImageContent }
+
+export function compactionFileMessages(files: CompactionFile[]): Array<Record<string, unknown>> {
+  return files.map(({ role, file }) => ({ type: "message", role, content: [file.type === "image"
+    ? { type: "input_image", image_url: file.imageUrl, ...(file.detail ? { detail: file.detail } : {}) }
+    : file.sourceType === "input_image" ? { type: "input_image", file_id: file.fileId, ...(file.detail ? { detail: file.detail } : {}) }
+    : { type: "input_file",
+    ...(file.filename ? { filename: file.filename } : {}), ...(file.fileData !== undefined ? { file_data: file.fileData } : {}),
+    ...(file.fileId ? { file_id: file.fileId } : {}), ...(file.fileUrl ? { file_url: file.fileUrl } : {}), ...(file.detail ? { detail: file.detail } : {}) }] }));
+}
+
+export function collectCompactionFiles(messages: CodexMessage[]): CompactionFile[] {
+  return messages.flatMap(message => (message.role === "user" || message.role === "developer") && Array.isArray(message.content)
+    ? message.content.filter((part): part is CodexFileContent | CodexImageContent => part.type === "file" || (part.type === "image" && !isOnePixelPngDataUrl(part.imageUrl))).map(file => ({ role: message.role as "user" | "developer", file })) : []);
+}
+
+function decodeFileCheckpoint(value: string): { summary: string; files: CompactionFile[] } {
+  const encoded = value.slice(BRIDGE_FILE_COMPACTION_PREFIX.length);
+  if (encoded.length > 100_000_000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) throw new Error("Invalid bridge file checkpoint");
+  let payload: { version?: number; summary?: unknown; files?: unknown };
+  try { payload = JSON.parse(gunzipSync(Buffer.from(encoded, "base64"), { maxOutputLength: 70_000_000 }).toString("utf8")); }
+  catch { throw new Error("Unreadable or oversized bridge file checkpoint"); }
+  if (payload.version !== 2 || typeof payload.summary !== "string" || !Array.isArray(payload.files) || payload.files.length > 128) throw new Error("Invalid bridge file checkpoint data");
+  const files: CompactionFile[] = payload.files.map(entry => {
+    if (!entry || !["user", "developer"].includes(entry.role) || !["file", "image"].includes(entry.file?.type)) throw new Error("Invalid checkpoint attachment");
+    if (entry.file.type === "image") {
+      if (typeof entry.file.imageUrl !== "string" || (entry.file.detail !== undefined && typeof entry.file.detail !== "string")) throw new Error("Invalid checkpoint image");
+      return { role: entry.role, file: { type: "image" as const, imageUrl: entry.file.imageUrl, ...(entry.file.detail ? { detail: entry.file.detail } : {}) } };
+    }
+    const file: CodexFileContent = { type: "file" };
+    if (entry.file.sourceType !== undefined) {
+      if (!["input_file", "input_image"].includes(entry.file.sourceType)) throw new Error("Invalid checkpoint attachment source type");
+      file.sourceType = entry.file.sourceType;
+    }
+    for (const key of ["filename", "fileData", "fileId", "fileUrl", "detail"] as const) {
+      if (entry.file[key] !== undefined && typeof entry.file[key] !== "string") throw new Error("Invalid checkpoint attachment value");
+      if (entry.file[key] !== undefined) file[key] = entry.file[key];
+    }
+    return { role: entry.role, file };
+  });
+  return { summary: payload.summary, files };
+}
+
+export function decodeCompactionFiles(value?: string): CompactionFile[] {
+  return value?.startsWith(BRIDGE_FILE_COMPACTION_PREFIX) ? decodeFileCheckpoint(value).files : [];
+}
+
+export function readCompactionCheckpoint(value?: string): { summary: string | null; text: string; files: CompactionFile[] } {
+  const decoded = value?.startsWith(BRIDGE_FILE_COMPACTION_PREFIX) ? decodeFileCheckpoint(value)
+    : { summary: value ? decodeCompactionSummary(value) : null, files: [] };
+  return { ...decoded, text: decoded.summary ? `${SUMMARY_PREFIX}\n\n${decoded.summary}` : OPAQUE_COMPACTION_NOTE };
+}
 
 /** Native checkpoint framing, extended with explicit durable-task continuity requirements. */
 export const COMPACT_PROMPT = `You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.
@@ -34,6 +90,8 @@ For running work, preserve exact process/session/job handles and their last veri
 
 Include only task state and supporting evidence, not private reasoning, credentials, or capability tokens.
 
+Refer to supplied attachments by their original filenames and whether their contents or graphics were inspected. Temporary attachment paths and page receipts are not durable task identifiers; the bridge preserves original supplied files separately.
+
 Be concise, structured, and focused on helping the next LLM seamlessly continue the work.`;
 
 /** Mirrors codex-rs core/templates/compact/summary_prefix.md (framing for a replayed summary). */
@@ -46,12 +104,19 @@ export function isReadableCompactionSummaryText(value: unknown): value is string
   return typeof value === "string" && value.startsWith(`${SUMMARY_PREFIX}\n`);
 }
 
-export function encodeCompactionSummary(summary: string): string {
+export function encodeCompactionSummary(summary: string, files: CompactionFile[] = []): string {
+  if (files.length) {
+    if (files.length > 128) throw new Error("Too many attachments for a compaction checkpoint");
+    const json = JSON.stringify({ version: 2, summary, files });
+    if (Buffer.byteLength(json, "utf8") > 70_000_000) throw new Error("Compaction attachments exceed their byte budget");
+    return BRIDGE_FILE_COMPACTION_PREFIX + gzipSync(json).toString("base64");
+  }
   return BRIDGE_COMPACTION_PREFIX + Buffer.from(summary, "utf-8").toString("base64");
 }
 
 /** Decode an `ocx1:` envelope; returns null for real (OpenAI-encrypted) blobs or garbage. */
 export function decodeCompactionSummary(encryptedContent: string): string | null {
+  if (encryptedContent.startsWith(BRIDGE_FILE_COMPACTION_PREFIX)) return decodeFileCheckpoint(encryptedContent).summary;
   if (!encryptedContent.startsWith(BRIDGE_COMPACTION_PREFIX)) return null;
   try {
     return Buffer.from(encryptedContent.slice(BRIDGE_COMPACTION_PREFIX.length), "base64").toString("utf-8");
@@ -152,6 +217,8 @@ function imageBlock(block: CompactContentBlock): boolean {
     && !isOnePixelPngDataUrl(block.image_url);
 }
 
+function fileBlock(block: CompactContentBlock): boolean { return block.type === "input_file"; }
+
 /**
  * Build the v1 compact replacement history.
  *
@@ -168,12 +235,20 @@ export function buildCompactV1Output(
   const selected: CompactMessageItem[] = [];
   let remaining = COMPACT_V1_RETAINED_CHAR_BUDGET;
   let retainedImages = 0;
-  for (let i = userMessages.length - 1; i >= 0 && (remaining > 0 || retainedImages < maxImages); i--) {
+  let retainedFileBytes = 0, retainedFiles = 0;
+  for (let i = userMessages.length - 1; i >= 0; i--) {
     const message = structuredClone(userMessages[i]!);
     const blocks = compactContentBlocks(message);
     const retainedReversed: CompactContentBlock[] = [];
     for (let blockIndex = blocks.length - 1; blockIndex >= 0; blockIndex -= 1) {
       const block = blocks[blockIndex]!;
+      if (fileBlock(block)) {
+        retainedFileBytes += Buffer.byteLength(JSON.stringify(block), "utf8");
+        retainedFiles++;
+        if (retainedFileBytes > 70_000_000 || retainedFiles > 128) throw new Error("Compaction attachment retention budget exceeded");
+        retainedReversed.push(block);
+        continue;
+      }
       if (imageBlock(block)) {
         if (retainedImages < maxImages) {
           retainedImages += 1;
