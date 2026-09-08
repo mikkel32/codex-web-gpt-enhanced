@@ -3,6 +3,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, unlinkSync } from "node:fs
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { isWindowsPipeEndpoint } from "../../config";
+import { NATIVE_CONTEXT_PAGE_CHARS, type NativeContextFile } from "./native-context";
 import {
   CompactionTransactionStore,
   type CompactionTransactionHandle,
@@ -64,6 +65,8 @@ interface SafeTurnControl {
 interface TurnChannel {
   traceId: string;
   externalOwner: boolean;
+  contextFiles?: NativeContextFile[];
+  contextReadOffsets?: Map<string, number>;
   environment: PendingTurn;
   bindingId?: string;
   queuedCallIds: string[];
@@ -97,6 +100,8 @@ interface BrokerRequest {
     | "owner_register"
     | "owner_register_safe"
     | "owner_update"
+    | "owner_context"
+    | "read_context"
     | "owner_safe_sent"
     | "owner_next"
     | "owner_complete"
@@ -130,6 +135,9 @@ interface BrokerRequest {
   surfaceNonce?: string;
   finalAnswer?: string;
   contract?: "native" | "safe";
+  contextFiles?: NativeContextFile[];
+  contextName?: string;
+  contextOffset?: number;
 }
 
 interface BrokerResponse {
@@ -207,6 +215,7 @@ function assertSurfaceNonce(value: unknown): asserts value is string {
 }
 
 export interface TurnBrokerOwner {
+  setContextFiles?(token: string, files: NativeContextFile[]): void | Promise<void>;
   register(environment: ChatGptTurnEnvironment, ttlMs?: number, traceId?: string): Promise<string>;
   registerSafe(
     environment: ChatGptTurnEnvironment,
@@ -376,6 +385,24 @@ export class TurnBroker implements TurnBrokerOwner {
     };
   }
 
+  setContextFiles(token: string, files: NativeContextFile[]): void {
+    this.prune();
+    const channel = this.channels.get(token);
+    if (!channel || channel.completionCommitted || channel.bindingId || channel.safe) {
+      throw new Error("Context can only be installed on an unclaimed active native turn");
+    }
+    if (!Array.isArray(files) || files.length < 2 || files.length > 3
+      || files.some((file, index) => typeof file?.text !== "string"
+        || file.name !== `codex-context-${index + 1}-of-${files.length}.json`
+        || Buffer.byteLength(file.text, "utf8") > 20_000_000)
+      || files.reduce((sum, file) => sum + Buffer.byteLength(file.text, "utf8"), 0) > 50_000_000) {
+      throw new Error("Native context files exceed the bounded context contract");
+    }
+    for (const file of files) JSON.parse(file.text);
+    channel.contextFiles = structuredClone(files);
+    channel.contextReadOffsets = new Map(files.map(file => [file.name, 0]));
+  }
+
   async nextToolBatch(token: string, signal?: AbortSignal): Promise<BrokerToolRequest[]> {
     this.prune();
     let channel = this.channels.get(token);
@@ -453,6 +480,9 @@ export class TurnBroker implements TurnBrokerOwner {
     if (channel.activityRevision !== revision
       || channel.activities.size > 0
       || channel.invocations.size > 0) return false;
+    if (channel.contextFiles?.some(file => (channel.contextReadOffsets?.get(file.name) ?? 0) < file.text.length)) {
+      throw new Error("ChatGPT finished before retrieving every required native context page. The task was not completed.");
+    }
     channel.completionCommitted = true;
     channel.completionRevision = revision;
     console.info(
@@ -877,7 +907,7 @@ export class TurnBroker implements TurnBrokerOwner {
     if (!request || typeof request !== "object" || typeof request.id !== "string" || request.id.length === 0 || request.id.length > 256) {
       throw new Error("turn broker request id is invalid");
     }
-    if (!["claim", "resolve", "release", "invoke", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "activity_complete", "submit_compaction_handoff"].includes(request.method)) {
+    if (!["claim", "resolve", "release", "invoke", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_context", "read_context", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "activity_complete", "submit_compaction_handoff"].includes(request.method)) {
       throw new Error("turn broker method is invalid");
     }
   }
@@ -940,6 +970,11 @@ export class TurnBroker implements TurnBrokerOwner {
       if (!request.token) throw new Error("turn owner token is required");
       this.updateEnvironment(request.token, ownerEnvironment(request.environment));
       return { updated: true };
+    }
+    if (request.method === "owner_context") {
+      if (!request.token || !request.contextFiles) throw new Error("Context owner token and files are required");
+      this.setContextFiles(request.token, request.contextFiles);
+      return { stored: true };
     }
     if (request.method === "owner_safe_sent") {
       if (!request.token) throw new Error("turn owner token is required");
@@ -1050,13 +1085,15 @@ export class TurnBroker implements TurnBrokerOwner {
         if (!existing || existing.token !== token || existing.channel !== activeChannel) {
           throw new Error("turn token binding state is inconsistent");
         }
-        return { bindingId: activeChannel.bindingId, activityId, environment: activeChannel.environment };
+        return { bindingId: activeChannel.bindingId, activityId, environment: activeChannel.environment,
+          ...(activeChannel.contextFiles ? { contextAvailable: true } : {}) };
       }
       this.pending.delete(token);
       const bindingId = opaqueId("binding");
       activeChannel.bindingId = bindingId;
       this.bindings.set(bindingId, { token, channel: activeChannel });
-      return { bindingId, activityId, environment: activeChannel.environment };
+      return { bindingId, activityId, environment: activeChannel.environment,
+        ...(activeChannel.contextFiles ? { contextAvailable: true } : {}) };
     }
 
     const bindingId = request.bindingId;
@@ -1102,6 +1139,20 @@ export class TurnBroker implements TurnBrokerOwner {
     }
     if (request.method === "resolve") return { environment: binding.channel.environment };
     this.assertSafeHarnessRunning(binding.channel);
+    if (request.method === "read_context") {
+      const channel = binding.channel;
+      if (channel.completionCommitted || channel.compactionRequested) throw new Error("Native context turn is already terminal");
+      const file = channel.contextFiles?.find(file => file.name === request.contextName);
+      const offset = request.contextOffset;
+      if (!file || !Number.isSafeInteger(offset) || offset! < 0 || offset! > file.text.length
+        || offset! > (channel.contextReadOffsets?.get(file.name) ?? 0)) {
+        throw new Error("Requested context file or sequential offset is unavailable in this turn");
+      }
+      const end = Math.min(offset! + NATIVE_CONTEXT_PAGE_CHARS, file.text.length);
+      channel.contextReadOffsets!.set(file.name, Math.max(end, channel.contextReadOffsets!.get(file.name)!));
+      console.info(`[chatgpt-web] broker trace=${channel.traceId} context-read file=${file.name} offset=${offset} chars=${end - offset!} complete=${end === file.text.length}`);
+      return { name: file.name, offset, text: file.text.slice(offset, end), next_offset: end < file.text.length ? end : null, total_chars: file.text.length };
+    }
     if (binding.channel.compactionRequested) {
       const result = binding.channel.compactionResult;
       if (!result) throw new Error("Codex context compaction control result is unavailable");
@@ -1113,6 +1164,9 @@ export class TurnBroker implements TurnBrokerOwner {
     }
 
     const wireName = request.wireName?.trim();
+    if (binding.channel.contextFiles?.some(file => (binding.channel.contextReadOffsets?.get(file.name) ?? 0) < file.text.length)) {
+      return { isError: true, content: [{ type: "text", text: "Read every native context page with codex_context_read before calling work tools. No work was executed." }] };
+    }
     if (!wireName) throw new Error("wire tool name is required");
     const callId = opaqueId("call");
     const toolRequest: BrokerToolRequest = {
@@ -1350,6 +1404,10 @@ export class RemoteTurnBroker implements TurnBrokerOwner {
 
   async updateEnvironment(token: string, environment: ChatGptTurnEnvironment): Promise<void> {
     await callTurnBroker(this.socketPath, { method: "owner_update", token, environment });
+  }
+
+  async setContextFiles(token: string, contextFiles: NativeContextFile[]): Promise<void> {
+    await callTurnBroker(this.socketPath, { method: "owner_context", token, contextFiles });
   }
 
   async confirmSafeTurnSent(

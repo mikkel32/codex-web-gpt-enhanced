@@ -1779,7 +1779,7 @@ class ChatGptBrowserDiagnostics {
                 .map(group => ({
                   contextFile: /^codex-context-[1-3]-of-[23]\.json$/.test(group.getAttribute("aria-label") ?? "")
                     ? group.getAttribute("aria-label") : null,
-                  busy: group.getAttribute("aria-busy") === "true" || !!group.querySelector('[role="progressbar"], [aria-busy="true"]'),
+                  busy: group.getAttribute("aria-busy") === "true" || !!group.querySelector('[role="progressbar"], [aria-busy="true"], [data-default-action] button.cursor-wait'),
                 }))),
             },
             effortControls: rows(effortControlSelector, 10),
@@ -1923,7 +1923,7 @@ export function chatGptImageFilePayloads(images: ChatGptWebPromptImage[]): Array
 export function chatGptPromptFilePayloads(
   prompt: CompiledChatGptWebPrompt,
 ): Array<{ name: string; mimeType: string; buffer: Buffer }> {
-  const context = prompt.multipart ? chatGptContextFiles(prompt.multipart).map(file => ({
+  const context = prompt.multipart && !prompt.nativeContext ? chatGptContextFiles(prompt.multipart).map(file => ({
     name: file.name, mimeType: "application/json", buffer: Buffer.from(file.text, "utf8"),
   })) : [];
   const files = [...context, ...chatGptImageFilePayloads(prompt.images)];
@@ -3554,11 +3554,12 @@ export class ChatGptBrowserWorker {
       const card = form.getByRole("group", { name, exact: true });
       if (!await card.isVisible()
         || await card.getAttribute("aria-busy") === "true"
-        || await card.locator('[role="progressbar"], [aria-busy="true"]').count() > 0) missing.push(name);
+        || await card.locator('[role="progressbar"], [aria-busy="true"], [data-default-action] button.cursor-wait').count() > 0) missing.push(name);
     }
     throwIfPromptAttachmentAborted(abortSignal);
     if (missing.length > 0) {
-      throw new Error(`ChatGPT prompt attachments are missing or still uploading: ${missing.join(", ")}. No prompt was sent.`);
+      throw new ChatGptWebAdapterError(`ChatGPT prompt attachments are missing or still uploading: ${missing.join(", ")}. No prompt was sent.`,
+        { status: 400, errorType: "invalid_request_error", code: "chatgpt_attachment_unavailable", retryable: false });
     }
   }
 
@@ -3583,9 +3584,10 @@ export class ChatGptBrowserWorker {
       const alerts = (await page.locator('[role="alert"]').allInnerTexts().catch(() => []))
         .map(text => text.replace(/\s+/g, " ").trim())
         .filter(Boolean);
-      throw new Error(
+      throw new ChatGptWebAdapterError(
         `ChatGPT did not accept all prompt attachments`
         + (alerts.length > 0 ? `: ${alerts.join(" | ")}` : ""),
+        { status: 400, errorType: "invalid_request_error", code: "chatgpt_attachment_unavailable", retryable: false },
       );
     }
     const send = composerForm.getByTestId("send-button");
@@ -3598,7 +3600,8 @@ export class ChatGptBrowserWorker {
       }
       await new Promise(resolveSleep => setTimeout(resolveSleep, 100));
     }
-    throw new Error("ChatGPT accepted the prompt attachments but did not make the message ready to send");
+    throw new ChatGptWebAdapterError("ChatGPT attachments did not finish uploading. No prompt was sent; check the upload in Maria before retrying.",
+      { status: 400, errorType: "invalid_request_error", code: "chatgpt_attachment_unavailable", retryable: false });
   }
 
   private async responseDomSnapshot(
@@ -4334,7 +4337,7 @@ export class ChatGptBrowserWorker {
       await diagnostics.capture(page, "effort-selection-complete");
 
       const finalPrompt = prepared.multipart
-        ? formatChatGptWebMultipartFileCommit(prepared.multipart) : prepared.text;
+        && !prepared.nativeContext ? formatChatGptWebMultipartFileCommit(prepared.multipart) : prepared.text;
 
       let submissionBaseline = await this.captureSubmissionBaseline(page, reuseConversation, turn.abortSignal);
       let catalogRefreshAvailable = mode.localTools && !reuseConversation && !prepared.multipart;

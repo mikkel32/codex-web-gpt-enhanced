@@ -20,6 +20,8 @@ export interface CompiledChatGptWebPrompt {
   images: ChatGptWebPromptImage[];
   /** Context files attached atomically to one browser message. */
   multipart?: ChatGptWebMultipartPrompt;
+  /** Full-mode context is retrieved through the bound broker instead of document uploads. */
+  nativeContext?: true;
   /** Oldest history items removed by native-style compaction fit recovery; absent on normal turns. */
   trimmedCompactionMessages?: number;
 }

@@ -18,7 +18,7 @@ const CHATGPT_ORIGINAL_IMAGE_RESERVE_TOKENS = 8_192;
 export const CHATGPT_LUNA_BROWSER_INPUT_TOKEN_BUDGET = 28_000;
 
 export function compiledChatGptWebMessages(compiled: CompiledChatGptWebPrompt): string[] {
-  if (!compiled.multipart) return [compiled.text];
+  if (!compiled.multipart || compiled.nativeContext) return [compiled.text];
   return [formatChatGptWebMultipartFileCommit(compiled.multipart)];
 }
 

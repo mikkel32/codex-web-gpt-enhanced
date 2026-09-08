@@ -25,7 +25,8 @@ import { ChatGptBrowserWorker } from "./browser-worker";
 import { conversationProfileNamespace } from "./conversation-profile";
 import { chatGptEnvironmentProvenanceCounts, extractChatGptTurnEnvironment, extractChatGptTurnIdentity, priorChatGptAbortedTurnIds } from "./environment";
 import { CHATGPT_WEB_LUNA_MODEL_ID, resolveChatGptWebModelMode, type ChatGptWebCapabilities } from "./model";
-import { chatGptReadOnlyContextWarning, compileChatGptWebPrompt } from "./prompt";
+import { chatGptContextFiles, chatGptReadOnlyContextWarning, compileChatGptWebPrompt } from "./prompt";
+import { nativeContextPrompt } from "./native-context";
 import { createChatGptStructuredOutputValidator } from "./output-validation";
 import { chatGptWebTurnRetryPolicy } from "./retry-policy";
 import { TurnBroker, type BrokerToolRequest, type BrokerToolResult, type TurnBrokerOwner } from "./turn-broker";
@@ -742,6 +743,10 @@ export function createChatGptWebAdapter(
           turnToken,
           compileOptionsFor(input),
         );
+        if (compiled.multipart && !input._compactionRequest && broker.setContextFiles) {
+          await broker.setContextFiles(turnToken, chatGptContextFiles(compiled.multipart));
+          return { ...nativeContextPrompt(compiled), release: () => {} };
+        }
         return { ...compiled, release: () => {} };
       } catch (error) {
         await broker.revoke(turnToken);

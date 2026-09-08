@@ -6,9 +6,11 @@ import { namespacedToolName, type CodexTool } from "../../types";
 import { VERSION } from "../../version";
 import type { ChatGptTurnEnvironment } from "./environment";
 import { CODEX_COMPACTION_CONTROL_WIRE_NAME } from "./native-compaction-control";
+import { NATIVE_CONTEXT_READ } from "./native-context";
 import { callTurnBroker, TurnBrokerTimeoutError, type BrokerToolResult } from "./turn-broker";
 
 interface ClaimedTurn {
+  contextAvailable?: boolean;
   bindingId: string;
   activityId: string;
   environment: ChatGptTurnEnvironment & { expiresAt?: number };
@@ -766,7 +768,12 @@ export async function runChatGptMcpServer(options: {
         const { query, offset, limit, include_schema } = input;
         const bound = claimed.environment;
         const needle = query?.trim().toLowerCase();
-        const directMatches = safeVisibleTools(bound, contract).filter(tool => !needle || [
+        const contextTools: CodexTool[] = claimed.contextAvailable && contract === "native" ? [{
+          name: NATIVE_CONTEXT_READ,
+          description: "Read a page of this task's canonical context. Follow next_offset until null for every file before work.",
+          parameters: { type: "object", properties: { name: { type: "string" }, offset: { type: "integer", minimum: 0 } }, required: ["name", "offset"], additionalProperties: false },
+        }] : [];
+        const directMatches = [...contextTools, ...safeVisibleTools(bound, contract)].filter(tool => !needle || [
           wireName(tool),
           tool.name,
           tool.namespace ?? "",
@@ -782,7 +789,7 @@ export async function runChatGptMcpServer(options: {
         }));
         let nestedTotal = 0;
         let nestedPage: Array<Record<string, unknown>> = [];
-        const gateway = execGateway(bound);
+        const gateway = needle === NATIVE_CONTEXT_READ && claimed.contextAvailable ? undefined : execGateway(bound);
         if (gateway) {
           const excludedGatewayNames = bound.tools.map(wireName);
           const nestedOffset = Math.max(0, offset - directMatches.length);
@@ -872,6 +879,16 @@ export async function runChatGptMcpServer(options: {
         return result({ submitted: true });
       }
       return withClaimedTurn("codex_tool_call", requestId, extra, async claimed => {
+        if (contract === "native" && wire_name === NATIVE_CONTEXT_READ) {
+          if (input !== undefined || typeof args?.name !== "string"
+            || !Number.isSafeInteger(args?.offset) || (args!.offset as number) < 0) {
+            throw new Error("Native context retrieval requires structured name and nonnegative integer offset");
+          }
+          return result(await callTurnBroker(options.brokerSocketPath, {
+            method: "read_context", bindingId: claimed.bindingId,
+            contextName: args.name, contextOffset: args.offset as number,
+          }, 10_000, extra.signal));
+        }
         const bound = claimed.environment;
         const tool = safeVisibleTools(bound, contract)
           .find(candidate => wireName(candidate) === wire_name);
