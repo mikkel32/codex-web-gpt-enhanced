@@ -526,6 +526,7 @@ export async function responseRequest(
   }
 
   const compaction = parsed._compactionRequest === true;
+  const encodedCompaction = compaction && parsed._plainTextCompactionResponse !== true;
   if (compaction && route.backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL) {
     return formatErrorResponse(
       409,
@@ -630,7 +631,7 @@ export async function responseRequest(
         ...(provider.chatgptWeb?.stallTimeoutSec !== undefined
           ? { stallTimeoutSec: provider.chatgptWeb.stallTimeoutSec }
           : {}),
-        ...(compaction ? { compaction: true } : {
+        ...(compaction ? (encodedCompaction ? { compaction: true } : {}) : {
           ...(options.rememberState === false ? {} : {
             onCompletedResponse: rememberWebResponse,
           }),
@@ -654,7 +655,7 @@ export async function responseRequest(
     toolNsMap: maps.toolNsMap,
     freeformToolNames: maps.freeformToolNames,
     toolSearchToolNames: maps.toolSearchToolNames,
-    ...(compaction ? { compaction: true } : {}),
+    ...(encodedCompaction ? { compaction: true } : {}),
   });
   if (!compaction && options.rememberState !== false) {
     rememberWebResponse(json);

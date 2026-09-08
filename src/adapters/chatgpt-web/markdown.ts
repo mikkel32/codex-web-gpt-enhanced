@@ -13,6 +13,17 @@ const turndown = new TurndownService({
 
 turndown.use(gfm);
 turndown.remove(["button", "script", "style"]);
+turndown.addRule("preservePlainJson", {
+  filter: node => {
+    if (node.nodeName !== "P") return false;
+    const text = (node.textContent ?? "").trim();
+    if (!text.startsWith("{") && !text.startsWith("[")) return false;
+    try { JSON.parse(text); return true; } catch { return false; }
+  },
+  // Markdown escapes such as \_ are not JSON escapes. Keep the DOM's literal JSON instead of
+  // the already-escaped child conversion, including genuine backslashes inside string values.
+  replacement: (_content, node) => `\n\n${(node.textContent ?? "").trim()}\n\n`,
+});
 turndown.addRule("removeImages", {
   filter: node => ["IMG", "PICTURE", "SOURCE"].includes(node.nodeName),
   replacement: () => "",

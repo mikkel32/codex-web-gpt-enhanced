@@ -22,6 +22,19 @@ function isObj(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+function nativeCompactionMetadata(body: unknown): boolean {
+  if (!isObj(body) || !isObj(body.client_metadata)) return false;
+  const raw = body.client_metadata["x-codex-turn-metadata"];
+  let metadata: unknown = raw;
+  if (typeof raw === "string") {
+    if (raw.length > 64 * 1024) return false;
+    try { metadata = JSON.parse(raw); } catch { return false; }
+  }
+  return isObj(metadata) && metadata.request_kind === "compaction"
+    && typeof metadata.thread_id === "string" && metadata.thread_id.trim().length > 0
+    && typeof metadata.turn_id === "string" && metadata.turn_id.trim().length > 0;
+}
+
 type InputBlock =
   | { type: "input_text"; text: string }
   | { type: "text"; text: string }
@@ -304,7 +317,8 @@ export function parseRequest(body: unknown): CodexParsedRequest {
   const loadedToolSpecs: unknown[] = [];
   // Remote compaction v2: the input tail carries `{type:"compaction_trigger"}` and Codex expects a
   // synthetic `{type:"compaction"}` output item (src/responses/compaction.ts). Flagged for the server.
-  let compactionRequest = false;
+  let compactionRequest = nativeCompactionMetadata(body);
+  let plainTextCompactionResponse = compactionRequest;
   let opaqueMultiAgentV2Payload = false;
 
   if (typeof data.instructions === "string" && data.instructions.length > 0) {
@@ -320,6 +334,7 @@ export function parseRequest(body: unknown): CodexParsedRequest {
 
       if (effectiveType === "compaction_trigger") {
         compactionRequest = true;
+        plainTextCompactionResponse = false;
         continue;
       }
 
@@ -630,6 +645,7 @@ export function parseRequest(body: unknown): CodexParsedRequest {
     _rawBody: body,
     ...(replayedInputPrefixLength > 0 ? { _replayPrefixLen: replayedInputPrefixLength } : {}),
     ...(compactionRequest ? { _compactionRequest: true } : {}),
+    ...(plainTextCompactionResponse ? { _plainTextCompactionResponse: true } : {}),
     ...(opaqueMultiAgentV2Payload ? { _opaqueMultiAgentV2Payload: true } : {}),
   };
 }

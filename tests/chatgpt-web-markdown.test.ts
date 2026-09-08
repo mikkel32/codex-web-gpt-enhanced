@@ -1,5 +1,25 @@
 import { expect, test } from "bun:test";
 import { chatGptHtmlToMarkdown } from "../src/adapters/chatgpt-web/markdown";
+import { createChatGptStructuredOutputValidator } from "../src/adapters/chatgpt-web/output-validation";
+
+test("plain JSON preserves keys, string values, and real JSON escapes", () => {
+  const values = [
+    { remembered_marker: "transport_ok", file_path: "folder_name/file_name.txt" },
+    { _key_: String.raw`C:\folder_name\file_name.txt`, text: "literal *stars* [brackets] & <xml>" },
+    [{ result_code: "ok" }, null, 42],
+  ];
+  for (const value of values) {
+    const json = JSON.stringify(value);
+    const html = json.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+    const markdown = chatGptHtmlToMarkdown(`<p>${html}</p>`);
+    expect(markdown).toBe(json);
+    expect(JSON.parse(markdown)).toEqual(value);
+  }
+  expect(chatGptHtmlToMarkdown('<p>Text with <strong>emphasis</strong> and a_key.</p>')).toContain("**emphasis**");
+  const validate = createChatGptStructuredOutputValidator({ type: "json_schema", name: "test", strict: true,
+    schema: { type: "object", properties: { result_code: { type: "string" } }, required: ["result_code"], additionalProperties: false } })!;
+  expect(() => validate(chatGptHtmlToMarkdown('<p>{"result_code":"transport_ok"}</p>'))).not.toThrow();
+});
 
 test("turns observed inline file path formats into Markdown links", () => {
   const cases = [
