@@ -14,8 +14,12 @@ for (const scenario of ["success", "unacknowledged", "invented-proof", "browser-
     const broker = TurnBroker.forSocket(socket);
     await broker.listen();
     const client = new Client({ name: "connection-verification-test", version: "1" });
-    await client.connect(new StdioClientTransport({ command: process.execPath,
-      args: ["src/cli.ts", "mcp", "--broker-socket", socket], cwd: process.cwd(), stderr: "pipe" }));
+    const transport = new StdioClientTransport({ command: process.execPath,
+      args: ["src/cli.ts", "mcp", "--broker-socket", socket], cwd: process.cwd(), stderr: "pipe" });
+    await client.connect(transport);
+    // Windows anonymous pipes are bounded. The MCP server writes per-page diagnostics;
+    // leaving stderr unread can block a response even though the broker served its page.
+    transport.stderr?.resume();
     let token = "";
     const controller = new AbortController();
     const other = await broker.register({ cwd: tmpdir(), roots: [tmpdir()], writableRoots: [], tools: [], sandboxPolicy: { type: "readOnly", networkAccess: false } });
