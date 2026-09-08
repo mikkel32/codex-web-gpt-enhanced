@@ -59,7 +59,7 @@ test("connector activation recovers a consumed mention with one shared bounded t
     let activations = 0;
     let selected = false;
     let cleaned = false;
-    let observations = 0;
+    let observations = -1; // The first observation checks the unsent draft before activation.
     const checkpoints: string[] = [];
     const budget = { triggerAttempts: initialAttempts };
     const timeout = Object.assign(new Error("selected chip absent"), { name: "TimeoutError" });

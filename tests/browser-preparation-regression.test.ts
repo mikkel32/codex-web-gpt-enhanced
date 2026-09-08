@@ -38,7 +38,7 @@ test("saved chats select their connector without attempting a Temporary Chat per
     config: { appName: "Codex Native2 Mac" },
     activeComposer: async () => composer,
     connectorIsSelected: async () => selected,
-    connectorActivationSnapshot: async () => ({ generating: false }),
+    connectorActivationSnapshot: async () => ({ generating: false, composerTexts: [""] }),
     selectedConnectorControl: () => ({ waitFor: async () => {} }),
   }, {
     locator: () => ({ filter: () => row }),
@@ -47,4 +47,21 @@ test("saved chats select their connector without attempting a Temporary Chat per
   }, undefined, false, { triggerAttempts: 0 }, undefined, true);
   expect(result).toBe(composer);
   expect(selected).toBeTrue();
+});
+
+test("a persisted failed context draft is cleared before the next connector prompt", async () => {
+  let text = "<codex_context_files>old unsent transport</codex_context_files>";
+  let selected = true;
+  const keys: string[] = [];
+  const composer = { fill: async () => {}, focus: async () => {}, pressSequentially: async () => {},
+    press: async (key: string) => { keys.push(key); if (key === "Backspace") { text = ""; selected = false; } if (key === "Enter") selected = true; } };
+  const row = { count: async () => 1, waitFor: async () => {}, getAttribute: async () => "" };
+  const select = (ChatGptBrowserWorker.prototype as any).selectConnector;
+  await select.call({config:{appName:"Codex Native2 Mac"},activeComposer:async () => composer,
+    connectorIsSelected:async () => selected,
+    connectorActivationSnapshot:async () => ({generating:false,composerTexts:[text]}),
+    selectedConnectorControl:() => ({waitFor:async () => {}})},
+    {locator:() => ({filter:() => row}),getByText:() => ({})},undefined,false,{triggerAttempts:0},undefined,true);
+  expect(keys).toEqual(["ControlOrMeta+A","Backspace","Enter"]);
+  expect(text).toBe(""); expect(selected).toBe(true);
 });

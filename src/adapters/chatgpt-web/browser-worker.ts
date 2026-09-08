@@ -3099,6 +3099,18 @@ export class ChatGptBrowserWorker {
     try {
       composer = await this.activeComposer(page, 30_000, abortSignal);
       await composer.fill("", { signal: abortSignal, timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS });
+      // Only recover our recognizable unsent transport draft. Do not append a new task to
+      // stale context when Lexical ignored fill(""). Submission state must still be idle.
+      const draft = await this.connectorActivationSnapshot(page, abortSignal);
+      if (draft.composerTexts.some(text => /<codex_context_(?:files|delivery)>/.test(text))) {
+        if (draft.generating) throw new Error("ChatGPT is generating; stale draft recovery stopped");
+        await composer.press("ControlOrMeta+A", { signal: abortSignal, timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS });
+        await composer.press("Backspace", { signal: abortSignal, timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS });
+        const cleared = await this.connectorActivationSnapshot(page, abortSignal);
+        if (cleared.generating || cleared.composerTexts.some(text => text.length > 0)) {
+          throw new ChatGptPromptAttachmentIntegrityError("ChatGPT did not clear the previous unsent context draft");
+        }
+      }
       if (await this.connectorIsSelected(composer, abortSignal)) {
         await capture("connector-already-selected");
         return composer;
@@ -3355,6 +3367,7 @@ export class ChatGptBrowserWorker {
     completionTracker?: ChatGptCompletionTracker,
     recoverObservation?: ChatGptObservationRecovery,
     expectedFileNames: readonly string[] = [],
+    expectedPrompt?: string,
   ): Promise<ChatGptSubmissionEvidence> {
     const composer = await this.activeComposer(page);
     const sendButton = composer
@@ -3382,6 +3395,7 @@ export class ChatGptBrowserWorker {
       await assertChatGptAstraProReady(control, abortSignal, page);
     }
     const initialToolBatchRevision = externalProgress?.snapshot().lastToolBatchRevision ?? 0;
+    if (expectedPrompt !== undefined) await this.assertPromptAttached(page, expectedPrompt, abortSignal);
     if (expectedFileNames.length > 0) await this.assertPromptFilesReady(page, expectedFileNames, abortSignal);
     await submissionLifecycle?.onSendActivated?.();
     await sendButton.press("Enter", {
@@ -3565,10 +3579,22 @@ export class ChatGptBrowserWorker {
 
   private async attachFiles(page: Page, prompt: CompiledChatGptWebPrompt, abortSignal?: AbortSignal): Promise<void> {
     const files = chatGptPromptFilePayloads(prompt);
-    if (files.length === 0) return;
+    if (files.length === 0 && !prompt.nativeContext) return;
     throwIfPromptAttachmentAborted(abortSignal);
     const composer = await this.activeComposer(page, 30_000, abortSignal);
     const composerForm = composer.locator("xpath=ancestor::form[1]");
+    if (prompt.nativeContext && prompt.multipart) {
+      // ChatGPT can persist a failed new-chat draft across launcher restarts. Remove only
+      // our named transport files from that unsent composer; never touch message history.
+      for (const { name } of chatGptContextFiles(prompt.multipart)) {
+        const card = composerForm.getByRole("group", { name, exact: true });
+        if (!await card.isVisible()) continue;
+        throwIfPromptAttachmentAborted(abortSignal);
+        await card.getByRole("button").last().click({ signal: abortSignal, timeout: 10_000 });
+        await card.waitFor({ state: "hidden", timeout: 10_000 });
+      }
+    }
+    if (files.length === 0) return;
     // The photos picker accepts only image/* and may discard JSON after showing transient
     // filename cards. Use the active composer's unrestricted document picker for the whole batch.
     const input = composerForm.locator('input[type="file"]:not([accept]), input[type="file"][accept=""]').first();
@@ -4426,6 +4452,7 @@ export class ChatGptBrowserWorker {
             }
           : undefined,
           chatGptPromptFilePayloads(prepared).map(file => file.name),
+          finalPrompt,
         ),
       );
       console.info(`[chatgpt-web] browser turn ${turn.traceId} submission accepted evidence=${finalSubmissionEvidence}`);

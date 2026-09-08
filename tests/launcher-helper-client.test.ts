@@ -184,6 +184,7 @@ test("launcher helper protocol preserves multipart context and the compaction fl
       images: [],
       multipart: { parts: ["{\"part\":1}", "{\"part\":2}", "{\"part\":3}"], commit: "commit" },
       trimmedCompactionMessages: 4,
+      nativeContext: true,
       release() {},
     }),
     onTextDelta() {},
@@ -201,6 +202,7 @@ test("launcher helper protocol preserves multipart context and the compaction fl
         text: "commit",
         multipart: { parts: ["{\"part\":1}", "{\"part\":2}", "{\"part\":3}"], commit: "commit" },
         trimmedCompactionMessages: 4,
+        nativeContext: true,
     },
   });
 });

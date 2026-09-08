@@ -23,6 +23,7 @@ function fixture() {
       isVisible: async () => present.has(options.name),
       getAttribute: async () => busy.has(options.name) ? "true" : null,
       locator: () => ({ count: async () => 0 }),
+      getByRole: () => ({ last: () => ({ click: async () => { present.delete(options.name); } }) }),
     }),
   };
   const hidden = { filter() { return this; }, last() { return this; }, isVisible: async () => false };
@@ -69,5 +70,13 @@ test("two complete files permit exactly one Send", async () => {
 test("cancellation before upload preserves the composer", async () => {
   const f = fixture(); const controller = new AbortController(); controller.abort();
   await expect(methods.attachFiles.call(f.worker, f.page, prompt, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+  expect(f.uploaded()).toEqual([]);
+});
+
+test("native context removes only the prior transport cards without uploading documents", async () => {
+  const f = fixture();
+  f.present.add("user-document.pdf");
+  await methods.attachFiles.call(f.worker, f.page, { ...prompt, nativeContext: true });
+  expect([...f.present]).toEqual(["user-document.pdf"]);
   expect(f.uploaded()).toEqual([]);
 });
