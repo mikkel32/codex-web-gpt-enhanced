@@ -240,3 +240,10 @@ context that preserves work performed by native Codex models.
 onboarding, and keeps the native connection alive independently of the window.
 The 5.0.2 foundation added reversible provider repair, native catalog fallback,
 SSE completion handling, and more practical Manual-mode deadlines.
+### 按需上下文与附件
+
+自动 Full 模式先加载并确认必要指令和当前任务记录。较大的历史成功工具输出保留为可搜索的原始证据，不必在开始工作前全部重读。`codex_context_read` 使用接收回执，`codex_context_search` 按需查找证据；分段传输不会增加模型的实际上下文容量。
+
+文本、CSV、JSON 和 PDF 文本可以检索。附件原始数据会保留，并提供私有临时副本供当前原生工具处理；PDF 图像和扫描页需要原生视觉检查。后续回合重新生成附件路径，桥接器自己的压缩检查点保留原始文档、图像和来源角色。沙盒权限不变。
+
+升级后请刷新自动模式连接器，确认上述两个工具及 `receipt` 参数已出现。有关限制、旧逻辑清理和验证范围，请参阅[上下文传输设计](docs/context-delivery.md)。

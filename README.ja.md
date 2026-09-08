@@ -241,3 +241,10 @@ context that preserves work performed by native Codex models.
 onboarding, and keeps the native connection alive independently of the window.
 The 5.0.2 foundation added reversible provider repair, native catalog fallback,
 SSE completion handling, and more practical Manual-mode deadlines.
+### オンデマンドのコンテキストと添付ファイル
+
+自動 Full モードは、必要な指示と現在のタスク状態を先に読み込み、受信を確認します。大きな過去の成功ツール出力は検索可能な元の証拠として保持され、作業前にすべて読み直す必要はありません。`codex_context_read` は受信確認を使い、`codex_context_search` は必要な証拠を検索します。分割転送でモデルの実際の容量が増えることはありません。
+
+テキスト、CSV、JSON、PDF のテキストを検索できます。元の添付データは保持され、現在のネイティブツールで処理できる非公開の一時コピーが作成されます。PDF の図やスキャンページはネイティブの視覚確認が必要です。後続ターンでは新しい添付パスを生成し、ブリッジ所有の圧縮チェックポイントは元の文書・画像・役割を保持します。サンドボックスの権限は変更しません。
+
+更新後は自動モードのコネクタを更新し、上記ツールと `receipt` パラメータを確認してください。制限、旧ロジックの整理、検証範囲は[コンテキスト転送設計](docs/context-delivery.md)に記載しています。
