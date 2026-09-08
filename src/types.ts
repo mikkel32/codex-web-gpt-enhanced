@@ -8,12 +8,11 @@ export interface CodexParsedRequest {
   /** Number of leading raw input items restored from local previous_response_id state. */
   _replayPrefixLen?: number;
   /**
-   * True when the input carried `{type:"compaction_trigger"}` — Codex remote compaction v2 asking
-   * this turn to produce a `{type:"compaction"}` output item. Routed adapters can't natively;
-   * the server runs the model as a summarizer and the bridge emits a synthetic compaction item
-   * (see src/responses/compaction.ts).
+   * Dedicated compaction requested through a trigger item or canonical native turn metadata.
    */
   _compactionRequest?: boolean;
+  /** Local native compaction expects assistant summary text instead of a remote compaction item. */
+  _plainTextCompactionResponse?: boolean;
   /**
    * True when Codex MultiAgent V2 delegated an agent_message as provider-private encrypted_content.
    * ChatGPT Web has no OpenAI backend key for that blob; the Responses HTTP boundary rejects it

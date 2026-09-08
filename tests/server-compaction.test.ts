@@ -10,6 +10,27 @@ import { chatGptCompactionSourceExecutionKey, chatGptTurnExecutionKey } from "..
 const model = "chatgpt-web/high";
 const summary = "The repository was inspected. Continue by implementing the bounded Web context contract.";
 
+test("native local compaction returns summary text for both JSON and streaming callers", async () => {
+  for (const stream of [false, true]) {
+    const response = await responseRequest(new Request("http://127.0.0.1:17841/v1/responses", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model, stream,
+        client_metadata: { "x-codex-turn-metadata": JSON.stringify({ request_kind: "compaction", thread_id: "thread_local_compact", turn_id: `turn_local_${stream}` }) },
+        input: [{ role: "user", content: "Compact the previous context" }],
+      }),
+    }), defaultConfig("full"), compactionAdapterFactory());
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    const body = stream
+      ? text.split("\n").filter(line => line.startsWith("data: ") && line !== "data: [DONE]")
+        .map(line => JSON.parse(line.slice(6))).find(event => event.type === "response.completed")?.response
+      : JSON.parse(text);
+    expect(body.output[0].type).toBe("message");
+    expect(body.output[0].content[0].text).toBe(summary);
+    expect(body.output.some((item: { type: string }) => item.type === "compaction")).toBeFalse();
+  }
+});
+
 function compactionAdapterFactory(
   seenProviders: CodexProviderConfig[] = [],
   expectedPreviousSummary?: string,

@@ -39,7 +39,7 @@ import {
   restartService,
   uninstallService,
 } from "./service";
-import { connectTunnel, createTunnelConfig, installRuntimeKey, installRuntimeKeyBytes, installTunnelClient, managedRuntimeKeyPath, stopTunnel, waitForTunnelReady } from "./tunnel";
+import { connectTunnel, createTunnelConfig, installRuntimeKey, installRuntimeKeyBytes, installTunnelClient, managedRuntimeKeyPath, runtimeScopedTunnelAlias, stopTunnel, waitForTunnelReady } from "./tunnel";
 import { getTunnelServiceStatus, installTunnelService, restartTunnelService, stopTunnelService, tunnelServiceDefinitionMatches, uninstallTunnelService } from "./tunnel-service";
 import { VERSION } from "./version";
 
@@ -364,7 +364,7 @@ async function configureTunnel(config: AppConfig, existing: AppConfig | undefine
     tunnelId,
     runtimeKeyFile,
     profileName,
-    alias: profileName,
+    alias: runtimeScopedTunnelAlias(profileName),
   });
   const otherTunnel = interactionMode === "manual" ? automaticTunnel : manualTunnel;
   if (otherTunnel?.tunnelId === configuredTunnel.tunnelId) {

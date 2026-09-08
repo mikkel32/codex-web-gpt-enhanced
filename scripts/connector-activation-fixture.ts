@@ -34,6 +34,7 @@ export async function verifyConnectorActivationFixture(page: Page): Promise<void
   }) as {
     selectConnector(page: Page, capture: (checkpoint: string) => Promise<void>): Promise<unknown>;
     connectorActivationSnapshot(page: Page): Promise<ChatGptConnectorActivationSnapshot>;
+    captureSubmissionBaseline(page: Page, retained: boolean): Promise<{ initialResponseTurnIdentities: string[] }>;
   };
   const before = await worker.connectorActivationSnapshot(page);
   assert.deepEqual(before.composerTexts, [""]);
@@ -47,5 +48,16 @@ export async function verifyConnectorActivationFixture(page: Page): Promise<void
   assert.deepEqual(after.turns, []);
   assert.equal(after.generating, false);
   assert.equal(after.documentEpoch, before.documentEpoch);
+  await page.setContent(`<!doctype html><html><body>
+    <div id="prompt-textarea" contenteditable="true" style="width:400px;min-height:40px"></div>
+    <script>setTimeout(() => {
+      const answer = document.createElement('article');
+      answer.setAttribute('data-testid','conversation-turn-1');
+      answer.setAttribute('data-message-author-role','assistant');
+      answer.innerHTML = '<div data-message-author-role="assistant">Existing answer</div>';
+      document.body.append(answer);
+    }, 150);</script></body></html>`);
+  const baseline = await worker.captureSubmissionBaseline(page, true);
+  assert.deepEqual(baseline.initialResponseTurnIdentities, ["conversation-turn-1"]);
   console.log("CONNECTOR_ELECTRON_ACTIVATION_OK consumed-mention replacement-composer bounded-pre-send-recovery");
 }

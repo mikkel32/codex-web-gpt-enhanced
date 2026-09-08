@@ -1,0 +1,50 @@
+import { expect, test } from "bun:test";
+import { ChatGptBrowserWorker } from "../src/adapters/chatgpt-web/browser-worker";
+
+test("restored chat baseline waits for the old answer after composer hydration", async () => {
+  const events: string[] = [];
+  const capture = (ChatGptBrowserWorker.prototype as unknown as {
+    captureSubmissionBaseline(page: unknown, retained: boolean): Promise<{ initialResponseTurnIdentities: string[] }>;
+  }).captureSubmissionBaseline;
+  const page = { locator: () => ({ last: () => ({ waitFor: async () => { events.push("history-ready"); } }) }) };
+  const result = await capture.call({
+    activeComposer: async () => { events.push("composer-ready"); },
+    submissionDomState: async () => {
+      expect(events).toEqual(["composer-ready", "history-ready"]);
+      return { userTurnCount: 1, assistantTurnCount: 1, visibleStopButtonCount: 0, userIdentities: ["old-user"], responseIdentities: ["old-answer"] };
+    },
+  }, page, true);
+  expect(result.initialResponseTurnIdentities).toEqual(["old-answer"]);
+});
+
+test("restored chat cannot take a baseline while the previous answer is running", async () => {
+  const capture = (ChatGptBrowserWorker.prototype as unknown as {
+    captureSubmissionBaseline(page: unknown, retained: boolean): Promise<unknown>;
+  }).captureSubmissionBaseline;
+  await expect(capture.call({
+    activeComposer: async () => {},
+    submissionDomState: async () => ({ assistantTurnCount: 1, visibleStopButtonCount: 1 }),
+  }, { locator: () => ({ last: () => ({ waitFor: async () => {} }) }) }, true)).rejects.toThrow("no prompt was sent");
+});
+
+test("saved chats select their connector without attempting a Temporary Chat personalization toggle", async () => {
+  let selected = false;
+  const composer = { fill: async () => {}, focus: async () => {}, pressSequentially: async () => {}, press: async () => { selected = true; } };
+  const row = { count: async () => 1, waitFor: async () => {}, getAttribute: async () => "" };
+  const select = (ChatGptBrowserWorker.prototype as unknown as {
+    selectConnector(page: unknown, capture: unknown, refresh: boolean, budget: { triggerAttempts: number }, signal: undefined, saved: boolean): Promise<unknown>;
+  }).selectConnector;
+  const result = await select.call({
+    config: { appName: "Codex Native2 Mac" },
+    activeComposer: async () => composer,
+    connectorIsSelected: async () => selected,
+    connectorActivationSnapshot: async () => ({ generating: false }),
+    selectedConnectorControl: () => ({ waitFor: async () => {} }),
+  }, {
+    locator: () => ({ filter: () => row }),
+    getByText: () => ({}),
+    getByRole: () => { throw new Error("Saved chat has no Temporary Chat personalization control"); },
+  }, undefined, false, { triggerAttempts: 0 }, undefined, true);
+  expect(result).toBe(composer);
+  expect(selected).toBeTrue();
+});

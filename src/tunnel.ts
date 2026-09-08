@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { homedir } from "node:os";
 import { unzipSync } from "fflate";
 import type { AppConfig, BrowserInteractionMode, TunnelConfig } from "./config";
 import { atomicWriteFile, getConfigDir } from "./config";
@@ -12,6 +13,23 @@ const RELEASE_BASE = `https://github.com/openai/tunnel-client/releases/download/
 const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
 export const TUNNEL_READY_TIMEOUT_MS = 120_000;
 const TUNNEL_STATUS_POLL_INTERVAL_MS = 1_000;
+
+/** tunnel-client aliases are user-global even when profile directories differ. */
+export function runtimeScopedTunnelAlias(
+  profileName: string,
+  coreHome = getConfigDir(),
+  userHome = homedir(),
+): string {
+  const identity = (path: string) => {
+    const value = resolve(path);
+    return process.platform === "win32" ? value.toLowerCase() : value;
+  };
+  const coreIdentity = identity(coreHome);
+  if ([".codex-chatgpt-web", ".codex-chatgpt-web-dev"].some(name => (
+    coreIdentity === identity(join(userHome, name))
+  ))) return profileName;
+  return `${profileName}-${createHash("sha256").update(coreIdentity).digest("hex").slice(0, 12)}`;
+}
 
 interface TunnelInstallManifest {
   version: 1;

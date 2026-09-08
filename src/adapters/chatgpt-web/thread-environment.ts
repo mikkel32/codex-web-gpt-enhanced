@@ -5,6 +5,7 @@ import { getCodexHome } from "../../codex-integration-shared";
 import type { CodexParsedRequest } from "../../types";
 import {
   extractChatGptTurnEnvironment,
+  extractChatGptResumedRootTurn,
   extractChatGptTurnIdentity,
   extractChatGptThreadSpawnLineage,
   hasRawChatGptEnvironmentContext,
@@ -12,7 +13,7 @@ import {
   type ChatGptSandboxPolicy,
   type ChatGptTurnEnvironment,
 } from "./environment";
-import { resolveCurrentCodexChildRolloutEnvironment } from "./codex-rollout-environment";
+import { resolveCurrentCodexChildRolloutEnvironment, resolveCurrentCodexRootRolloutEnvironment } from "./codex-rollout-environment";
 
 interface StoredThreadEnvironment {
   cwd: string;
@@ -135,6 +136,16 @@ export class ChatGptThreadEnvironmentStore {
       return environment;
     } catch (error) {
       if (!(error instanceof MissingTrustedCodexEnvironmentError) || !identity.threadId) throw error;
+      const rootTurn = extractChatGptResumedRootTurn(parsed);
+      if (rootTurn) {
+        const environment = resolveCurrentCodexRootRolloutEnvironment({
+          codexHome: this.codexHome,
+          lineage: rootTurn,
+          tools: parsed.context.tools,
+        });
+        this.set(identity.threadId, environment);
+        return environment;
+      }
       if (hasRawChatGptEnvironmentContext(parsed)) throw error;
       const lineage = extractChatGptThreadSpawnLineage(parsed);
       if (lineage && identity.turnId) {

@@ -103,6 +103,68 @@ export function hasRawChatGptEnvironmentContext(parsed: CodexParsedRequest): boo
   });
 }
 
+/** Counts only: safe to put in normal diagnostics without exporting prompts or identifiers. */
+export function chatGptEnvironmentProvenanceCounts(parsed: CodexParsedRequest): Record<string, number> {
+  const body = record(parsed._rawBody);
+  const input = Array.isArray(body?.input) ? body.input : [];
+  const messages = input.map(record).filter(item => item?.type === "message");
+  return {
+    inputItems: input.length,
+    messages: messages.length,
+    messageIds: messages.filter(item => typeof item?.id === "string" && item.id.length > 0).length,
+    messageTurnIds: messages.filter(item => itemTurnId(item) !== undefined).length,
+    environmentEnvelopes: messages.filter(item => /<\/?environment_context\b/i.test(rawMessageText(item!))).length,
+    assistantMessages: messages.filter(item => item?.role === "assistant").length,
+  };
+}
+
+export interface ChatGptResumedRootTurn {
+  threadId: string;
+  turnId: string;
+  sandboxType: ChatGptSandboxPolicy["type"];
+  workspaceRoots: string[];
+}
+
+/** Cold CLI resume replays server-owned messages without per-message turn metadata. */
+export function extractChatGptResumedRootTurn(parsed: CodexParsedRequest): ChatGptResumedRootTurn | undefined {
+  const metadata = clientTurnMetadata(parsed);
+  if (metadata?.request_kind !== "turn" || metadata.thread_source !== "user"
+    || metadata.agent_name !== "/root" || metadata.parent_thread_id || metadata.subagent_kind) return undefined;
+  const threadId = metadata.thread_id;
+  const turnId = metadata.turn_id;
+  const sandboxType = sandboxTypeFromMetadata(canonicalSandboxMetadata(metadata));
+  if (typeof threadId !== "string" || typeof turnId !== "string"
+    || !sandboxType || sandboxType === "platform") return undefined;
+  const body = record(parsed._rawBody);
+  const input = Array.isArray(body?.input) ? body.input : [];
+  let lastOutput = -1;
+  let lastUser = -1;
+  const envelopes: number[] = [];
+  for (let index = 0; index < input.length; index += 1) {
+    const item = record(input[index]);
+    if (!item) continue;
+    if (item.type !== "message") continue;
+    if (/<\/?environment_context\b/i.test(rawMessageText(item))) envelopes.push(index);
+    if (item.role === "user" && !contextualUserMessage(item)) lastUser = index;
+  }
+  for (let index = 0; index < lastUser; index += 1) {
+    const item = record(input[index]);
+    if ((item?.type === "message" && item.role === "assistant")
+      || item?.type === "function_call_output") lastOutput = index;
+  }
+  const active = record(input[lastUser]);
+  // A new/malformed envelope is never hidden by old authority. Only historical envelopes before
+  // a completed output qualify, and the actual authority still comes from the exact local turn.
+  if (envelopes.length === 0 || lastOutput < 0 || lastUser <= lastOutput
+    || envelopes.some(index => index >= lastOutput)
+    || typeof active?.id !== "string" || !active.id
+    || (itemTurnId(active) !== undefined && itemTurnId(active) !== turnId)) return undefined;
+  const workspaces = record(metadata.workspaces);
+  const roots = workspaces ? Object.keys(workspaces) : [];
+  if (roots.some(path => !isAbsolute(path))) return undefined;
+  return { threadId, turnId, sandboxType, workspaceRoots: roots.map(path => resolve(path)) };
+}
+
 function contextualUserMessage(value: Record<string, unknown>): boolean {
   const text = rawMessageText(value).trim();
   return /^<environment_context>[\s\S]*<\/environment_context>$/.test(text)
