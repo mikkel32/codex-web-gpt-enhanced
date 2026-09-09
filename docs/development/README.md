@@ -52,4 +52,8 @@ checks. An already published version is not rebuilt or retagged by later docs
 changes. A new version still requires the complete release matrix and asset checks.
 See [fork maintenance](../../FORK.md) for upstream comparison and release ownership.
 
+The upstream baseline workflow runs when `UPSTREAM.lock` changes or on manual
+dispatch. Documentation edits do not rebuild historical dependencies. Baseline
+verification still includes its dependency audit and must pass before publication.
+
 [Branch archive](branch-archive.md) records retired branches and preserved commit identities.
