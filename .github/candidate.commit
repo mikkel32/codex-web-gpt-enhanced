@@ -1,0 +1,6 @@
+tree 4ddff3280915b9fc7acf93877aae5694e2f4f1cc
+parent d6096c5be4a0accd258076ef1ed8cf36fef222d2
+author Mikkel <120693567+mikkel32@users.noreply.github.com> 1788980698 +0200
+committer Mikkel <120693567+mikkel32@users.noreply.github.com> 1788980914 +0200
+
+fix: isolate concurrent browser turns and restore native views

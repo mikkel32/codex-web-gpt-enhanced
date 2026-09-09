@@ -1,0 +1,33 @@
+name: Materialize verified 5.20.3 source
+on:
+  push:
+    branches: [codex/publish-5.20.3-transfer]
+permissions:
+  contents: write
+concurrency:
+  group: materialize-verified-5.20.3
+  cancel-in-progress: false
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Reconstruct and verify the exact tested source
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=d6096c5be4a0accd258076ef1ed8cf36fef222d2
+          expected_tree=4ddff3280915b9fc7acf93877aae5694e2f4f1cc
+          expected_commit=14a52cd941431e6e952c140706301fef044f860f
+          export GIT_INDEX_FILE="$RUNNER_TEMP/candidate.index"
+          git read-tree "$base"
+          git apply --cached .github/candidate.patch
+          test "$(git write-tree)" = "$expected_tree"
+          actual_commit="$(git hash-object -t commit -w .github/candidate.commit)"
+          test "$actual_commit" = "$expected_commit"
+          git merge-base --is-ancestor "$base" "$actual_commit"
+          git push origin "$actual_commit:refs/heads/codex/concurrent-chat-stability"
+          printf 'VERIFIED_SOURCE %s %s\n' "$actual_commit" "$expected_tree"

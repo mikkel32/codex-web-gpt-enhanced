@@ -1,0 +1,786 @@
+diff --git a/README.ja.md b/README.ja.md
+--- a/README.ja.md
++++ b/README.ja.md
+@@ -16,3 +16,9 @@
+ 
+-## Maria 5.20.2: 中断したタスクを復旧する安定版
++## Maria 5.20.3: 複数チャットの安定性改善
++
++**5.20.3** は応答しないタブが他のタスクの接続を無期限に妨げないようにし、非表示のチャットを固定サイズのビューポートで維持します。
++Browser の **表示を復元** は、再読み込みやプロンプトの再送をせずに表示を復元します。
++検証範囲と制約は [5.20.3 リリースノート](docs/release-5.20.3.md) を参照してください。
++
++## 中断したタスクの復旧
+ 
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -16,3 +16,16 @@
+ 
+-## Maria 5.20.2: stable interrupted-turn recovery
++## Maria 5.20.3: concurrent-chat stability
++
++**5.20.3** bounds browser ownership checks so one unresponsive tab cannot indefinitely
++block other tasks. Helpers preserve unrelated pages' focus and display settings,
++and failed response reads recover observation of the same chat instead of pretending
++the response disappeared. Hidden chats keep an 800 x 600 viewport across window
++resizes, while existing idle-page reclamation stays enabled.
++
++**Restore view** in Browser reapplies the current native page presentation without
++reloading or resending. Chat reuse and in-page navigation no longer leave a false
++loading state. See the [5.20.3 release notes](docs/release-5.20.3.md) for verification
++scope and remaining live-service limitations.
++
++## Interrupted-turn recovery
+ 
+diff --git a/README.zh-CN.md b/README.zh-CN.md
+--- a/README.zh-CN.md
++++ b/README.zh-CN.md
+@@ -16,3 +16,9 @@
+ 
+-## Maria 5.20.2：中断任务恢复稳定版
++## Maria 5.20.3：多聊天稳定性改进
++
++**5.20.3** 为浏览器身份检查设置时间限制，避免无响应的标签页无限阻塞其他任务，并为后台聊天保持固定尺寸的视口。
++Browser 中的 **恢复显示** 不会重新加载页面或重发提示词。
++验证范围和限制请参阅 [5.20.3 发布说明](docs/release-5.20.3.md)。
++
++## 中断任务恢复
+ 
+diff --git a/docs/release-5.20.3.md b/docs/release-5.20.3.md
+new file mode 100644
+--- /dev/null
++++ b/docs/release-5.20.3.md
+@@ -0,0 +1,49 @@
++# Maria WebGPT 5.20.3
++
++Stable patch for concurrent-chat isolation, response observation, and the Browser loading display.
++
++## What changed
++
++- Browser ownership lookup used to await every page without a per-page deadline.
++  An unrelated unresponsive renderer could hold up all helpers. Reads now have
++  bounded, cancellable waits and at most one pending probe per page per lookup.
++- A helper connection no longer applies Playwright's default focus and media
++  overrides across the user's browser context. Focus emulation is scoped to its
++  exact owned task page. Disconnecting one helper preserves other task pages.
++- Response reads distinguish an observed missing message from an unavailable
++  observation. A blocked read has a deadline, and observation recovery rebinds
++  the same owned page within the existing retry budget. Failed reads cannot
++  reuse a cached final answer or automatically replay the prompt.
++- Hidden task viewports stay at 800 x 600 rather than growing with the window.
++  Resizing the launcher no longer resizes every background conversation's
++  rendered layout. The five-tab limit and idle-page reclamation remain unchanged.
++- Reusing a conversation and same-document navigation no longer leave a false
++  loading state. Native view readiness starts when the document is ready rather
++  than waiting for every subresource to finish.
++- **Restore view** reapplies the selected native view's placement and stacking
++  without navigation, reload, prompt submission, or acknowledgement of an
++  interrupted task. Use it when the Browser display is blank while Codex is
++  still receiving progress. Recovery of an uncertain task continues to use the
++  separate **I reviewed this chat** action from 5.20.2.
++
++## Verification and limits
++
++The isolated Electron regression uses five real embedded WebContentsViews and
++five concurrent production helper connections, plus an unrelated ownership probe
++that never settles. It checks 15 viewport measurements across window resizes,
++restoration without navigation, five large responses, 100 cached response reads,
++unrelated focus/media preservation, and independent helper disconnection.
++This regression runs in the existing verification pipeline on all release platforms.
++
++Unit coverage checks cancellation, duplicate ownership, bounded hung reads, stale
++completion rejection, same-document loading events, and native restoration.
++Renderer checks cover the restore control at desktop and narrow widths.
++
++These tests establish the covered local behaviors. They do not reproduce the
++reported Windows blank page on the user's signed-in session, prove lower total
++process RAM, or guarantee that ChatGPT can never stop or lose its connection.
++A permanently blank loading page is not an intentional memory-saving mode;
++background viewport sizing and idle-page reclamation are the resource controls.
++
++Update after active work has finished. Publishing this release does not restart
++the installed application or change any saved conversation's result.
+diff --git a/launcher/electron/browser-host.cjs b/launcher/electron/browser-host.cjs
+--- a/launcher/electron/browser-host.cjs
++++ b/launcher/electron/browser-host.cjs
+@@ -793,4 +793,4 @@
+       tab.url = url;
+-      tab.loading = true;
+       if (!inPlace) {
++        tab.loading = true;
+         tab.rendererReady = false;
+@@ -813,4 +813,9 @@
+       tab.url = url;
++      tab.loading = contents.isLoadingMainFrame?.() === true;
+       this.rememberSubmittedConversationUrl(tab);
+     });
++    contents.on("dom-ready", () => {
++      tab.rendererReady = true;
++      this.syncViewVisibility();
++    });
+     contents.on("did-finish-load", () => {
+@@ -1441,4 +1446,5 @@
+     const [contentWidth, contentHeight] = this.window.getContentSize();
+-    const width = Math.max(HIDDEN_TURN_VIEWPORT.width, Math.round(contentWidth || 0));
+-    const height = Math.max(HIDDEN_TURN_VIEWPORT.height, Math.round(contentHeight || 0));
++    // Hidden chats need an operational viewport, not a full-size copy of the user's
++    // monitor. Keeping its size fixed also avoids relayout in every chat on resize.
++    const { width, height } = HIDDEN_TURN_VIEWPORT;
+     return {
+@@ -1532,2 +1538,7 @@
+     this.syncViewVisibility();
++    // Reattach the selected native view at the top of the child stack. This repairs
++    // a stale/blank Windows presentation without navigating or disturbing the turn.
++    if (this.visible && this.surfaceActive && this.boundsReady) {
++      this.window?.contentView?.addChildView(this.activeView());
++    }
+     if (this.visible && this.surfaceActive) this.activeView().webContents.focus();
+@@ -2345,3 +2356,3 @@
+       existing.status = "running";
+-      existing.loading = true;
++      existing.loading = existing.view.webContents.isLoadingMainFrame?.() === true;
+       existing.message = "ChatGPT is working";
+diff --git a/launcher/package.json b/launcher/package.json
+--- a/launcher/package.json
++++ b/launcher/package.json
+@@ -2,3 +2,3 @@
+   "name": "codex-web-gpt-launcher",
+-  "version": "5.20.2",
++  "version": "5.20.3",
+   "private": true,
+diff --git a/launcher/scripts/astra-picker-electron.cjs b/launcher/scripts/astra-picker-electron.cjs
+--- a/launcher/scripts/astra-picker-electron.cjs
++++ b/launcher/scripts/astra-picker-electron.cjs
+@@ -12,2 +12,3 @@
+ let fixtureWindow;
++let concurrentViews;
+ const stopFile = path.join(home, 'stop');
+@@ -17,2 +18,5 @@
+   await fixtureWindow.loadFile(path.resolve(__dirname, '../../tests/fixtures/astra-picker.html'));
++  if (process.env.RESPONSE_CONCURRENT_FIXTURE === '1') {
++    concurrentViews = await require('./concurrent-view-fixture.cjs')(fixtureWindow, home);
++  }
+ });
+diff --git a/launcher/scripts/concurrent-view-fixture.cjs b/launcher/scripts/concurrent-view-fixture.cjs
+new file mode 100644
+--- /dev/null
++++ b/launcher/scripts/concurrent-view-fixture.cjs
+@@ -0,0 +1,48 @@
++const assert = require("node:assert/strict");
++const fs = require("node:fs");
++const path = require("node:path");
++const { WebContentsView } = require("electron");
++const { BrowserHost } = require("../electron/browser-host.cjs");
++
++module.exports = async function verifyConcurrentViews(window, home) {
++  const host = Object.assign(Object.create(BrowserHost.prototype), {
++    window, turnTabs: new Map(), bounds: { x: 0, y: 0, width: 800, height: 600 },
++    boundsReady: true, surfaceActive: true, visible: false, selectedTabId: "view-0",
++    snapshot: () => ({}), publishState() {}, writeDescriptor() {},
++    syncViewVisibility() {
++      for (const tab of this.turnTabs.values()) this.presentTurnView(tab, false);
++    },
++  });
++  for (let index = 0; index < 5; index++) {
++    const view = new WebContentsView({ webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } });
++    window.contentView.addChildView(view);
++    await view.webContents.loadFile(path.resolve(__dirname, "../../tests/fixtures/astra-picker.html"));
++    const tab = { id: `view-${index}`, traceId: `trace-${index}`, view, status: "running", interactionMode: "automatic", rendererReady: true, deviceEmulationDirty: true };
++    host.turnTabs.set(tab.id, tab);
++    host.presentTurnView(tab, false);
++  }
++  for (const [width, height] of [[900,700], [1920,1080], [1100,800]]) {
++    window.setContentSize(width, height);
++    host.syncViewVisibility();
++    for (const tab of host.turnTabs.values()) {
++      const viewport = await tab.view.webContents.executeJavaScript("({ width: innerWidth, height: innerHeight })");
++      assert.deepEqual(viewport, { width: 800, height: 600 });
++    }
++  }
++  const selected = host.turnTabs.get("view-0");
++  let navigations = 0;
++  selected.view.webContents.on("did-start-navigation", () => navigations++);
++  host.visible = true;
++  host.selectTab(selected.id);
++  assert.equal(window.contentView.children.at(-1), selected.view);
++  assert.equal(navigations, 0);
++  assert.equal(selected.status, "running");
++  assert.equal(selected.traceId, "trace-0");
++  host.visible = false;
++  host.syncViewVisibility();
++  fs.writeFileSync(path.join(home, "concurrent-views-ready.json"), JSON.stringify({ views: 5, resizeChecks: 15, restorationNavigations: 0 }));
++  window.on("closed", () => {
++    for (const tab of host.turnTabs.values()) if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
++  });
++  return host;
++};
+diff --git a/launcher/src/App.tsx b/launcher/src/App.tsx
+--- a/launcher/src/App.tsx
++++ b/launcher/src/App.tsx
+@@ -898,2 +898,6 @@
+         ) : null}
++        {visible && browser?.activeTabId ? (
++          <button className="toolbar-text-button" onClick={() => void selectTab(browser.activeTabId)}
++            title={copy.restoreBrowserViewBody} type="button">{copy.restoreBrowserView}</button>
++        ) : null}
+         <button className="toolbar-text-button" onClick={() => void toggle()} type="button">
+@@ -960,3 +964,3 @@
+           <div className="browser-underlay" aria-hidden="true">
+-            <span>{copy.loading}</span>
++            <span>{browser?.loading ? copy.loading : copy.restoreBrowserViewBody}</span>
+           </div>
+diff --git a/launcher/src/i18n.ts b/launcher/src/i18n.ts
+--- a/launcher/src/i18n.ts
++++ b/launcher/src/i18n.ts
+@@ -178,2 +178,4 @@
+   loading: "Loading",
++  restoreBrowserView: "Restore view",
++  restoreBrowserViewBody: "Restore the page view without reloading or interrupting the task.",
+   platform: "Platform",
+@@ -365,2 +367,4 @@
+   loading: "加载中",
++  restoreBrowserView: "恢复显示",
++  restoreBrowserViewBody: "恢复页面显示，不重新加载或中断任务。",
+   platform: "平台",
+@@ -552,2 +556,4 @@
+   loading: "読み込み中",
++  restoreBrowserView: "表示を復元",
++  restoreBrowserViewBody: "再読み込みやタスクの中断をせずにページ表示を復元します。",
+   platform: "プラットフォーム",
+diff --git a/launcher/src/styles.css b/launcher/src/styles.css
+--- a/launcher/src/styles.css
++++ b/launcher/src/styles.css
+@@ -835,2 +835,4 @@
+   place-items: center;
++  padding: 24px;
++  text-align: center;
+ }
+diff --git a/launcher/tests/browser-concurrent-tabs.test.cjs b/launcher/tests/browser-concurrent-tabs.test.cjs
+new file mode 100644
+--- /dev/null
++++ b/launcher/tests/browser-concurrent-tabs.test.cjs
+@@ -0,0 +1,74 @@
++const test = require("node:test");
++const assert = require("node:assert/strict");
++const { EventEmitter } = require("node:events");
++const { BrowserHost } = require("../electron/browser-host.cjs");
++
++function navigationFixture() {
++  const contents = new EventEmitter();
++  contents.setWindowOpenHandler = () => {};
++  contents.isLoadingMainFrame = () => false;
++  contents.getURL = () => "https://chatgpt.com/c/fixture";
++  const tab = { id: "tab", interactionMode: "automatic", loading: false, rendererReady: true,
++    view: { webContents: contents } };
++  let presentations = 0;
++  const host = { snapshot: () => ({}), publishState() {}, rememberSubmittedConversationUrl() {},
++    syncViewVisibility() { presentations++; } };
++  BrowserHost.prototype.bindTurnContents.call(host, tab);
++  return { contents, tab, presentations: () => presentations };
++}
++
++test("in-page navigation settles without requiring a document load event", () => {
++  const { contents, tab } = navigationFixture();
++  contents.emit("did-start-navigation", {}, "https://chatgpt.com/c/fixture", true, true);
++  assert.equal(tab.loading, false);
++  assert.equal(tab.rendererReady, true);
++  tab.loading = true;
++  contents.emit("did-navigate-in-page", {}, "https://chatgpt.com/c/fixture", true);
++  assert.equal(tab.loading, false);
++});
++
++test("the document can present before slow subresources finish loading", () => {
++  const { contents, tab, presentations } = navigationFixture();
++  contents.emit("did-start-navigation", {}, "https://chatgpt.com/c/fixture", false, true);
++  assert.equal(tab.rendererReady, false);
++  assert.equal(tab.loading, true);
++  contents.emit("dom-ready");
++  assert.equal(tab.rendererReady, true);
++  assert.equal(tab.loading, true);
++  assert.equal(presentations(), 1);
++});
++
++test("five hidden chats retain small stable viewports through monitor-sized resizes", () => {
++  let size = [1120, 720];
++  let emulations = 0;
++  const host = Object.assign(Object.create(BrowserHost.prototype), { window: { getContentSize: () => size } });
++  const tabs = Array.from({ length: 5 }, () => ({ status: "running", rendererReady: true, deviceEmulationDirty: true,
++    view: { setBounds() {}, setVisible() {}, webContents: { enableDeviceEmulation() { emulations++; } } } }));
++  for (const next of [[1120,720], [1920,1080], [3840,2160], [800,600]]) {
++    size = next;
++    const bounds = host.hiddenTurnBounds();
++    assert.deepEqual([bounds.width, bounds.height], [800,600]);
++    assert(bounds.x > size[0] && bounds.y > size[1]);
++    tabs.forEach(tab => host.presentTurnView(tab, false));
++  }
++  assert.equal(emulations, 5, "one emulation per chat, not per window resize");
++});
++
++test("restoring a working page only reapplies its native presentation", () => {
++  const events = [];
++  const view = { webContents: { focus: () => events.push("focus"),
++    reload: () => assert.fail("view restoration must not reload"),
++    loadURL: () => assert.fail("view restoration must not navigate") } };
++  const tab = { id: "current", status: "running", traceId: "same-trace", view };
++  const host = Object.assign(Object.create(BrowserHost.prototype), {
++    turnTabs: new Map([[tab.id, tab]]), selectedTabId: tab.id,
++    visible: true, surfaceActive: true, boundsReady: true,
++    window: { contentView: { addChildView: selected => { assert.equal(selected, view); events.push("reattach"); } } },
++    syncViewVisibility: () => events.push("present"), snapshot: () => ({}), publishState() {}, writeDescriptor() {},
++  });
++  host.selectTab(tab.id);
++  assert.deepEqual(events, ["present", "reattach", "focus"]);
++  assert.equal(tab.status, "running");
++  assert.equal(tab.traceId, "same-trace");
++  assert.throws(() => host.selectTab("missing"), /does not exist/);
++});
+diff --git a/launcher/tests/browser-host.test.cjs b/launcher/tests/browser-host.test.cjs
+--- a/launcher/tests/browser-host.test.cjs
++++ b/launcher/tests/browser-host.test.cjs
+@@ -483,3 +483,3 @@
+   assert.deepEqual(events, [
+-    ["home-bounds", { x: 1121, y: 721, width: 1120, height: 720 }],
++    ["home-bounds", { x: 1121, y: 721, width: 800, height: 600 }],
+     ["home-visible", true],
+@@ -487,12 +487,12 @@
+       screenPosition: "desktop",
+-      screenSize: { width: 1120, height: 720 },
++      screenSize: { width: 800, height: 600 },
+       viewPosition: { x: 0, y: 0 },
+       deviceScaleFactor: 0,
+-      viewSize: { width: 1120, height: 720 },
++      viewSize: { width: 800, height: 600 },
+       scale: 1,
+     }],
+-    ["bounds", { x: 1121, y: 721, width: 1120, height: 720 }],
++    ["bounds", { x: 1121, y: 721, width: 800, height: 600 }],
+     ["visible", true],
+   ]);
+-  assert.deepEqual(tab.deviceEmulationViewport, { width: 1120, height: 720 });
++  assert.deepEqual(tab.deviceEmulationViewport, { width: 800, height: 600 });
+   assert.equal(tab.deviceEmulationDirty, false);
+@@ -539,3 +539,3 @@
+   assert.deepEqual(events, [
+-    ["home-bounds", { x: 1121, y: 721, width: 1120, height: 720 }],
++    ["home-bounds", { x: 1121, y: 721, width: 800, height: 600 }],
+     ["home-visible", true],
+@@ -543,15 +543,15 @@
+       screenPosition: "desktop",
+-      screenSize: { width: 1120, height: 720 },
++      screenSize: { width: 800, height: 600 },
+       viewPosition: { x: 0, y: 0 },
+       deviceScaleFactor: 0,
+-      viewSize: { width: 1120, height: 720 },
++      viewSize: { width: 800, height: 600 },
+       scale: 1,
+     }],
+-    ["bounds", { x: 1121, y: 721, width: 1120, height: 720 }],
++    ["bounds", { x: 1121, y: 721, width: 800, height: 600 }],
+     ["visible", true],
+   ]);
+-  assert.deepEqual(tab.deviceEmulationViewport, { width: 1120, height: 720 });
++  assert.deepEqual(tab.deviceEmulationViewport, { width: 800, height: 600 });
+ });
+ 
+-test("new turn tabs defer device emulation until their renderer finishes loading", () => {
++test("new turn tabs defer device emulation until their document is ready", () => {
+   const events = [];
+@@ -567,4 +567,4 @@
+       webContents: {
+-        enableDeviceEmulation: () => assert.fail("emulation started before did-finish-load"),
+-        disableDeviceEmulation: () => assert.fail("emulation cleared before did-finish-load"),
++        enableDeviceEmulation: () => assert.fail("emulation started before dom-ready"),
++        disableDeviceEmulation: () => assert.fail("emulation cleared before dom-ready"),
+       },
+@@ -583,3 +583,3 @@
+   assert.deepEqual(events, [
+-    ["bounds", { x: 1121, y: 721, width: 1120, height: 720 }],
++    ["bounds", { x: 1121, y: 721, width: 800, height: 600 }],
+     ["visible", true],
+@@ -596,3 +596,3 @@
+     rendererReady: true,
+-    deviceEmulationViewport: { width: 1120, height: 720 },
++    deviceEmulationViewport: { width: 800, height: 600 },
+     deviceEmulationDirty: true,
+@@ -629,3 +629,3 @@
+   assert.deepEqual(events, [
+-    ["home-bounds", { x: 1121, y: 721, width: 1120, height: 720 }],
++    ["home-bounds", { x: 1121, y: 721, width: 800, height: 600 }],
+     ["home-visible", true],
+@@ -1481,3 +1481,3 @@
+     rendererReady: true,
+-    deviceEmulationViewport: { width: 1120, height: 720 },
++    deviceEmulationViewport: { width: 800, height: 600 },
+     deviceEmulationDirty: false,
+@@ -1516,3 +1516,3 @@
+   assert.equal(events.filter(([kind]) => kind === "emulate").length, 1);
+-  assert.deepEqual(tab.deviceEmulationViewport, { width: 1120, height: 720 });
++  assert.deepEqual(tab.deviceEmulationViewport, { width: 800, height: 600 });
+   assert.equal(tab.deviceEmulationDirty, false);
+@@ -2047,3 +2047,3 @@
+   assert.equal(tab.status, "running");
+-  assert.equal(tab.loading, true);
++  assert.equal(tab.loading, false);
+   assert.equal(tab.message, "ChatGPT is working");
+diff --git a/package.json b/package.json
+--- a/package.json
++++ b/package.json
+@@ -2,3 +2,3 @@
+   "name": "codex-chatgpt-web",
+-  "version": "5.20.2",
++  "version": "5.20.3",
+   "private": true,
+diff --git a/scripts/concurrent-browser-fixture.ts b/scripts/concurrent-browser-fixture.ts
+new file mode 100644
+--- /dev/null
++++ b/scripts/concurrent-browser-fixture.ts
+@@ -0,0 +1,57 @@
++import assert from "node:assert/strict";
++import { existsSync, readFileSync, writeFileSync } from "node:fs";
++import { join } from "node:path";
++import type { Browser } from "playwright-core";
++import { connectLauncherBrowserHost, LAUNCHER_BROWSER_HOST_KIND, LAUNCHER_BROWSER_IDLE_URL } from "../src/launcher-browser-host";
++import { verifyResponseStateFixture } from "./response-state-fixture";
++
++/** Real Electron/CDP concurrency, entirely offline and isolated from the user's account. */
++export async function verifyConcurrentBrowserFixture(browser: Browser, websocket: string, home: string, pid: number) {
++  assert(Number.isSafeInteger(pid) && pid > 0);
++  const context = browser.contexts()[0]!;
++  const deadline = Date.now() + 20_000;
++  const viewResult = join(home, "concurrent-views-ready.json");
++  while ((!existsSync(viewResult) || context.pages().length < 6) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50));
++  assert(existsSync(viewResult), "Native embedded-view checks did not complete");
++  assert.deepEqual(JSON.parse(readFileSync(viewResult, "utf8")), { views: 5, resizeChecks: 15, restorationNavigations: 0 });
++  assert.equal(context.pages().length, 6, "five working pages and one unrelated page");
++  const pages = context.pages().slice(0, 5);
++  const sentinel = context.pages()[5]!;
++  const ids = pages.map((_page, index) => `fixture_surface_${index}`.padEnd(32, "x"));
++  await Promise.all(pages.map((page, index) => page.evaluate(id => {
++    Object.defineProperty(globalThis, "__CODEX_WEB_GPT_SURFACE_ID__", { value: id, configurable: true });
++  }, ids[index]!)));
++  // A stuck ownership read in another real renderer used to hang all five helpers.
++  await sentinel.evaluate(() => {
++    Object.defineProperty(globalThis, "__CODEX_WEB_GPT_SURFACE_ID__", { get: () => new Promise(() => {}), configurable: true });
++  });
++  const sentinelSession = await context.newCDPSession(sentinel);
++  await sentinelSession.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] });
++  const sentinelState = () => sentinel.evaluate(() => ({ focus: document.hasFocus(), dark: matchMedia("(prefers-color-scheme: dark)").matches }));
++  const before = await sentinelState();
++  assert.equal(before.dark, true);
++  const endpoint = new URL(websocket);
++  const descriptor = join(home, "concurrent-descriptor.json");
++  writeFileSync(descriptor, JSON.stringify({ version: 2, kind: LAUNCHER_BROWSER_HOST_KIND, profile: "development", pid,
++    endpoint: `http://127.0.0.1:${endpoint.port}`, control: { endpoint: "http://127.0.0.1:1", token: "offline-fixture-control-not-used".padEnd(48, "x") },
++    helper: { executable: process.execPath, script: process.argv[1] }, partition: "persist:codex-web-gpt-dev-chatgpt",
++    idleUrl: LAUNCHER_BROWSER_IDLE_URL, surfaceId: ids[0], createdAt: new Date().toISOString() }), { mode: 0o600 });
++  const connections = await Promise.allSettled(ids.map(id => connectLauncherBrowserHost(descriptor, 20_000, id)));
++  const opened = connections.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
++  try {
++    for (const result of connections) if (result.status === "rejected") throw result.reason;
++    assert.equal(opened.length, 5);
++    assert.deepEqual(await sentinelState(), before, "helper attachments must preserve unrelated page focus/media");
++    await Promise.all(opened.map(connection => verifyResponseStateFixture(connection.page)));
++    await opened[0]!.browser.close();
++    for (const connection of opened.slice(1)) {
++      assert.equal(connection.page.isClosed(), false);
++      assert(await connection.page.locator("#response").count());
++    }
++    assert.deepEqual(await sentinelState(), before, "one helper disconnect must preserve unrelated browser state");
++    console.log("CONCURRENT_BROWSER_ELECTRON_OK helpers=5 native-views=5 resize-checks=15 restore-without-navigation hung-unrelated-lookup large-responses=5 cached-reads=100 isolated-focus-media independent-disconnect");
++  } finally {
++    await Promise.allSettled(opened.map(connection => connection.browser.close()));
++    await sentinelSession.detach();
++  }
++}
+diff --git a/scripts/guided-ui-driver.ts b/scripts/guided-ui-driver.ts
+--- a/scripts/guided-ui-driver.ts
++++ b/scripts/guided-ui-driver.ts
+@@ -129,2 +129,5 @@
+     await screenshot(`turn-review-${width}`);
++    await page.getByRole("button", { name: "Restore view", exact: true }).click();
++    assert.equal(await page.evaluate(() => (window as unknown as GuidedFixtureWindow).guidedFixture.snapshot.browser?.activeTabId), "review-task");
++    assert.equal(await page.evaluate(() => (window as unknown as GuidedFixtureWindow).guidedFixture.calls.filter(action => action === "selectBrowserTab").length), 1);
+     await page.evaluate(() => {
+diff --git a/scripts/install.sh b/scripts/install.sh
+--- a/scripts/install.sh
++++ b/scripts/install.sh
+@@ -4,3 +4,3 @@
+ REPOSITORY="${CODEX_CHATGPT_WEB_REPOSITORY:-mikkel32/codex-web-gpt-enhanced}"
+-VERSION="${CODEX_CHATGPT_WEB_VERSION:-5.20.2}"
++VERSION="${CODEX_CHATGPT_WEB_VERSION:-5.20.3}"
+ BIN_DIR="${CODEX_CHATGPT_WEB_BIN_DIR:-$HOME/.local/bin}"
+diff --git a/scripts/response-state-driver.ts b/scripts/response-state-driver.ts
+--- a/scripts/response-state-driver.ts
++++ b/scripts/response-state-driver.ts
+@@ -3,4 +3,5 @@
+ import { verifyResponseStateFixture } from "./response-state-fixture";
++import { verifyConcurrentBrowserFixture } from "./concurrent-browser-fixture";
+ 
+-const browser = await chromium.connectOverCDP(process.argv[2]!);
++const browser = await chromium.connectOverCDP(process.argv[2]!, { noDefaults: true });
+ try {
+@@ -9,2 +10,3 @@
+   await verifyResponseStateFixture(page);
++  await verifyConcurrentBrowserFixture(browser, process.argv[2]!, process.argv[3]!, Number(process.argv[4]));
+ } finally { await browser.close(); }
+diff --git a/scripts/smoke-response-state.ts b/scripts/smoke-response-state.ts
+--- a/scripts/smoke-response-state.ts
++++ b/scripts/smoke-response-state.ts
+@@ -13,3 +13,3 @@
+ if (process.platform === "linux") { args.push("--no-sandbox"); args.unshift("xvfb-run", "-a"); }
+-const environment: NodeJS.ProcessEnv = { ...process.env, ASTRA_PICKER_TEST_HOME: home };
++const environment: NodeJS.ProcessEnv = { ...process.env, ASTRA_PICKER_TEST_HOME: home, RESPONSE_CONCURRENT_FIXTURE: "1" };
+ delete environment.ELECTRON_RUN_AS_NODE;
+@@ -21,8 +21,11 @@
+   assert(build.success, `Response driver build failed: ${build.logs.join("\n")}`);
+-  const driver = Bun.spawn([electron, join(home, "driver.mjs"), websocket], {
++  const driver = Bun.spawn([electron, join(home, "driver.mjs"), websocket, home, String(child.pid)], {
+     cwd: root, env: { ...environment, ELECTRON_RUN_AS_NODE: "1" }, stdout: "pipe", stderr: "pipe",
+   });
+-  const [status, stdout, errors] = await Promise.all([driver.exited, new Response(driver.stdout).text(), new Response(driver.stderr).text()]);
++  const timer = setTimeout(() => driver.kill(), 120_000);
++  const [status, stdout, errors] = await Promise.all([driver.exited, new Response(driver.stdout).text(), new Response(driver.stderr).text()])
++    .finally(() => clearTimeout(timer));
+   assert.equal(status, 0, `Electron response-state fixture failed: ${errors}`);
+   assert(stdout.includes("RESPONSE_STATE_ELECTRON_OK"));
++  assert(stdout.includes("CONCURRENT_BROWSER_ELECTRON_OK"));
+   process.stdout.write(stdout);
+diff --git a/src/adapters/chatgpt-web/browser-worker.ts b/src/adapters/chatgpt-web/browser-worker.ts
+--- a/src/adapters/chatgpt-web/browser-worker.ts
++++ b/src/adapters/chatgpt-web/browser-worker.ts
+@@ -968,2 +968,9 @@
+ 
++export class ChatGptBrowserObservationReadError extends Error {
++  constructor(cause: unknown) {
++    super("The ChatGPT response could not be observed", { cause });
++    this.name = "ChatGptBrowserObservationReadError";
++  }
++}
++
+ export async function withChatGptBrowserObservationTimeout<T>(
+@@ -3654,3 +3661,5 @@
+   ): Promise<ChatGptResponseDomSnapshot> {
+-    const observed = await responseTurn.evaluate((element, options) => {
++    const observed = await withChatGptBrowserObservationTimeout(responseTurn.evaluateAll((elements, options) => {
++      const element = elements[0];
++      if (!element) return { key: "" };
+       const root = element as HTMLElement;
+@@ -4011,4 +4020,3 @@
+       attributeFilter: [...CHATGPT_DOM_REVISION_ATTRIBUTES],
+-    }, { timeout: 2_000 }).catch(() => undefined);
+-    if (!observed) {
++    })).catch(error => {
+       if (responseTurn.page().isClosed()) {
+@@ -4016,4 +4024,8 @@
+       }
+-      return absentResponseDomSnapshot();
+-    }
++      if (error instanceof ChatGptBrowserObservationTimeoutError || error instanceof TypeError) throw error;
++      throw new ChatGptBrowserObservationReadError(error);
++    });
++    // Absence was observed successfully. A slow or failed read must never masquerade
++    // as a missing response or fall back to an old cached completion.
++    if (!observed.key) return absentResponseDomSnapshot();
+     const snapshot = observed.snapshot ?? cache?.snapshot ?? absentResponseDomSnapshot();
+@@ -4569,5 +4581,6 @@
+ 
+-        let snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
+-        if (!snapshot.responsePresent) {
+-          try {
++        let snapshot: ChatGptResponseDomSnapshot;
++        try {
++          snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
++          if (!snapshot.responsePresent) {
+             const rebound = await withChatGptBrowserObservationTimeout(
+@@ -4586,9 +4599,11 @@
+             }
+-          } catch (error) {
+-            if (!(error instanceof ChatGptBrowserObservationTimeoutError) || !launcherSurfaceId) throw error;
++          }
++        } catch (error) {
++            if (!(error instanceof ChatGptBrowserObservationTimeoutError || error instanceof ChatGptBrowserObservationReadError)) throw error;
++            if (!launcherSurfaceId) throw chatGptResponseObservationError(error.message, error);
+             consecutiveObservationRebinds += 1;
+             if (consecutiveObservationRebinds > MAX_CHATGPT_BROWSER_PAGE_REBINDS) {
+-              throw new Error(
+-                `ChatGPT browser DOM remained unresponsive after ${MAX_CHATGPT_BROWSER_PAGE_REBINDS} same-page rebinds`,
+-                { cause: error },
++              throw chatGptResponseObservationError(
++                `ChatGPT browser observation failed after ${MAX_CHATGPT_BROWSER_PAGE_REBINDS} same-page rebinds`,
++                error,
+               );
+@@ -4613,3 +4628,2 @@
+             continue;
+-          }
+         }
+diff --git a/src/launcher-browser-host.ts b/src/launcher-browser-host.ts
+--- a/src/launcher-browser-host.ts
++++ b/src/launcher-browser-host.ts
+@@ -188,2 +188,21 @@
+ 
++async function boundedLauncherObservation<T>(operation: Promise<T>, timeoutMs: number, signal?: AbortSignal): Promise<T> {
++  let timer: ReturnType<typeof setTimeout> | undefined;
++  let onAbort: (() => void) | undefined;
++  try {
++    return await Promise.race([
++      operation,
++      new Promise<never>((_resolve, reject) => {
++        onAbort = () => reject(new DOMException("Launcher browser connection aborted", "AbortError"));
++        if (signal?.aborted) { onAbort(); return; }
++        signal?.addEventListener("abort", onAbort, { once: true });
++        timer = setTimeout(() => reject(new Error("Launcher browser surface observation timed out")), Math.max(1, timeoutMs));
++      }),
++    ]);
++  } finally {
++    clearTimeout(timer);
++    if (onAbort) signal?.removeEventListener("abort", onAbort);
++  }
++}
++
+ export async function selectLauncherPage(
+@@ -195,3 +214,6 @@
+ ): Promise<{ context: BrowserContext; page: Page }> {
+-  const deadline = Date.now() + timeoutMs;
++  const deadline = performance.now() + timeoutMs;
++  // A slow unrelated renderer must not hold every helper's ownership lookup open. Keep
++  // at most one outstanding read per page, including across timed-out polling rounds.
++  const pending = new Map<Page, Promise<unknown>>();
+   do {
+@@ -201,9 +223,18 @@
+     const candidates = browser.contexts().flatMap(context => context.pages().map(page => ({ context, page })));
+-    const inspected = await Promise.all(candidates.map(async candidate => ({
+-      ...candidate,
+-      surfaceId: await candidate.page.evaluate(
+-        () => (globalThis as typeof globalThis & { __CODEX_WEB_GPT_SURFACE_ID__?: unknown })
+-          .__CODEX_WEB_GPT_SURFACE_ID__,
+-      ).catch(() => undefined),
+-    })));
++    const inspected = await Promise.all(candidates.map(async candidate => {
++      let probe = pending.get(candidate.page);
++      if (!probe) {
++        probe = Promise.resolve().then(() => candidate.page.evaluate(
++          () => (globalThis as typeof globalThis & { __CODEX_WEB_GPT_SURFACE_ID__?: unknown })
++            .__CODEX_WEB_GPT_SURFACE_ID__,
++        )).catch(() => undefined);
++        pending.set(candidate.page, probe);
++        const current = probe;
++        void probe.then(() => { if (pending.get(candidate.page) === current) pending.delete(candidate.page); });
++      }
++      const observed = await boundedLauncherObservation(probe, Math.min(500, deadline - performance.now()), abortSignal)
++        .catch(error => { if (abortSignal?.aborted) throw error; return undefined; });
++      return { ...candidate, surfaceId: observed };
++    }));
++    if (abortSignal?.aborted) throw new DOMException("Launcher browser connection aborted", "AbortError");
+     const owned = inspected.filter(candidate => candidate.surfaceId === surfaceId);
+@@ -215,4 +246,6 @@
+     }
+-    await new Promise(resolve => setTimeout(resolve, 100));
+-  } while (Date.now() < deadline);
++    if (performance.now() >= deadline) break;
++    await boundedLauncherObservation(new Promise<never>(() => {}), Math.min(100, deadline - performance.now()), abortSignal)
++      .catch(error => { if (abortSignal?.aborted) throw error; });
++  } while (performance.now() < deadline);
+   throw new Error("Launcher browser host did not expose its owned browser surface");
+@@ -245,3 +278,3 @@
+   try {
+-    browser = await chromium.connectOverCDP(webSocketDebuggerUrl, { timeout: remaining() });
++    browser = await chromium.connectOverCDP(webSocketDebuggerUrl, { timeout: remaining(), noDefaults: true });
+   } catch (error) {
+@@ -262,2 +295,9 @@
+     );
++    if (surfaceId) {
++      // Focus emulation belongs to this helper's exact page, not every concurrent chat.
++      await boundedLauncherObservation((async () => {
++        const session = await context.newCDPSession(page);
++        await session.send("Emulation.setFocusEmulationEnabled", { enabled: true });
++      })(), remaining(), abortSignal);
++    }
+     return { descriptor, browser, context, page };
+diff --git a/src/version.ts b/src/version.ts
+--- a/src/version.ts
++++ b/src/version.ts
+@@ -1 +1 @@
+-export const VERSION = "5.20.2";
++export const VERSION = "5.20.3";
+diff --git a/tests/browser-concurrent-observation.test.ts b/tests/browser-concurrent-observation.test.ts
+new file mode 100644
+--- /dev/null
++++ b/tests/browser-concurrent-observation.test.ts
+@@ -0,0 +1,68 @@
++import { expect, test } from "bun:test";
++import type { Browser, BrowserContext, Locator, Page } from "playwright-core";
++import { selectLauncherPage, type LauncherBrowserHostDescriptor } from "../src/launcher-browser-host";
++import { ChatGptBrowserWorker, ChatGptBrowserObservationReadError, ChatGptBrowserObservationTimeoutError } from "../src/adapters/chatgpt-web/browser-worker";
++
++const descriptor = { surfaceId: "owned" } as LauncherBrowserHostDescriptor;
++function browserFixture(pages: Array<{ evaluate: () => Promise<unknown> }>) {
++  const context = { pages: () => pages } as unknown as BrowserContext;
++  return { context, browser: { contexts: () => [context] } as unknown as Browser };
++}
++
++test("five concurrent ownership lookups survive an unrelated renderer that never answers", async () => {
++  const pages = Array.from({ length: 5 }, (_, i) => ({ evaluate: async () => `surface-${i}` }));
++  const stalled = { evaluate: () => new Promise<never>(() => {}) };
++  const { browser, context } = browserFixture([stalled, ...pages]);
++  const results = await Promise.all(pages.map((_page, i) => selectLauncherPage(browser, descriptor, 40, `surface-${i}`)));
++  results.forEach((result, i) => {
++    expect(result.context).toBe(context);
++    expect(result.page).toBe(pages[i] as unknown as Page);
++  });
++});
++
++test("an unresponsive owned surface respects the deadline without accumulating probes", async () => {
++  let reads = 0;
++  const { browser } = browserFixture([{ evaluate: () => { reads++; return new Promise<never>(() => {}); } }]);
++  const start = performance.now();
++  await expect(selectLauncherPage(browser, descriptor, 650)).rejects.toThrow("did not expose its owned browser surface");
++  expect(reads).toBe(1);
++  expect(performance.now() - start).toBeLessThan(1500);
++});
++
++test("cancellation promptly interrupts ownership reads while preserving duplicate detection", async () => {
++  const controller = new AbortController();
++  const stalled = browserFixture([{ evaluate: () => new Promise<never>(() => {}) }]);
++  const pending = selectLauncherPage(stalled.browser, descriptor, 10000, undefined, controller.signal);
++  controller.abort();
++  await expect(pending).rejects.toMatchObject({ name: "AbortError" });
++  const duplicate = browserFixture([{ evaluate: async () => "owned" }, { evaluate: async () => "owned" }]);
++  await expect(selectLauncherPage(duplicate.browser, descriptor, 100)).rejects.toThrow("2 surfaces with the same ownership id");
++});
++
++const readSnapshot = (ChatGptBrowserWorker.prototype as unknown as {
++  responseDomSnapshot(locator: Locator, cache?: Record<string, unknown>): Promise<{ responsePresent: boolean }>;
++}).responseDomSnapshot;
++function locator(evaluateAll: () => Promise<unknown>, closed = false): Locator {
++  return { evaluateAll, page: () => ({ isClosed: () => closed }) } as unknown as Locator;
++}
++
++test("a missing response never reuses a cached final answer", async () => {
++  const result = await readSnapshot.call({}, locator(async () => ({ key: "" })), {
++    key: "old", snapshot: { responsePresent: true, visibleText: "old final", completionActionVisible: true },
++  });
++  expect(result.responsePresent).toBe(false);
++});
++
++test("a failed DOM read preserves uncertainty and its cause instead of fabricating absence", async () => {
++  const cause = new Error("Execution context was destroyed");
++  const error = await readSnapshot.call({}, locator(async () => { throw cause; })).catch(error => error);
++  expect(error).toBeInstanceOf(ChatGptBrowserObservationReadError);
++  expect(error.cause).toBe(cause);
++  const bug = new TypeError("internal reader defect");
++  await expect(readSnapshot.call({}, locator(async () => { throw bug; }))).rejects.toBe(bug);
++});
++
++test("a hung renderer has a bounded response read rather than an endless evaluation", async () => {
++  await expect(readSnapshot.call({}, locator(() => new Promise<never>(() => {}))))
++    .rejects.toBeInstanceOf(ChatGptBrowserObservationTimeoutError);
++}, 10000);
+diff --git a/tests/browser-worker-contract.test.ts b/tests/browser-worker-contract.test.ts
+--- a/tests/browser-worker-contract.test.ts
++++ b/tests/browser-worker-contract.test.ts
+@@ -1037,3 +1037,3 @@
+   const responseTurn = {
+-    evaluate: async () => { throw new Error("Target page has been closed"); },
++    evaluateAll: async () => { throw new Error("Target page has been closed"); },
+     page: () => ({ isClosed: () => true }),
