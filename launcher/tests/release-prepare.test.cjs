@@ -6,7 +6,7 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 const root = path.resolve(__dirname, "../..");
-const workflow = fs.readFileSync(path.join(root, ".github/workflows/release.yml"), "utf8");
+const workflow = fs.readFileSync(path.join(root, ".github/workflows/release.yml"), "utf8").replace(/\r\n/g, "\n");
 const prepare = workflow.slice(workflow.indexOf("      - name: Resolve the immutable release candidate"), workflow.indexOf("\n  build:"));
 const script = prepare.split("        run: |\n")[1].split("\n").map(line => line.replace(/^          /, "")).join("\n");
 
