@@ -3,11 +3,22 @@
 This guide covers the failures reported most often in GitHub issues. Start here before reinstalling,
 editing Codex configuration, or opening a new issue.
 
+## Choose the symptom
+
+| Symptom | First action |
+| --- | --- |
+| Browser is blank or says Loading while Codex still updates | Use **Restore view**. This redraws the existing page without navigation or resending. |
+| Previous turn needs attention | Inspect the saved chat, choose **I reviewed this chat**, then continue in the original task. |
+| Tool not found or wrong workspace | Follow [connector recovery](docs/reference/connector-recovery.md); verify the exact runtime and tool catalog. |
+| Sign-in, verification or rate limit | Complete the required action and cooldown; resume without replaying the interrupted prompt. |
+
+Background viewport sizing and idle-page reclamation reduce work; a permanently
+blank foreground view is not an intentional memory-saving mode.
+
 ## The first five minutes
 
-1. Install the [latest release](https://github.com/mikkel32/codex-web-gpt-enhanced/releases/latest). Quit
-   **Maria WebGPT** before running the installer again; updating preserves its private ChatGPT
-   profile and launcher configuration.
+1. Check the installed version against the [latest stable release](https://github.com/mikkel32/codex-web-gpt-enhanced/releases/latest).
+   Finish active tasks before updating. Do not restart the app to diagnose a task that is still progressing.
 2. In the launcher, confirm that ChatGPT sign-in, the browser smoke test, and **Install models** (or
    **Repair Codex setup**) are green.
 3. Fully quit Codex, including its background process, and reopen it. Signing out, closing only the
@@ -51,8 +62,7 @@ Choose one route owner:
   route that existed before Maria WebGPT was installed.
 
 Do not hand-edit the launcher's route journal. It exists so setup and removal can fail closed instead
-of silently destroying another provider's configuration. First-class external-router composition is
-tracked in [#205](https://github.com/mikkel32/codex-web-gpt-enhanced/issues/205), but is not supported today.
+of silently destroying another provider's configuration. Use one owner for the route; preserve its configuration journal when changing integrations.
 
 ## ChatGPT sign-in does not complete
 
@@ -117,10 +127,8 @@ connector identity, so create **Codex Native2** as a new connector.
    after 5–10 seconds. Press **Create** one more time. If the second attempt also fails, stop
    retrying and recheck the account, Tunnel ID, and running Tunnel first.
 
-If tool calls work until native Codex quota is exhausted and then edits are denied by **Automatic
-approval review**, disable that optional Codex review setting and restart Codex. The outer Codex
-sandbox and explicit approvals still apply; this only prevents an unavailable native model from
-being inserted as an extra reviewer after the Web tool call already completed.
+If automatic approval review rejects a tool call, preserve the exact rejection and check the
+current Codex review configuration. A tool rejection is not evidence that the browser lost the conversation.
 
 ## `Reconnecting`, `stream disconnected`, or `ChatGPT failed`
 
@@ -131,8 +139,8 @@ its bounded MCP deadline.
 
 - Read the final detailed error after the reconnect attempts; do not report only the word
   `Reconnecting`.
-- Retry once in a fresh Codex task. State whether the fresh task works and whether the failure is
-  consistent.
+- Inspect the saved ChatGPT conversation and any completed actions. Use **I reviewed this chat**
+  when offered, then continue in the original Codex task. Do not replay an uncertain request.
 - Run **Settings → Run doctor** and export a safe log immediately after the failure.
 - Include the exact model, Browser-only or Full harness mode, whether tools ran, and whether the
   ChatGPT page showed a final answer.

@@ -10,4 +10,4 @@ This release improves continuity through compaction and reduces unnecessary rend
 - Response observation uses DOM revision tokens instead of retaining and transmitting a redundant full-HTML copy for completion checks.
 - Extra idle Automatic pages can be released after two minutes when their exact conversation URL is safely saved. The most recent warm page, the currently viewed page, active turns, manual pages, and uncertain saved state are protected from this early reclamation. Reopening a reclaimed task uses its original chat.
 
-Focused tests cover repeated goal checkpoints, cache loss, restore failure, no mapping deletion on compaction failure, exact context preservation in files, completion stability, and idle-page reclamation. The research and limitations are documented in `docs/CONTINUITY_RESEARCH.md`.
+Focused tests cover repeated goal checkpoints, cache loss, restore failure, no mapping deletion on compaction failure, exact context preservation in files, completion stability, and idle-page reclamation. The research and limitations are documented in `docs/research/continuity-research.md`.

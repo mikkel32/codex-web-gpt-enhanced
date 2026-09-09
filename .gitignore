@@ -17,3 +17,7 @@ launcher/artifacts/
 .playwright-cli/
 output/
 notes.md
+
+# Local verification worktrees and scratch evidence
+/validation/
+/.verification/

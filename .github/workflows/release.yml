@@ -46,6 +46,7 @@ jobs:
           tag="v${version}"
           source_sha="$(git rev-parse HEAD)"
           publish=true
+          existing_draft="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
 
           if [ "$EVENT_NAME" = "push" ]; then
             test "$PUSH_TAG" = "$tag"
@@ -56,11 +57,14 @@ jobs:
             test "$(git rev-parse origin/main)" = "$source_sha"
 
             if tagged_sha="$(git rev-list -n 1 "$tag" 2>/dev/null)"; then
-              test "$tagged_sha" = "$source_sha"
+              if [ "$existing_draft" = false ]; then
+                git merge-base --is-ancestor "$tagged_sha" "$source_sha"
+              else
+                test "$tagged_sha" = "$source_sha"
+              fi
             fi
           fi
 
-          existing_draft="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
           if [ "$existing_draft" = false ]; then publish=false; fi
 
           {
@@ -254,7 +258,7 @@ jobs:
           test "${#release_files[@]}" -gt 0
           release_flags=(--latest)
           notes_flags=(--generate-notes)
-          notes_file="docs/release-${RELEASE_TAG#v}.md"
+          notes_file="docs/releases/release-${RELEASE_TAG#v}.md"
           if [ -f "$notes_file" ]; then notes_flags=(--notes-file "$notes_file"); fi
           if [[ "$RELEASE_TAG" == *-* ]]; then
             release_flags=(--prerelease --latest=false)

@@ -61,7 +61,7 @@ body:
     attributes:
       label: Scope checklist
       options:
-        - label: I searched existing issues and Discussions for this request.
+        - label: I searched existing issues and pull requests for this request.
           required: true
         - label: This request does not rely on bypassing authentication, access controls, or account limits.
           required: true

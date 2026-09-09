@@ -75,7 +75,7 @@ presentation. These fixtures contain no live account or user profile.
 
 **Account-bound acceptance remains unexecuted for this version:** Windows 11
 items 1–11, macOS items 2–10 and Linux interactive items 2–7 in
-`docs/release-validation.md`. This includes authenticated ChatGPT sign-in,
+`docs/development/release-validation.md`. This includes authenticated ChatGPT sign-in,
 installed Codex model discovery, live MCP tools, compaction/cancellation and
 upgrade behavior on a real user's machine. Offline tests and packaging smoke do
 not establish those results. This is why the release is explicitly an alpha.

@@ -63,9 +63,9 @@ events, Pause, post-step races, and uploaded-asset integrity.
 
 The Electron UI suite uses an isolated in-memory launcher API, not a real account. Live
 installed-Mac/ChatGPT/Codex project-tool acceptance, account-bound sign-in and connector
-selection, and the remaining interactive gates in `docs/release-validation.md` remain
+selection, and the remaining interactive gates in `docs/development/release-validation.md` remain
 unexecuted for this candidate. The user's installed launcher and credentials were not
 changed during source verification. This is why the release remains an alpha.
 
 For a persistent failure, use **Activity → Export safe log**. Do not upload raw browser
-state, account keys, tunnel credentials, or prompt contents. See `docs/CONNECTOR_RECOVERY.md`.
+state, account keys, tunnel credentials, or prompt contents. See `docs/reference/connector-recovery.md`.

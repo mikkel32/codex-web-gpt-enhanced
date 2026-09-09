@@ -1,50 +1,46 @@
 # Contributing
 
-Maria WebGPT is maintained by Mikkel and Maria. Our priorities are reliable native
-Codex access, clear interaction states, and reproducible releases.
+Maria WebGPT is maintained by Mikkel & Maria. Focused fixes, regression coverage,
+documentation improvements and platform fixes are welcome. Discuss large features
+or architecture changes in an issue before implementation.
 
-External contributions are welcome, but this is an intentionally maintainer-led project. Pull
-requests are expected to be small, focused, and easy to review and verify. Good contributions
-include isolated bug fixes, regression tests, documentation corrections, and narrow
-platform-specific fixes.
+## Before you start
 
-Before opening a bug report, work through [TROUBLESHOOTING.md](TROUBLESHOOTING.md) and use the
-structured issue form. Reproduce once on the latest release and attach the privacy-safe export from
-**Activity → Export safe log**; never upload raw browser state, credentials, or unredacted logs.
+Read the [development guide](docs/development/README.md) for the repository map,
+DEV isolation and commands. Check existing issues and pull requests. Bug reports
+should include a reproducible symptom and a redacted export from Activity, never
+raw browser state, credentials or private conversation contents.
 
-Large feature branches, broad refactors, rewrites, new providers, and changes to core behavior or
-architecture are generally not accepted. In rare cases they may be considered, but discuss the
-proposal in an issue before implementation. Prior discussion does not guarantee acceptance, and a
-large unsolicited pull request may be closed even when substantial work went into it.
+## Make the change reviewable
 
-## Scope and invariants
+Describe the problem, the resulting behavior and the evidence. Keep unrelated
+refactoring out of a fix. Add a regression test when behavior changes; for docs-only
+work, check links, commands and translated README parity instead of inventing
+runtime tests. Report unexecuted checks explicitly.
 
-- Keep the project focused on ChatGPT web-backed Codex models. Generic providers and unrelated
-  product surfaces are out of scope.
-- Model selection is explicit. Never silently fall back to another model or reasoning level.
-- Full mode exposes local tools only through the active outer Codex registry and official MCP
-  tunnel. Browser-only mode must not create a broker capability or attach an MCP connector.
-- Every available ChatGPT Web effort has the same turn-bound MCP capability in Full mode. Do not
-  add effort-specific MCP exclusions.
-- Preserve fail-closed behavior. A selector or protocol failure must return an explicit error, not
-  pick another option or claim success.
-- Never commit browser state, cookies, API keys, tunnel IDs, Codex history, generated logs, or
-  absolute user paths.
+Run `bun run verify` for code changes. For browser changes, use observed DOM evidence
+and a reproducible fixture. For execution changes, separately record validation
+through an installed Codex integration. Package changes need the affected native
+platform's smoke checks; CI alone is not proof of a signed-in account flow.
 
-## Before opening a pull request
+## Preserve these contracts
 
-1. Run `bun install --frozen-lockfile` in the repository root and in `launcher/`.
-2. Run `bun run verify`.
-3. Add a focused regression test for behavior changes.
-4. For browser UI changes, include the observed DOM evidence and a reproducible fixture. Do not
-   broaden selectors speculatively.
-5. Keep Terms and trademark claims factual. Do not market the project as a quota or rate-limit
-   bypass.
-6. Manually test the affected behavior. DEV mode is sufficient only when the change does not affect
-   local-tool execution, MCP execution, or the outer Codex agent loop. Execution changes require a
-   real installed Codex integration; DEV simulation is not end-to-end acceptance evidence.
+- Keep model, route, effort, connector and task identity explicit. Never silently
+  switch models or replay an uncertain submitted prompt.
+- Full harness tools belong to the active Codex task and its permissions.
+  Browser-only and Manual mode must retain their separate boundaries.
+- Preserve user changes and saved conversations. Stop with a useful error when
+  success cannot be established.
+- Keep browser sessions, keys, raw logs, local paths and generated build artifacts
+  out of commits. Review [Security](SECURITY.md) before sharing diagnostic evidence.
 
-Launcher changes must preserve native packaging on macOS, Windows, and Linux. Platform packages
-must be built on their matching operating system. See [DEV chat mode](docs/dev-chat.md) for isolated
-browser and MCP development, and [release validation](docs/release-validation.md) for the required
-account-bound release checks.
+## Close the loop
+
+Target `main` unless the PR genuinely depends on another active PR. Name that
+dependency when stacking. After a release, resolve PRs already included through
+ancestry or an equivalent published tree, and link the integration evidence.
+Remove merged branches; preserve unique historical commits before archiving a
+superseded branch. Never merge obsolete release metadata just to close a PR.
+
+Use [release notes](docs/releases/README.md) for version history and the
+[release validation guide](docs/development/release-validation.md) for release checks.

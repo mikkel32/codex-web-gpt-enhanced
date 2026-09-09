@@ -1,221 +1,61 @@
+<p align="center"><img src="launcher/assets/icon.png" width="88" alt="Maria WebGPT" /></p>
+
 # Maria WebGPT
 
 [![CI](https://github.com/mikkel32/codex-web-gpt-enhanced/actions/workflows/ci.yml/badge.svg)](https://github.com/mikkel32/codex-web-gpt-enhanced/actions/workflows/ci.yml)
-[Download the latest release](https://github.com/mikkel32/codex-web-gpt-enhanced/releases/latest) · [Release history](https://github.com/mikkel32/codex-web-gpt-enhanced/releases)
+[![Release](https://img.shields.io/github/v/release/mikkel32/codex-web-gpt-enhanced)](https://github.com/mikkel32/codex-web-gpt-enhanced/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**你的模型，你的工作空间，更多可能。**
+[English](README.md) · [日本語](README.ja.md) · [简体中文](README.zh-CN.md)
 
-Built by Mikkel & Maria
+**在同一个工作区中使用 ChatGPT Web 和原生 Codex。**
 
-Maria brings ChatGPT Web into your Codex workflow while keeping regular Codex
-models available. Choose a native model for your Codex account, or choose a
-**Maria Web** model to use your ChatGPT session. Your task, files, tools, and results
-stay together in Codex.
+Maria 是一款将你自己的 ChatGPT 会话连接到 Codex 的桌面应用。
+保留原生 Codex 模型，使用当前任务的文件和工具，并在同一对话中继续后续工作。
 
-> **设置与恢复：** 在 Overview 中选择 **自动完成设置**。启动器会复用已保存的凭据，仅提示需要你完成的操作。遇到 `Tool read not found` 或 `Unknown root "/Users"` 时，请查看[连接器恢复指南](docs/CONNECTOR_RECOVERY.md)；更改文件夹权限并非默认解决方式。
+## 下载
 
-## Maria 5.20.3：多聊天稳定性改进
+**[获取最新稳定版](https://github.com/mikkel32/codex-web-gpt-enhanced/releases/latest)**
 
-**5.20.3** 为浏览器身份检查设置时间限制，避免无响应的标签页无限阻塞其他任务，并为后台聊天保持固定尺寸的视口。
-Browser 中的 **恢复显示** 不会重新加载页面或重发提示词。
-验证范围和限制请参阅 [5.20.3 发布说明](docs/release-5.20.3.md)。
+| 平台 | 安装包 |
+| --- | --- |
+| macOS · Apple Silicon | `mac-arm64.dmg` 或 `mac-arm64.zip` |
+| macOS · Intel | `mac-x64.dmg` 或 `mac-x64.zip` |
+| Windows · x64 | `win-x64.exe` |
+| Linux · x64 | `linux-x64.AppImage` |
 
-## 中断任务恢复
+安装包已包含运行时。现有用户可在活动任务结束后，通过 Maria 的 **Updates** 更新。
+下载内容会根据发布的校验和进行验证。
+变更和验证范围请查看 [发布说明](docs/releases/README.md)。
 
-**5.20.2** 会保留中断的聊天供你检查，不再关闭标签页后留下无法恢复的进行中记录。
-在 Browser 中检查聊天并选择 **我已检查此聊天**，即可在原 Codex 任务中发送新消息。
-此操作不会重发中断的提示词，也不会创建替代聊天；下一次发送前会重新验证连接器。
+## 开始使用
 
-观察中断、读取故障或新的推理进度会重置响应健康检查计时器。
-已知的 DOM 故障会保留具体原因，聊天恢复冲突也不再显示为通用 HTTP 400。
-恢复步骤与限制请参阅 [5.20.2 发布说明](docs/release-5.20.2.md)。
-此前的 [5.20.1 稳定性修复](docs/release-5.20.1.md)仍然包含在本版本中。
+1. 打开 Maria，在 Overview 中选择 **自动完成设置**。
+2. 登录 ChatGPT 并完成模型设置，按提示完全重启 Codex。
+3. 在现有 Codex 任务中选择原生模型或 **Maria Web** 模型。
 
-## 此前的界面与连续性改进
+Web 模式下的本地工具需要 Full harness 连接器，并通过 **Verify runtime** 验证。
+[用户指南](docs/user-guide.md) 包含设置、登录、更新和快捷键的说明。
 
-即使进程内的会话缓存丢失，仍会使用已保存的 Web 会话生成检查点。
-压缩失败不会删除原会话映射。附件数量允许时，大型 Automatic Full 上下文通过文件一次性发送。
-目标状态和预算仍由 Codex 管理。释放额外的空闲页面后，原聊天 URL 仍会保留。
-依据、取舍与限制见 [连续性研究](docs/CONTINUITY_RESEARCH.md)。
+## 选择工作方式
 
-A cinematic motion system brings spring-driven navigation, an interactive depth mark,
-masked heading reveals, and coordinated page transitions. The sidebar folds into an
-icon rail and remembers its width and desktop preference.
+| 模式 | 谁操作浏览器？ | 工具 |
+| --- | --- | --- |
+| 原生 Codex | 不需要 ChatGPT 浏览器 | 原生 Codex 工具 |
+| Automatic Web | Maria 准备并发送任务 | Browser-only 或 Full harness |
+| Manual Web | 你选择模型并发送准备好的提示词 | 界面显示的 Manual 连接器 |
 
-Use Cmd/Ctrl+B to toggle the sidebar, Cmd/Ctrl+K for page search, and Cmd/Ctrl+1–8
-to switch pages. Drag the sidebar edge to resize it; double-click to reset its width.
-Connection checks are shared and visibility-aware, native browser geometry is
-coordinated, and failed startup connections can be retried. Setup still sends no
-test message.
+可用模型取决于你的账户。Maria 明确保留任务归属和权限，不会自动重发结果不确定的请求。
 
-## Start here
+## 任务需要处理时
 
-- Open **Maria WebGPT**. The Overview shows your connection and the next setup steps.
-- Sign in to ChatGPT in the Browser page, or choose Manual mode in Settings.
-- Open **Models & setup** to add Web models. Restart Codex once after installation so its picker refreshes.
-- Choose a regular Codex model or a **Maria Web** model directly in Codex.
-- Use **Help & guide** inside Maria whenever you need these instructions.
+Codex 仍在更新但 Browser 一片空白时，选择 **恢复显示**，无需重新加载或重发。
+任务中断时，先检查保存的聊天，选择可用的 **我已检查此聊天**，然后回到原 Codex 任务继续。
+详细步骤见 [故障排查](TROUBLESHOOTING.md)。
 
-## Two ways to work
+## 开发与贡献
 
-### Native Codex
-
-Regular models use your Codex account, reasoning controls, and native tools.
-They do not need a ChatGPT browser login or the Web connector. Maria preserves
-the official catalog and repairs old bridge-provider settings that can hide native models.
-
-### ChatGPT Web
-
-Automatic mode prepares and sends the current Codex task through your own
-ChatGPT session. Available model tiers depend on what that account exposes.
-Full harness mode connects ChatGPT to the tools of the same Codex task.
-
-Manual mode gives you control over model selection and sending. Copy the prepared
-prompt, paste it into ChatGPT, select your model and the **Codex Zero Risk** connector,
-send it, and choose **Sent** in Maria. You have five minutes to prepare the prompt
-and a separate 90 seconds for the connector to start. Attach images manually.
-Existing connector names and model IDs stay compatible with your saved setup.
-
-## Cooperative Web access
-
-Maria spaces automatic sends across the browser profile, pauses on verification,
-sign-in, rate-limit, and conversation-service failures, and respects Retry-After.
-The pause survives restart. Complete any check yourself in ChatGPT, then choose
-**Resume WebGPT** in Maria after the cooldown. Resume enables your next request;
-it does not replay a stopped or uncertain turn. Native Codex remains independent.
-
-Security-check pages are kept for inspection. Maria does not automatically reload
-challenges or dismiss rate-limit dialogs. Local Activity records the reason,
-server-provided request references when available, and explicit resume events.
-No diagnostic report is sent automatically.
-
-User-initiated browser automation is still automation. These controls reduce
-avoidable traffic and duplicate actions; they cannot guarantee account access or
-establish that a service decision was a false positive.
-
-## Updates from our GitHub
-
-Open **Updates** in Maria. When a newer complete release is available, the sidebar
-shows **Update · v…** and the release page offers **Update to …**. Downloads are
-verified against the release's SHA-256 checksums before installation.
-
-- Maria checks at startup, every four hours, and when you return after at least 15 minutes. **Check for updates** retries immediately.
-- The page shows the installed version, latest published version, and last successful check. A local build newer than the published release is labeled **ahead of the release**.
-- Our repository is private. **Release notes & downloads** opens GitHub using your normal browser sign-in. For automatic checks and in-app updates, connect a fine-grained GitHub token restricted to this repository with **Contents: Read-only**. It is stored using operating-system encryption and can be removed in Updates.
-- GitHub access failures and offline checks stay visible; Maria never reports them as "up to date."
-- Finish active work before installing. DEV/source installations stay separate and do not replace the installed application.
-
-## One task, less repeated context
-
-Codex remains the source of truth for your task history, instructions, tool results,
-and compaction checkpoints. In Automatic Full harness mode, Maria keeps a saved
-ChatGPT conversation for the same Codex task and Web model configuration.
-
-Web models declare no numeric Codex context window or automatic-compaction threshold. ChatGPT manages its active context. Setup preserves existing global context preferences for native models only and restores those preferences when the bridge is disconnected or uninstalled. Normal evidence retrieval has no local token allowance; file bytes, page sizes and permissions remain bounded.
-
-- **Large context:** required records are read through the bound native connection, with historical output and document text retrieved on demand. One browser Send starts the turn. Page acknowledgements verify delivery.
-- **Follow-ups:** Maria sends only the new portion when the earlier input and final Web answer match a recorded local cursor. The cursor stores hashes, not another copy of your conversation.
-- **Native → Web:** any work done with native Codex after the last Web answer is included. Maria does not assume the last assistant message came from ChatGPT.
-- **Compaction:** the ChatGPT conversation identity stays the same. Codex's current checkpoint updates the task context without discarding the saved chat. Changed or unverifiable history uses the full current Codex context.
-- **Restart or tab eviction:** completed Automatic Full harness chats reopen their exact saved `chatgpt.com/c/...` address. Existing saved links from earlier Maria builds migrate in place.
-- **Uncertain submission:** Maria keeps the saved link and stops. It does not resend an accepted prompt or open a replacement task. Inspect the existing chat before continuing.
-
-Manual mode also uses verified incremental context while its retained tab is
-available; it does not automatically inspect or reopen remote chat history.
-Read-only Web modes and isolated checkpoint fallback requests use Temporary Chat.
-Saved Full harness chats appear in your ChatGPT history and use that account's
-normal data controls. Codex compaction reduces local context; it cannot reset
-ChatGPT's internal context window. ChatGPT's own limits still apply.
-
-See [Conversation architecture](docs/CONVERSATION_CONTINUITY.md) for the recovery
-and context-selection rules.
-
-## Reuse an existing browser login
-
-Open Browser in Maria and choose **Use an existing browser login**. Select Chrome,
-Microsoft Edge, or Safari. Enable the bundled Maria Browser Sign-in connector once
-in that browser, then connect the profile where ChatGPT is already signed in.
-
-- Chrome and Edge: open the extensions page, enable Developer mode, choose Load unpacked, and select the folder shown by Maria. Then use Open connector.
-- Safari: open the bundled Safari companion and enable its extension in Safari settings. Local unsigned builds may also require Safari's Develop > Allow Unsigned Extensions setting.
-- The connection code expires after five minutes and accepts one session transfer.
-- Maria verifies the login inside its own browser before reporting success. Passwords, other sites, and browsing history are not imported.
-- Keep the source browser open. The handoff does not close or restart it.
-- If the shared session expires or is revoked, reconnect from the browser. Native Codex sign-in stays separate.
-- Connect in Automatic mode to verify sign-in; you can switch to Manual afterward.
-
-## Keep developing when Maria is stopped
-
-The native connection has an independent recovery guardian. If the transport exits
-while Maria is closed, the guardian starts a native-only replacement. It never
-resends a ChatGPT prompt. On macOS, the installed production app registers recovery
-at login. On other platforms, Launch at login starts Maria and its guardian again.
-
-For a native Codex session that bypasses Maria completely, use this from your project terminal:
-
-```bash
-codex -c model_provider=openai -c openai_base_url=https://chatgpt.com/backend-api/codex
-```
-
-The Overview's **Copy native command** button copies this command. In this source
-repository, `bun run codex:native` provides the same direct route and ignores an
-inherited OPENAI_BASE_URL override.
-
-## Safe development environments
-
-`bun run app` and `bun start` use an isolated DEV profile. Each checkout gets its own
-state directory and private Vite port. Production routing, browser-profile paths,
-and control credentials are removed from the development process environment.
-`bun run dev:chat` uses that same checkout profile.
-
-Source CLI commands that could change production Maria or Codex data require an
-explicit `--allow-production` flag. Standard development commands never need it.
-Use the installed packaged application for production; avoid pointing production
-services at files you are actively editing.
-
-## Closing Maria without losing Codex
-
-Closing the window keeps your work running. When you quit with a ChatGPT turn
-active, Maria stays in the background so that turn can finish. When no Web turn
-is running, the UI can exit while the native connection continues in a separate
-process. Reopening Maria reconnects to that process.
-
-Native responses already streaming are not cancelled when the UI exits. A new
-Web request while the browser is closed asks you to open Maria; regular Codex
-requests continue. Turn on **Launch at login** for availability after restarting
-your computer. Explicitly removing the integration stops its background connection.
-
-## Connect the tools
-
-- Open MCP in Maria and use your existing saved tunnel credentials, or configure a tunnel.
-- Follow the connector instructions shown for your selected interaction mode.
-- Keep the Automatic and Manual connectors separate. Their exact names are displayed in Maria.
-- Run Verify runtime. Native Codex tools continue to use Codex's own permissions.
-
-## If something needs attention
-
-- **Native models missing:** use Setup to reinstall the model integration, then restart Codex.
-- **Web model unavailable:** open Maria, check browser sign-in and the model tier on your account.
-- **Manual connection timed out:** select the shown connector and check MCP status before starting a new turn.
-- **A turn stops unexpectedly:** open Activity and export diagnostics. Check whether the browser tab closed or the connector disconnected.
-- **Switching models:** finish or cancel the current turn, then choose another model in Codex. Your Codex task remains the same.
-
-Maria does not automatically resend an accepted prompt. This avoids duplicate work
-when a network connection becomes uncertain. Both saved and Temporary Chat are
-processed by OpenAI. Account availability and limits still apply.
-
-## Our project
-
-Source and issues live in our private GitHub repository:
-https://github.com/mikkel32/codex-web-gpt-enhanced
-
-There are no social-page requirements in onboarding. The project ships its own
-interface, local guide, model integration, diagnostics, and release tooling.
-Third-party license notices are included in LICENSE and LICENSES.
-
-## Run from source
-
-This source path requires Bun 1.4.0. Use an authenticated clone for this private repository.
+开发需要 Bun 1.4.0。源码启动使用独立的 DEV 配置。
 
 ```bash
 git clone https://github.com/mikkel32/codex-web-gpt-enhanced.git
@@ -225,44 +65,13 @@ bun install --frozen-lockfile --cwd launcher
 bun run app
 ```
 
-## Verify and build
+提出代码变更前请运行 `bun run verify`。
+[开发指南](docs/development/README.md) 介绍仓库结构和检查流程；[贡献指南](CONTRIBUTING.md) 介绍审核方式。
 
-```bash
-bun run verify
-bun run app:package
-bun run app:smoke
-bun run app:performance
-```
+## 更多信息
 
-Verification covers the runtime, launcher, model routing, process lifecycle,
-TypeScript, the renderer, dependency audits, and relocatable runtime smoke checks.
-Packaging produces an installer for the current operating system. macOS builds
-include a signature check and a launch test. Windows and Linux builds run in CI.
+[文档](docs/README.md) · [安全](SECURITY.md) ·
+[报告问题](https://github.com/mikkel32/codex-web-gpt-enhanced/issues/new/choose)
 
-## Release notes
-
-5.5.0 adds persistent cooperative-access pauses, Retry-After handling, shared send
-pacing, user-controlled recovery, and terminal handling of typed errors after Send.
-
-5.4.0 introduces the monochrome Moonlight interface, reduced-motion-aware interactions,
-visibility-aware connection checks, batched Activity updates, exclusive guardian
-ownership, and shared daemon/browser startup operations. Context hashing now avoids
-allocating another complete serialized transcript.
-
-5.3.0 adds a GitHub Updates page, private-release access, repeatable release checks,
-durable completed-chat recovery, compaction continuity, and verified incremental
-context that preserves work performed by native Codex models.
-
-5.2.0 adds existing-browser sign-in, independent native recovery, and isolated checkout development.
-
-5.1.0 introduces Maria's own interface and in-app handbook, removes promotional
-onboarding, and keeps the native connection alive independently of the window.
-The 5.0.2 foundation added reversible provider repair, native catalog fallback,
-SSE completion handling, and more practical Manual-mode deadlines.
-### 按需上下文与附件
-
-自动 Full 模式先加载并确认必要指令和当前任务记录。较大的历史成功工具输出保留为可搜索的原始证据，不必在开始工作前全部重读。`codex_context_read` 使用接收回执，`codex_context_search` 按需查找证据；分段传输不会增加模型的实际上下文容量。
-
-文本、CSV、JSON 和 PDF 文本可以检索。附件原始数据会保留，并提供私有临时副本供当前原生工具处理；PDF 图像和扫描页需要原生视觉检查。后续回合重新生成附件路径，桥接器自己的压缩检查点保留原始文档、图像和来源角色。沙盒权限不变。
-
-升级后请刷新自动模式连接器，确认上述两个工具及 `receipt` 参数已出现。有关限制、旧逻辑清理和验证范围，请参阅[上下文传输设计](docs/context-delivery.md)。
+由 **Mikkel & Maria** 开发。[MIT 许可证](LICENSE)。基于
+[miuuyy/codex-chatgpt-web](https://github.com/miuuyy/codex-chatgpt-web)。
