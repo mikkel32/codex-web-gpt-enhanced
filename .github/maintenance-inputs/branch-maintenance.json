@@ -1,0 +1,28 @@
+{
+  "base": "14a52cd941431e6e952c140706301fef044f860f",
+  "branches": [
+    ["build/alpha2-source-transfer-20260907", "fc8dbfce1ef21b87a9095ed161d382657745ade5", true],
+    ["build/native2-workspace-transfer-20260907", "256ca464ab50411d94a6490e6cd45c89cdecf81c", false],
+    ["build/ui-integration-export-20260907", "c7337a9359991d4d1c85c40ef51eaddda25ffd6c", false],
+    ["codex/automatic-setup-recovery-20260907", "7e6dd084d98bff6d3127f40722a16b5bc2265362", false],
+    ["codex/concurrent-chat-stability", "14a52cd941431e6e952c140706301fef044f860f", true],
+    ["codex/document-attachment-delivery-20260908", "9a0172d050c38f2a3dc42ea53726252cb5b7fd31", true],
+    ["codex/electron-smoke-readiness-20260908", "dab187ef2857044aa1ec95844167ee7925829128", true],
+    ["codex/guided-workspace-ui-20260907", "d1f7f8cde639be64aec3bb02a5f4ee9bc6bbcb8f", true],
+    ["codex/mac-runtime-validation-20260908", "6108ddec83d73303215f49a8f71d1d3efbbf878c", true],
+    ["codex/maria-5.6-desktop-redesign", "3f4c11cb945ca91b9f412eab006e4b95a9b6cf2a", true],
+    ["codex/native-model-reliability-5.0.2", "0cb54de0741f1438fe21c75f540fdd7e759e1b31", true],
+    ["codex/plugin-capabilities-20260909", "ceb447b9fa49d63f28b9b92f7465dd9b102723cc", false],
+    ["codex/progressive-context-20260908", "cf1cd698396accf3919bf3d599d4f6b42a18c308", true],
+    ["codex/publish-5.20.3-transfer", "e85c8094a8bd7773e658e924a5bb8188b13e9d3f", false],
+    ["codex/release-5.0.2-finalize", "1582a8c959e6dd70e48d956a11b75b9231c5193a", true],
+    ["codex/release-5.13.10-alpha.2-20260907", "9a29e26e72b3ebc924fc694c675f54ab8cf953e0", false],
+    ["codex/release-transfer-5.20.0", "1277e5617c8372156081578ddbeaf7b7d0b14113", true],
+    ["codex/tunnel-health-discovery-20260908", "69ad192ce5c3860df801ef20fb9339862b816721", true],
+    ["codex/ui-reviewed-20260907", "0453c74adc1169a48aafd13dd48d0b352764664f", true],
+    ["codex/web-managed-context-20260909", "917dbd1bc5e54bd36fe8bd7b36be6827be6703b0", true],
+    ["fix/automated-launcher-setup-20260907", "a7bbd7e74cdbbafef3a39d1bcca469beee89e825", true],
+    ["fix/native2-workspace-automation-20260907", "31e7b58c79352ec7ae99fec0acf36bde6c123223", true],
+    ["release-prep/stream-recovery-5.20.2", "78bd60351dd9304e08e9e572a11780ad26678c55", false]
+  ]
+}

@@ -1,0 +1,64 @@
+name: Verified repository maintenance
+on:
+  push:
+    branches: [codex/repository-maintenance-20260909]
+permissions:
+  contents: write
+concurrency:
+  group: repository-maintenance-20260909
+  cancel-in-progress: false
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Reconstruct the exact locally reviewed cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp -R .github/maintenance-inputs "$RUNNER_TEMP/maintenance-inputs"
+          git checkout --detach 14a52cd941431e6e952c140706301fef044f860f
+          python3 "$RUNNER_TEMP/maintenance-inputs/clean-repository.py"
+          python3 "$RUNNER_TEMP/maintenance-inputs/finalize-cleanup.py"
+          cp "$RUNNER_TEMP/maintenance-inputs/documentation.test.cjs" launcher/tests/documentation.test.cjs
+          cp "$RUNNER_TEMP/maintenance-inputs/release-prepare.test.cjs" launcher/tests/release-prepare.test.cjs
+          git add -A
+          test "$(git write-tree)" = bf6ac5ac628a8958167513ff2657d6e0e59e5c7d
+          candidate="$(git hash-object -t commit -w "$RUNNER_TEMP/maintenance-inputs/candidate.commit")"
+          test "$candidate" = 7bec5b318202c62e681f8dda56cfd386a91e5278
+          git diff --check 14a52cd941431e6e952c140706301fef044f860f "$candidate"
+          node --test launcher/tests/documentation.test.cjs launcher/tests/localization.test.cjs launcher/tests/release-prepare.test.cjs launcher/tests/release-readiness.test.cjs
+          git push origin "$candidate:refs/heads/codex/repository-cleanup"
+          printf 'VERIFIED_CLEANUP_SOURCE %s\n' "$candidate"
+  retire:
+    needs: materialize
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Await the published stable release before retirement
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in $(seq 1 60); do
+            if gh release view v5.20.3 --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease 2>/dev/null | jq -e '.isDraft == false and .isPrerelease == false' >/dev/null; then
+              exit 0
+            fi
+            sleep 15
+          done
+          echo 'Stable 5.20.3 is not public; no branches retired' >&2
+          exit 1
+      - name: Attempt public About metadata with existing permissions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/maintenance-inputs/update-about.py
+      - name: Preserve historical heads and retire integrated branches
+        run: python3 .github/maintenance-inputs/retire-branches.py
