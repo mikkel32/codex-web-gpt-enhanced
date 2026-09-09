@@ -414,7 +414,7 @@ kbd { color: #a9c0b2; border-color: #ffffff23; }
   .wizard-stepper > button em { display: none; }
   .error-toast { gap: 12px; flex-wrap: wrap; }
   .error-toast > span { min-width: calc(100% - 30px); }
-  .browser-toolbar { gap: 4px; flex-wrap: wrap; }
+  .browser-toolbar { height: auto; flex: 0 0 auto; gap: 4px; flex-wrap: wrap; padding: 6px 8px; }
   .browser-address { min-width: 90px; }
   .browser-empty { padding: 20px; }
   .browser-empty-actions { flex-direction: column; }

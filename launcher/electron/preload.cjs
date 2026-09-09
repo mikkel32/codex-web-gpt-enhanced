@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld("codexWebLauncher", {
   zoomBrowser: (action) => ipcRenderer.invoke("launcher:browser-zoom", action),
   selectBrowserTab: (tabId) => ipcRenderer.invoke("launcher:browser-tab-select", tabId),
   closeBrowserTab: (tabId) => ipcRenderer.invoke("launcher:browser-tab-close", tabId),
+  confirmBrowserTurnReviewed: (tabId, recoveryId) => ipcRenderer.invoke("launcher:browser-turn-reviewed", tabId, recoveryId),
   copyManualPrompt: (tabId) => ipcRenderer.invoke("launcher:manual-prompt-copy", tabId),
   confirmManualSent: (tabId) => ipcRenderer.invoke("launcher:manual-prompt-sent", tabId),
   openLogin: () => ipcRenderer.invoke("launcher:browser-login"),

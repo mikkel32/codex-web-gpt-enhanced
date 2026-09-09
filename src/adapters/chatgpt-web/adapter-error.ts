@@ -36,13 +36,20 @@ export function chatGptBrowserTabClosedError(): ChatGptWebAdapterError {
 
 export function chatGptStoppedThinkingError(): ChatGptWebAdapterError {
   return new ChatGptWebAdapterError(
-    "ChatGPT stayed stopped without generation or new progress for 30 seconds. The submitted turn was not replayed. Continue the same task when ready; this was not a Codex user cancellation.",
+    "ChatGPT stayed stopped without generation or new progress for 30 seconds. Review the ChatGPT tab before continuing the same task. The submitted turn was not replayed; this was not a Codex user cancellation.",
     {
       status: 502,
       errorType: "server_error",
       code: "chatgpt_generation_stopped",
       retryable: false,
     },
+  );
+}
+
+export function chatGptResponseObservationError(reason: string, cause?: unknown): ChatGptWebAdapterError {
+  return new ChatGptWebAdapterError(
+    `${reason}. Review the ChatGPT tab before continuing. No prompt was resent.`,
+    { status: 502, errorType: "server_error", code: "chatgpt_response_observation_failed", retryable: false, cause },
   );
 }
 

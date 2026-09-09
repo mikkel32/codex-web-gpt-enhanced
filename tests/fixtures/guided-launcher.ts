@@ -36,6 +36,11 @@ export function installGuidedFixture() {
     tabs: [{ id: "home", traceId: null, title: "ChatGPT", status: "ready", loading: false, active: true, closable: false }],
   };
   if (scenario === "tasks") browser.tabs.push({ id: "task", traceId: "fixture-task", title: "Build a better workspace", status: "running", loading: false, active: false, closable: true });
+  if (scenario === "review") {
+    browser.status = "error"; browser.visible = true; browser.surfaceActive = true; browser.activeTabId = "review-task";
+    browser.tabs = [{ id: "review-task", traceId: "fixture-review", title: "Interrupted task", status: "error", loading: false,
+      active: true, closable: true, interactionMode: "automatic", recoveryId: "r".repeat(32) }];
+  }
   if (manual) {
     browser.activeTabId = "manual-task"; browser.tabs[0]!.active = false;
     browser.tabs.push({ id: "manual-task", traceId: "fixture-manual", title: "My manual task", status: "ready", loading: false, active: true, closable: true,
@@ -91,6 +96,13 @@ export function installGuidedFixture() {
     showBrowser: async () => { fixture.calls.push("showBrowser"); return clone(browser); }, hideBrowser: async () => clone(browser),
     selectBrowserTab: async (id: string) => { fixture.calls.push("selectBrowserTab"); browser.activeTabId = id; browser.tabs.forEach(tab => { tab.active = tab.id === id; }); fixture.emit("onBrowserState", browser); return clone(browser); },
     closeBrowserTab: async (id: string) => { browser.tabs = browser.tabs.filter(tab => tab.id !== id); fixture.emit("onBrowserState", browser); return clone(browser); },
+    confirmBrowserTurnReviewed: async (id: string, recoveryId: string) => {
+      const tab = browser.tabs.find(candidate => candidate.id === id && candidate.recoveryId === recoveryId);
+      if (!tab) throw new Error("Stale fixture review action");
+      fixture.calls.push("confirmBrowserTurnReviewed");
+      delete tab.recoveryId; tab.status = "ready"; browser.status = "ready";
+      fixture.emit("onBrowserState", browser); return clone(browser);
+    },
     copyManualPrompt: async () => { fixture.calls.push("copyManualPrompt"); return clone(browser); },
     confirmManualSent: async () => { fixture.calls.push("confirmManualSent"); return clone(browser); },
     reviewWebAccess: async () => clone(browser), resumeWebAccess: async () => { fixture.calls.push("resumeWebAccess"); browser.webAccess = { status: "ready" }; fixture.emit("onBrowserState", browser); return clone(browser); },

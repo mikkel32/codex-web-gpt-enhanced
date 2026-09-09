@@ -25,7 +25,8 @@ class SavedConversations {
           && value.connectorBound === true && savedConversationUrl(value.url)) value.status = "ready";
         if (!/^[a-f0-9]{64}$/.test(key) || !value || !["ready", "in-flight"].includes(value.status)
           || (value.url !== null && !savedConversationUrl(value.url)) || typeof value.connectorIdentity !== "string"
-          || typeof value.connectorBound !== "boolean") throw new Error("Invalid saved conversation");
+          || typeof value.connectorBound !== "boolean"
+          || (value.reviewedInterruption !== undefined && value.reviewedInterruption !== true)) throw new Error("Invalid saved conversation");
       }
       this.entries = data.conversations;
     } catch { this.error = new Error("Maria's conversation index needs recovery. Your Codex history is intact; no replacement ChatGPT chat was opened."); }
