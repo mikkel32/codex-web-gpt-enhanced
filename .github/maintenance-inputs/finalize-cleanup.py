@@ -4,7 +4,7 @@ import json
 
 inputs = Path(__file__).parent
 guide = Path('docs/user-guide.md')
-guide.write_text(guide.read_text().replace('[Documentation](../README.md)', '[Documentation](README.md)', 1))
+guide.write_text(guide.read_text().replace('[Documentation](../README.md)', '[Documentation](README.md)', 1).rstrip() + '\n')
 manifest = json.loads((inputs / 'branch-maintenance.json').read_text())
 lines = ['# Branch archive', '', '[Development](README.md) · [Documentation](../README.md)', '',
          'Repository maintenance for the stable 5.20.3 line. Integrated commits remain',
