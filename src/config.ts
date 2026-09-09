@@ -121,7 +121,7 @@ export interface AppConfig {
   solAvailable: boolean;
   proAvailable: boolean;
   experimentalBiggerContext: boolean;
-  /** Explicitly install the additional Pro-sized model row while Zero Risk is active. */
+  /** Explicitly install the additional manual Pro model row while Zero Risk is active. */
   zeroRiskProEnabled: boolean;
   /** Optional adapter-silence budget for the Responses watchdog. */
   stallTimeoutSec?: number;

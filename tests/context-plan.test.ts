@@ -38,7 +38,8 @@ test("large historical evidence is deferred while every instruction and action r
   expect(prompt.text).toContain("receipt");
   expect(prompt.text).toContain("codex_context_search");
   expect(compiledChatGptWebMessages(prompt)).toEqual([prompt.text]);
-  expect(estimateCompiledChatGptWebInputTokens(prompt, "gpt-5.6-sol")).toBeGreaterThan(32000);
+  expect(estimateCompiledChatGptWebInputTokens(prompt, "gpt-5.6-sol")).toBeGreaterThan(0);
+  expect(plan.options.optionalTokenBudget).toBeNull();
 });
 
 test("inline attachment bytes survive parsing without being pasted as base64 into context", async () => {
@@ -63,6 +64,6 @@ test("unavailable file IDs produce an explicit preparation failure rather than a
 test("usage estimation accepts Full-mode documents without expanding their base64 into tokens", () => {
   const request = parseRequest({ model: "gpt-5.6-sol", input: [{ role: "user", content: [{ type: "input_file", filename: "large.csv", file_data: Buffer.from("row,1\n".repeat(50000)).toString("base64") }] }] });
   const tokens = estimateChatGptWebInputTokens(request, { localToolsEnabled: true, solAvailable: true, proAvailable: true });
-  expect(tokens).toBeGreaterThan(32000);
-  expect(tokens).toBeLessThan(50000);
+  expect(tokens).toBeGreaterThan(0);
+  expect(tokens).toBeLessThan(32000);
 });

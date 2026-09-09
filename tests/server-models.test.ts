@@ -81,10 +81,10 @@ test("proxies official /models auth and query, then appends the fixed ChatGPT We
   const body = await response.json() as {
     models: Array<{
       slug: string;
-      context_window?: number;
-      max_context_window?: number;
+      context_window?: number | null;
+      max_context_window?: number | null;
       effective_context_window_percent?: number;
-      auto_compact_token_limit?: number;
+      auto_compact_token_limit?: number | null;
       supported_in_api?: boolean;
       priority?: number;
       multi_agent_version?: string;
@@ -175,10 +175,10 @@ test("Zero Risk returns one generic Web row without using scanned capabilities",
     upgrade: null,
     default_reasoning_level: "low",
     input_modalities: ["text"],
-    context_window: 123_000,
-    max_context_window: 123_000,
-    effective_context_window_percent: 78,
-    auto_compact_token_limit: 96_000,
+    context_window: null,
+    max_context_window: null,
+    effective_context_window_percent: 100,
+    auto_compact_token_limit: null,
     additional_speed_tiers: [],
     service_tiers: [],
     default_service_tier: null,

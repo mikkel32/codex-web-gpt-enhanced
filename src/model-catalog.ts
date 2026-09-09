@@ -158,11 +158,41 @@ export function buildChatGptWebModel(
     default_service_tier: null,
   };
   // A native template's compaction hash describes OpenAI's native model contract, not this routed
-  // browser model. The explicit Web window above is owned by this adapter and never copied back to
-  // native models or the user's top-level model_context_window setting.
+  // browser model. Automatic Web routes leave numeric context ownership to ChatGPT.
   delete model.comp_hash;
   delete model.availability_nux;
   return model;
+}
+
+/** Apply saved native preferences even while the Web route is paused/unavailable. */
+export function applyNativeContextOverrides(value: unknown, contextOverride?: CodexModelContextOverride): JsonObject {
+  const catalog = object(value, "native Codex models response");
+  if (!Array.isArray(catalog.models)) throw new Error("Native Codex models response is missing a models array");
+  const models = structuredClone(catalog.models);
+  if (contextOverride) {
+    // model_context_window is a single top-level Codex setting, not a per-model one. Apply its
+    // advertised maximum to every native row so switching native models cannot silently clamp the
+    // effective override. Codex itself applies context_window and auto-compaction configuration.
+    for (const candidate of models) {
+      const modelSlug = slug(candidate);
+      if (!modelSlug || modelSlug.startsWith(CHATGPT_WEB_MODEL_PREFIX)) continue;
+      const model = object(candidate, `native ${modelSlug} model`);
+      const current = model.max_context_window;
+      if (current !== undefined && current !== null
+        && (typeof current !== "number" || !Number.isSafeInteger(current) || current <= 0)) {
+        throw new Error(`Native ${modelSlug} max_context_window must be a positive integer`);
+      }
+      if (contextOverride.contextWindow !== undefined
+        && (current === undefined || current === null || current < contextOverride.contextWindow)) {
+        model.max_context_window = contextOverride.contextWindow;
+      }
+      if (contextOverride.scopedToNative) {
+        if (contextOverride.contextWindow !== undefined) model.context_window = contextOverride.contextWindow;
+        if (contextOverride.autoCompactTokenLimit !== undefined) model.auto_compact_token_limit = contextOverride.autoCompactTokenLimit;
+      }
+    }
+  }
+  return { ...structuredClone(catalog), models };
 }
 
 export function augmentNativeModelCatalog(
@@ -170,7 +200,7 @@ export function augmentNativeModelCatalog(
   config: AppConfig,
   contextOverride?: CodexModelContextOverride,
 ): JsonObject {
-  const catalog = object(value, "native Codex models response");
+  const catalog = applyNativeContextOverrides(value, contextOverride);
   if (!Array.isArray(catalog.models)) {
     throw new Error("Native Codex models response is missing a models array");
   }
@@ -185,24 +215,6 @@ export function augmentNativeModelCatalog(
     }
   }
   const template = selectNativeTemplate(nativeModels, config);
-  if (contextOverride) {
-    // model_context_window is a single top-level Codex setting, not a per-model one. Apply its
-    // advertised maximum to every native row so switching native models cannot silently clamp the
-    // effective override. Codex itself applies context_window and auto-compaction configuration.
-    for (const candidate of nativeModels) {
-      const modelSlug = slug(candidate);
-      if (!modelSlug) continue;
-      const model = object(candidate, `native ${modelSlug} model`);
-      const current = model.max_context_window;
-      if (current !== undefined && current !== null
-        && (typeof current !== "number" || !Number.isSafeInteger(current) || current <= 0)) {
-        throw new Error(`Native ${modelSlug} max_context_window must be a positive integer`);
-      }
-      if (current === undefined || current === null || current < contextOverride.contextWindow) {
-        model.max_context_window = contextOverride.contextWindow;
-      }
-    }
-  }
   const webModels = availableChatGptWebModelRoutes(config)
     .map(route => buildChatGptWebModel(template, route, config));
   return {

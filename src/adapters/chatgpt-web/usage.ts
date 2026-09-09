@@ -2,7 +2,6 @@ import { estimateTokens } from "../../lib/token-estimate";
 import {
   CHATGPT_WEB_BACKEND_MODEL,
   isChatGptWebZeroRiskBackendModel,
-  resolveChatGptWebContextLimits,
 } from "../../chatgpt-web-models";
 import type { CodexParsedRequest, CodexUsage } from "../../types";
 import { estimateCompiledChatGptWebInputTokens } from "./input-tokens";
@@ -50,17 +49,12 @@ export function estimateChatGptWebInputTokens(
         && Boolean(identity.threadId && identity.turnId),
     },
   );
-  // Documents are queried or processed locally rather than pasted as base64. Reserve the
-  // bounded retrieval allowance here; the prepared plan separately checks required text/images.
-  return estimateCompiledChatGptWebInputTokens(compiled, parsed.modelId)
-    + (compiled.files?.length && !parsed._compactionRequest ? 32_000 : 0);
+  // Estimate supplied context without inventing a fixed future retrieval allowance.
+  return estimateCompiledChatGptWebInputTokens(compiled, parsed.modelId);
 }
 
-/**
- * Use the existing model/account compaction threshold as the size of one context part. Normal
- * turns stay on the original one-message transport until they actually need the experiment;
- * compaction itself always receives all three parts so it can summarize the expanded window.
- */
+/** Select record packing independently of context capacity or automatic compaction.
+ * Explicit checkpoint requests retain the existing three-part delivery format. */
 export function resolveBiggerContextMultipartParts(
   parsed: CodexParsedRequest,
   capabilities: ChatGptWebCapabilities,
@@ -73,11 +67,8 @@ export function resolveBiggerContextMultipartParts(
   }
   const mode = resolveChatGptWebModelMode(parsed.modelId, parsed.options.reasoning, capabilities);
 
-  const onePartLimit = resolveChatGptWebContextLimits(
-    CHATGPT_WEB_BACKEND_MODEL,
-    mode.effort,
-    capabilities,
-  ).autoCompactTokenLimit;
+  // A partition-size hint only. This does not cap context or trigger compaction.
+  const onePartLimit = 64_000;
   const inputTokens = estimateChatGptWebInputTokens(parsed, capabilities);
   return biggerContextPartCount(inputTokens, onePartLimit, parsed._compactionRequest === true);
 }

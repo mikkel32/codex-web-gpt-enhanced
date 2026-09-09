@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { AppConfig, SubagentProtocol } from "./config";
 import { atomicWriteFile, expandUserPath, getConfigDir } from "./config";
+import { planNativeContextPolicy, readNativeContextPolicy } from "./codex-context-policy";
 
 export const MANAGED_COMMENT = "# Managed by codex-chatgpt-web; `codex-chatgpt-web uninstall` restores prior values.";
 export const MANAGED_ROUTE_COMMENT =
@@ -242,7 +243,13 @@ export interface SetCodexIntegrationActiveResult {
 }
 
 export interface CodexModelContextOverride {
-  contextWindow: number;
+  contextWindow?: number;
+  autoCompactTokenLimit?: number;
+  scopedToNative?: true;
+}
+
+export function getCodexContextPolicyPath(): string {
+  return join(getCodexHome(), "maria-native-context-preferences.json");
 }
 
 export function getCodexHome(): string {
@@ -326,11 +333,17 @@ export function writeIntegrationState(
   removals: string[] = [],
 ): void {
   const data = serializeJournal(journal);
+  const context = configWrite ? planNativeContextPolicy(configWrite.data, configWrite.path,
+    readNativeContextPolicy(getCodexContextPolicyPath(), configWrite.path), "active" in journal ? journal.active : true) : undefined;
   // The recovery copy records intent and the primary copy records commit. If the process stops
   // between those writes, the physical config unambiguously selects the completed state.
   writeFilesWithCompensation([
     { path: getCodexJournalRecoveryPath(), data },
-    ...(configWrite ? [configWrite] : []),
+    ...(context && configWrite ? [
+      ...(Object.keys(context.policy.entries).length || existsSync(getCodexContextPolicyPath())
+        ? [{ path: getCodexContextPolicyPath(), data: JSON.stringify(context.policy, null, 2) + "\n" }] : []),
+      { path: configWrite.path, data: context.text },
+    ] : []),
     { path: getCodexJournalPath(), data },
   ], removals);
 }

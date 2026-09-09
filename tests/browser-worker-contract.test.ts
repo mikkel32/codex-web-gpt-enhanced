@@ -2814,206 +2814,22 @@ test("localized confirmation cannot authorize another app or persistent access",
   expect(await resolveChatGptToolConfirmation(metacharacters.page, "Codex Native.", true)).toBeFalse();
 });
 
-test("browser preflight separates model context from one-message transport limits", () => {
-  const plus = { localToolsEnabled: false, solAvailable: true, proAvailable: false };
-  const pro = { localToolsEnabled: false, solAvailable: true, proAvailable: true };
-  const luna = { localToolsEnabled: false, solAvailable: false, proAvailable: false };
-
-  try {
-    assertChatGptWebInputWithinLimits(90_000, 81_808, "gpt-5.6-sol", "medium", plus);
-    throw new Error("expected context-window preflight to fail");
-  } catch (error) {
-    expect(error).toMatchObject({
-      name: "ChatGptWebAdapterError",
-      status: 400,
-      errorType: "invalid_request_error",
-      code: "context_length_exceeded",
-      retryable: false,
-    });
-    expect(String(error)).toContain("/compact");
+test("browser preflight permits arbitrary token estimates while checking the actual composer size", () => {
+  const caps = { localToolsEnabled: true, solAvailable: true, proAvailable: true };
+  for (const tokens of [95_000, 1_000_000, 50_000_000]) {
+    expect(() => assertChatGptWebInputWithinLimits(tokens, tokens, "gpt-5.6-sol", "xhigh", caps, 100)).not.toThrow();
+    expect(() => assertChatGptWebInputWithinLimits(tokens, tokens, "gpt-6-astra", "max", caps, 100)).not.toThrow();
+    expect(() => assertChatGptWebInputWithinLimits(tokens, tokens, "gpt-5.6-luna", "low", { ...caps, solAvailable: false }, 100)).not.toThrow();
   }
-
-  expect(() => assertChatGptWebInputWithinLimits(40_999, 32_807, "gpt-5.6-sol", "low", plus)).not.toThrow();
-  expect(() => assertChatGptWebInputWithinLimits(41_000, 32_808, "gpt-5.6-sol", "low", plus)).toThrow(
-    "41,000-token context window",
-  );
-  expect(() => assertChatGptWebInputWithinLimits(89_999, 81_807, "gpt-5.6-sol", "medium", plus)).not.toThrow();
-  expect(() => assertChatGptWebInputWithinLimits(89_999, 81_807, "gpt-5.6-sol", "high", plus)).not.toThrow();
-  expect(() => assertChatGptWebInputWithinLimits(90_000, 81_808, "gpt-5.6-sol", "high", plus)).toThrow(
-    "90,000-token context window",
-  );
-  expect(() => assertChatGptWebInputWithinLimits(100_000, 100_000, "gpt-5.6-sol", "xhigh", pro)).not.toThrow();
-  expect(() => assertChatGptWebInputWithinLimits(100_000, 100_000, "gpt-5.6-sol", "max", pro)).not.toThrow();
-  expect(() => assertChatGptWebInputWithinLimits(28_000, 19_808, "gpt-5.6-luna", "low", luna)).not.toThrow();
-  expect(() => assertChatGptWebInputWithinLimits(28_001, 19_809, "gpt-5.6-luna", "low", luna)).toThrow(
-    "ChatGPT Free browser transport budget",
-  );
-
-  expect(() => assertChatGptWebInputWithinLimits(
-    1,
-    1,
-    "gpt-5.6-sol",
-    "low",
-    plus,
-    211_256,
-  )).not.toThrow();
-  expect(() => assertChatGptWebInputWithinLimits(
-    1,
-    1,
-    "gpt-5.6-sol",
-    "low",
-    plus,
-    211_257,
-  )).toThrow("211,256-character ChatGPT composer boundary");
-  for (const effort of ["medium", "high"] as const) {
-    expect(() => assertChatGptWebInputWithinLimits(
-      1,
-      1,
-      "gpt-5.6-sol",
-      effort,
-      plus,
-      1_048_572,
-    )).not.toThrow();
-    expect(() => assertChatGptWebInputWithinLimits(
-      1,
-      1,
-      "gpt-5.6-sol",
-      effort,
-      plus,
-      1_048_573,
-    )).toThrow("1,048,572-character ChatGPT composer boundary");
-  }
-
-  expect(() => assertChatGptWebInputWithinLimits(
-    111_192,
-    103_000,
-    "gpt-5.6-sol",
-    "medium",
-    pro,
-    515_000,
-  )).not.toThrow();
-  expect(() => assertChatGptWebInputWithinLimits(
-    111_193,
-    103_001,
-    "gpt-5.6-sol",
-    "medium",
-    pro,
-    515_001,
-  )).toThrow("103,000-token ChatGPT browser message boundary");
-  expect(() => assertChatGptWebInputWithinLimits(
-    112_192,
-    104_000,
-    "gpt-5.6-sol",
-    "max",
-    pro,
-    520_000,
-  )).not.toThrow();
-  expect(() => assertChatGptWebInputWithinLimits(
-    112_193,
-    104_001,
-    "gpt-5.6-sol",
-    "max",
-    pro,
-    520_001,
-  )).toThrow("104,000-token ChatGPT browser message boundary");
+  expect(() => assertChatGptWebInputWithinLimits(1, 1, "gpt-5.6-sol", "low", { ...caps, proAvailable: false }, 211_257)).toThrow("composer boundary");
 });
 
-test("Bigger Context preflight preserves the actual model ceiling and keeps each message boundary", () => {
-  const plus = {
-    localToolsEnabled: false,
-    solAvailable: true,
-    proAvailable: false,
-    experimentalBiggerContext: true,
-  };
-  const pro = {
-    localToolsEnabled: false,
-    solAvailable: true,
-    proAvailable: true,
-    experimentalBiggerContext: true,
-  };
-  expect(() => assertChatGptWebMultipartInputWithinLimits(
-    111_192,
-    95_000,
-    "gpt-5.6-sol",
-    "high",
-    pro,
-    900_000,
-    3,
-  )).not.toThrow();
-  expect(() => assertChatGptWebMultipartInputWithinLimits(
-    111_193,
-    95_000,
-    "gpt-5.6-sol",
-    "high",
-    pro,
-    900_000,
-    3,
-  )).toThrow("111,193-token model ceiling");
-  expect(() => assertChatGptWebMultipartInputWithinLimits(
-    111_192,
-    95_000,
-    "gpt-5.6-sol",
-    "high",
-    pro,
-    900_000,
-    2,
-  )).not.toThrow();
-  expect(() => assertChatGptWebMultipartInputWithinLimits(
-    111_193,
-    95_000,
-    "gpt-5.6-sol",
-    "high",
-    pro,
-    900_000,
-    2,
-  )).toThrow("111,193-token model ceiling");
-  expect(() => assertChatGptWebMultipartInputWithinLimits(
-    89_999,
-    80_000,
-    "gpt-5.6-sol",
-    "high",
-    plus,
-    900_000,
-    3,
-  )).not.toThrow();
-  expect(() => assertChatGptWebMultipartInputWithinLimits(
-    90_000,
-    80_000,
-    "gpt-5.6-sol",
-    "high",
-    plus,
-    900_000,
-    3,
-  )).toThrow("90,000-token model ceiling");
-  expect(() => assertChatGptWebMultipartInputWithinLimits(
-    90_000,
-    80_000,
-    "gpt-5.6-sol",
-    "high",
-    plus,
-    900_000,
-    2,
-  )).toThrow("90,000-token model ceiling");
-  expect(() => assertChatGptWebMultipartInputWithinLimits(
-    280_000,
-    103_001,
-    "gpt-5.6-sol",
-    "high",
-    pro,
-    900_000,
-    3,
-  )).toThrow("ChatGPT message boundary");
-  expect(() => assertChatGptWebMultipartInputWithinLimits(
-    20_000,
-    10_000,
-    "gpt-5.6-luna",
-    "low",
-    { localToolsEnabled: false, solAvailable: false, proAvailable: false },
-    40_000,
-    2,
-  )).toThrow("unavailable for Luna");
+test("multipart delivery has no model-token ceiling and still verifies composer integrity", () => {
+  const caps = { localToolsEnabled: true, solAvailable: true, proAvailable: true };
+  expect(() => assertChatGptWebMultipartInputWithinLimits(50_000_000, 50_000_000, "gpt-5.6-sol", "xhigh", caps, 100, 2)).not.toThrow();
+  expect(() => assertChatGptWebMultipartInputWithinLimits(50_000_000, 50_000_000, "gpt-6-astra", "max", caps, 100, 3)).not.toThrow();
+  expect(() => assertChatGptWebMultipartInputWithinLimits(1, 1, "gpt-5.6-sol", "xhigh", caps, 1_045_001, 2)).toThrow("composer boundary");
 });
-
 
 test("browser diagnostics redact context envelopes and capability values", () => {
   const diagnostic = redactChatGptUiDiagnostic(

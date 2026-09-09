@@ -13,7 +13,7 @@ export function conversationPrompt(state: ConversationPromptState, checkpoint: b
     ...(checkpoint ? ["Codex has compacted earlier history. Use its supplied checkpoint to recover the objective, verified completed work, pending work, constraints and references. Current instructions and later results take precedence over checkpoint facts."] : []),
     "Carry forward the unfinished objective and latest user corrections. Distinguish verified completion, pending work, and uncertain outcomes; observe existing work before deciding whether another action is needed.",
     "Use focused repository reads or on-demand evidence to fill specific gaps. If an earlier detail is absent from the available history and records, retrieve it or state the gap instead of guessing.",
-    "Keep working state concise as the task progresses. Codex coordinates durable compaction; do not replace its history, reset the task, or emit a separate checkpoint unless requested by its compaction control.",
+    "ChatGPT manages the active conversation context. Keep completed and pending work clear; do not reset the task or initiate a separate Codex checkpoint. Follow an explicit checkpoint request when one is supplied.",
     "</codex_conversation>",
   ];
 }

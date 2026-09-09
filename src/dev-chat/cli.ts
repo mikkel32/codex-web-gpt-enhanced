@@ -102,7 +102,9 @@ function modelFromCli(value: string | undefined): DevChatModel | undefined {
 }
 
 function statusLine(status: DevContextStatus): string {
-  const main = `${status.inputTokens.toLocaleString("en-US")} / ${status.autoCompactTokenLimit.toLocaleString("en-US")} tokens (${status.percent}%)`;
+  const main = status.autoCompactTokenLimit === null
+    ? `${status.inputTokens.toLocaleString("en-US")} estimated tokens · context managed by ChatGPT`
+    : `${status.inputTokens.toLocaleString("en-US")} / ${status.autoCompactTokenLimit.toLocaleString("en-US")} tokens (${status.percent}%)`;
   const transport = status.browserInputTokenLimit
     ? ` · Luna browser request budget ${status.browserInputTokenLimit.toLocaleString("en-US")}`
     : "";

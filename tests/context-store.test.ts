@@ -48,7 +48,24 @@ test("optional evidence is searchable without becoming a mandatory full-history 
   const page = store.read(evidence.name, found.matches[0]!.offset);
   expect(page.text).toContain("rare-target-value");
   expect(store.read(evidence.name, page.offset)).toEqual(page);
-  expect(store.search("rare-target").remaining_retrieval_tokens).toBeLessThan(found.remaining_retrieval_tokens);
+  expect(store.search("rare-target").remaining_retrieval_tokens!).toBeLessThan(found.remaining_retrieval_tokens!);
+});
+
+test("ChatGPT-managed retrieval reads beyond the old token allowance while retaining receipt gates", () => {
+  const evidence: NativeContextFile = { name: "codex-evidence-0123456789abcdef.txt",
+    text: "alpha beta gamma delta\n".repeat(40_000), required: false, kind: "evidence" };
+  const store = new NativeContextStore([...core, evidence], { requireReceipts: true, optionalTokenBudget: null });
+  expect(() => store.search("delta")).toThrow("required context");
+  core.forEach(file => acknowledge(store, file));
+  let offset = 0, restored = "";
+  for (;;) {
+    const page = store.read(evidence.name, offset);
+    restored += page.text;
+    if (page.next_offset === null) break;
+    offset = page.next_offset;
+  }
+  expect(restored).toBe(evidence.text);
+  expect(store.search("delta").remaining_retrieval_tokens).toBeNull();
 });
 
 test("optional retrieval respects a finite budget while identical retries are free", () => {

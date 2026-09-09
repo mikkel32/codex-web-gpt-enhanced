@@ -21,7 +21,7 @@ import { AsyncEventQueue } from "./event-queue";
 import { readJsonRequestBody } from "./http-body";
 import { httpStatusFromTerminalError } from "./lib/errors";
 import { createHash } from "node:crypto";
-import { augmentNativeModelCatalog } from "./model-catalog";
+import { applyNativeContextOverrides, augmentNativeModelCatalog } from "./model-catalog";
 import { assertWebRequestCompatibility } from "./web-request-compatibility";
 import {
   readCodexModelContextOverride,
@@ -413,7 +413,7 @@ export async function modelsRequest(
   let catalog = nativeCatalog as Record<string, unknown>;
   let catalogStatus = "augmented";
   try {
-    if (nativeOnly) catalogStatus = "native-only";
+    if (nativeOnly) { catalogStatus = "native-only"; catalog = applyNativeContextOverrides(nativeCatalog, contextOverride?.()); }
     else catalog = augmentNativeModelCatalog(nativeCatalog, config, contextOverride?.());
   } catch (error) {
     // A Web capability/template mismatch must never hide the account's official models.

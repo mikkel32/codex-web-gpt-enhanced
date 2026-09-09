@@ -40,7 +40,7 @@ test("fresh, proven continuation and checkpoint resync prompts preserve the curr
       const delivered = multipart ? nativeContextPrompt(compiled) : compiled;
       expect(delivered.text).toContain(`<codex_conversation state="${state}">`);
       expect(delivered.text).toContain("turn_token turn_current_handle");
-      expect(delivered.text).toContain("Codex coordinates durable compaction");
+      expect(delivered.text).toContain("ChatGPT manages the active conversation context");
       const records = multipart ? compiled.multipart!.parts.join("") : compiled.text;
       expect(records).toContain("preserve-system");
       expect(records).toContain("preserve-developer");

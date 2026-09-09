@@ -4,7 +4,6 @@ import type { CompiledChatGptWebPrompt } from "./prompt";
 import type { ChatGptTurnEnvironment } from "./environment";
 import { chatGptImageFilePayloads } from "./browser-worker";
 import { extractInputDocument } from "./input-files";
-import { OPTIONAL_CONTEXT_TOKENS } from "./context-store";
 import type { NativeContextFile, NativeContextOptions } from "./native-context";
 import { AttachmentCache } from "./attachment-cache";
 
@@ -93,10 +92,10 @@ export async function buildContextPlan(compiled: CompiledChatGptWebPrompt, envir
   const parts = [JSON.stringify({ version: 2, records: core }), JSON.stringify(index)] as const;
   const coreFiles: NativeContextFile[] = parts.map((text, index) => ({ name: `codex-context-${index + 1}-of-2.json`, text, kind: "context", required: true }));
   const result: CompiledChatGptWebPrompt = { ...compiled, nativeImages: true,
-    multipart: { parts, commit: compiled.multipart.commit }, contextReserveTokens: optional.some(file => file.required === false) ? OPTIONAL_CONTEXT_TOKENS : 0,
+    multipart: { parts, commit: compiled.multipart.commit }, contextReserveTokens: 0,
     contextRequiredTokens: optional.filter(file => file.required !== false).reduce((n, file) => n + estimateTokens(file.text, "gpt-5.6-sol"), 0) };
   return { compiled: result, files: [...coreFiles, ...optional, ...images], release: cache.dispose,
-    options: { requireReceipts: true, optionalTokenBudget: result.contextReserveTokens },
+    options: { requireReceipts: true, optionalTokenBudget: null },
     stats: { originalCharacters: compiled.multipart.parts.reduce((n, part) => n + part.length, 0),
       requiredCharacters: parts[0].length + parts[1].length, archivedCharacters: optional.reduce((n, file) => n + file.text.length, 0),
       archivedResults, attachments: attachments.length, images: images.length } };

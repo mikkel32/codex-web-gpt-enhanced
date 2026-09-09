@@ -6,16 +6,9 @@ import {
 } from "./prompt";
 
 // ChatGPT's product system prompt and the fixed Codex Native MCP schemas are not present in the
-// visible composer text. Reserve them explicitly; over-counting fails safe by compacting earlier.
+// visible composer text. Include estimates for diagnostics; these do not impose a window.
 const CHATGPT_IMAGE_RESERVE_TOKENS = 4_096;
 const CHATGPT_ORIGINAL_IMAGE_RESERVE_TOKENS = 8_192;
-
-/**
- * The Free/Luna product accepted measured browser inputs at 25,400 and 28,547 estimated tokens,
- * but rejected the same shape at 32,283 before producing a response. This is a ChatGPT browser
- * transport boundary, not Luna's model context window, and applies to normal and checkpoint turns.
- */
-export const CHATGPT_LUNA_BROWSER_INPUT_TOKEN_BUDGET = 28_000;
 
 export function compiledChatGptWebMessages(compiled: CompiledChatGptWebPrompt): string[] {
   if (!compiled.multipart || compiled.nativeContext) return [compiled.text];

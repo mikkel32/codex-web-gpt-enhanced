@@ -454,6 +454,7 @@ class RuntimeHost {
       path.join(coreHome, "codex", "integration-journal.recovery.json"),
       path.join(coreHome, "runtime", "tunnel-authorization-pause.json"),
       path.join(this.codexHome, "config.toml"),
+      path.join(this.codexHome, "maria-native-context-preferences.json"),
       path.join(this.codexHome, "models_cache.json"),
       path.join(coreHome, "secrets", "tunnel-runtime.key"),
       path.join(coreHome, "secrets", "tunnel-runtime-automatic.key"),

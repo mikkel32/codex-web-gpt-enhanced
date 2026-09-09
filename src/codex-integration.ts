@@ -3,9 +3,11 @@ import { dirname } from "node:path";
 import type { AppConfig } from "./config";
 import { atomicWriteFile, getConfigPath, loadConfig, saveConfig } from "./config";
 import { installCodexInterruptHook, installCodexInterruptHookCommand } from "./codex-interrupt-hook";
+import { planNativeContextPolicy, readNativeContextPolicy } from "./codex-context-policy";
 import {
   CODEX_REALTIME_WEBRTC_CALL_BASE_URL,
   getCodexConfigPath,
+  getCodexContextPolicyPath,
   getCodexJournalPath,
   getCodexJournalRecoveryPath,
   getCodexModelsCachePath,
@@ -144,6 +146,7 @@ export function setCodexSubagentProtocol(
     getCodexModelsCachePath(),
     getCodexJournalPath(),
     getCodexJournalRecoveryPath(),
+    getCodexContextPolicyPath(),
   ].map(snapshotFile);
   try {
     const journal = installCodexIntegration(nextConfig);
@@ -383,6 +386,12 @@ export function activateCodexIntegration(): SetCodexIntegrationActiveResult {
   const current = readFileSync(existing.configPath, "utf8");
   if (existing.version === 10 && existing.active) {
     verifyInstalledRoute(current, existing);
+    const context = planNativeContextPolicy(current, existing.configPath,
+      readNativeContextPolicy(getCodexContextPolicyPath(), existing.configPath), true);
+    if (context.text !== current) {
+      writeIntegrationState(existing, { path: existing.configPath, data: current }, [getCodexModelsCachePath()]);
+      return { changed: true, active: true };
+    }
     return { changed: false, active: true };
   }
   let baseline: string;
@@ -462,15 +471,19 @@ export function uninstallCodexIntegration(): UninstallCodexIntegrationResult {
   const modelsCacheSnapshot = snapshotFile(getCodexModelsCachePath());
   const journalSnapshot = snapshotFile(getCodexJournalPath());
   const recoverySnapshot = snapshotFile(getCodexJournalRecoveryPath());
+  const contextSnapshot = snapshotFile(getCodexContextPolicyPath());
+  const context = planNativeContextPolicy(restored, journal.configPath,
+    readNativeContextPolicy(getCodexContextPolicyPath(), journal.configPath), false);
   try {
-    atomicWriteFile(journal.configPath, restored);
+    atomicWriteFile(journal.configPath, context.text);
     if (catalogSnapshot?.exists) rmSync(catalogSnapshot.path);
     rmSync(modelsCacheSnapshot.path, { force: true });
     rmSync(getCodexJournalPath(), { force: true });
     rmSync(getCodexJournalRecoveryPath(), { force: true });
+    rmSync(getCodexContextPolicyPath(), { force: true });
   } catch (error) {
     const rollbackFailures: string[] = [];
-    for (const snapshot of [recoverySnapshot, journalSnapshot, modelsCacheSnapshot, catalogSnapshot, configSnapshot]) {
+    for (const snapshot of [contextSnapshot, recoverySnapshot, journalSnapshot, modelsCacheSnapshot, catalogSnapshot, configSnapshot]) {
       if (!snapshot) continue;
       try {
         restoreFileSnapshot(snapshot);

@@ -6,7 +6,6 @@ import { createChatGptWebAdapter } from "../adapters/chatgpt-web";
 import { estimateChatGptWebInputTokens } from "../adapters/chatgpt-web/usage";
 import { RemoteTurnBroker, type TurnBrokerOwner } from "../adapters/chatgpt-web/turn-broker";
 import {
-  CHATGPT_LUNA_BROWSER_INPUT_TOKEN_BUDGET,
 } from "../adapters/chatgpt-web/input-tokens";
 import {
   CHATGPT_WEB_LUNA_BACKEND_MODEL,
@@ -40,10 +39,10 @@ export type DevChatEvent =
 export interface DevContextStatus {
   model: DevChatModel;
   inputTokens: number;
-  autoCompactTokenLimit: number;
-  contextWindow: number;
+  autoCompactTokenLimit: number | null;
+  contextWindow: number | null;
   browserInputTokenLimit?: number;
-  percent: number;
+  percent: number | null;
   inputItems: number;
 }
 
@@ -502,7 +501,7 @@ export class DevChatDriver {
     if (this.shouldAutoCompact(state, context)) {
       throw new Error(
         `DEV turn still requires ${context.inputTokens.toLocaleString("en-US")} tokens after compaction; `
-        + `the selected mode compacts at ${context.autoCompactTokenLimit.toLocaleString("en-US")}`,
+        + `the selected mode compacts at ${context.autoCompactTokenLimit?.toLocaleString("en-US")}`,
       );
     }
 
@@ -571,7 +570,7 @@ export class DevChatDriver {
   }
 
   private shouldAutoCompact(state: DevChatState, context: DevContextStatus): boolean {
-    return !isLunaDevChatModel(state.model) && context.inputTokens >= context.autoCompactTokenLimit;
+    return context.autoCompactTokenLimit !== null && !isLunaDevChatModel(state.model) && context.inputTokens >= context.autoCompactTokenLimit;
   }
 
   private assertBiggerContextModel(model: DevChatModel): void {
@@ -605,10 +604,7 @@ export class DevChatDriver {
       inputTokens,
       autoCompactTokenLimit,
       contextWindow,
-      ...(route.backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL
-        ? { browserInputTokenLimit: CHATGPT_LUNA_BROWSER_INPUT_TOKEN_BUDGET }
-        : {}),
-      percent: Math.round((inputTokens / autoCompactTokenLimit) * 1_000) / 10,
+      percent: autoCompactTokenLimit === null ? null : Math.round((inputTokens / autoCompactTokenLimit) * 1_000) / 10,
       inputItems: input.length,
     };
   }

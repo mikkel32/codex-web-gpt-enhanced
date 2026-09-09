@@ -4,7 +4,7 @@ export const CHATGPT_WEB_ASTRA_BACKEND_MODEL = "gpt-6-astra";
 export const CHATGPT_WEB_LUNA_BACKEND_MODEL = "gpt-5.6-luna";
 /** Internal adapter identity for a turn whose ChatGPT model is selected by the user in the launcher. */
 export const CHATGPT_WEB_ZERO_RISK_BACKEND_MODEL = "chatgpt-web-zero-risk";
-/** Internal adapter identity for the explicitly enabled, Pro-sized Zero Risk context profile. */
+/** Internal adapter identity for the explicitly enabled manual Pro profile. */
 export const CHATGPT_WEB_ZERO_RISK_PRO_BACKEND_MODEL = "chatgpt-web-zero-risk-pro";
 
 export type ChatGptWebAutomaticBackendModel =
@@ -21,63 +21,20 @@ export type ChatGptWebZeroRiskBackendModel =
 export type ChatGptWebCodexEffort = "low" | "medium" | "high" | "xhigh" | "ultra";
 export type ChatGptWebAdapterEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
-/**
- * Measured Plus browser transport windows, including the fixed hidden ChatGPT platform reserve.
- * Codex compacts the visible task at the lower explicit threshold before the next browser turn is
- * compiled. The remaining headroom is owned by ChatGPT's product prompt and Codex Native schemas.
- */
-export const CHATGPT_WEB_INSTANT_CONTEXT_WINDOW = 41_000;
-export const CHATGPT_WEB_INSTANT_AUTO_COMPACT_TOKEN_LIMIT = 32_000;
-/**
- * Zero Risk keeps one visible ChatGPT conversation across sequential Codex turns. Its fixed route
- * therefore uses the requested three-turn compaction interval without enabling Bigger Context's
- * automatic multipart transport; the user still pastes exactly one incremental prompt per turn.
- */
-export const CHATGPT_WEB_ZERO_RISK_CONTEXT_WINDOW = CHATGPT_WEB_INSTANT_CONTEXT_WINDOW * 3;
-export const CHATGPT_WEB_ZERO_RISK_AUTO_COMPACT_TOKEN_LIMIT = CHATGPT_WEB_INSTANT_AUTO_COMPACT_TOKEN_LIMIT * 3;
-export const CHATGPT_WEB_MEDIUM_HIGH_CONTEXT_WINDOW = 90_000;
-export const CHATGPT_WEB_MEDIUM_HIGH_AUTO_COMPACT_TOKEN_LIMIT = 80_000;
 export const CHATGPT_WEB_INSTANT_COMPOSER_CHAR_LIMIT = 211_256;
 export const CHATGPT_WEB_MEDIUM_HIGH_COMPOSER_CHAR_LIMIT = 1_048_572;
 /** Hidden ChatGPT product prompt and Codex Native schema reserve included in usage estimates. */
 export const CHATGPT_WEB_PLATFORM_RESERVE_TOKENS = 8_192;
-/** Pro-account usable browser windows and separately measured one-message boundaries. */
-export const CHATGPT_WEB_PRO_AUTO_COMPACT_TOKEN_LIMIT = 95_000;
-export const CHATGPT_WEB_PRO_STANDARD_MESSAGE_TOKEN_LIMIT = 103_000;
-export const CHATGPT_WEB_PRO_MODEL_MESSAGE_TOKEN_LIMIT = 104_000;
-// Browser message maxima are inclusive, while the context preflight treats its ceiling as an
-// exclusive upper bound. The extra token preserves the last accepted payload exactly.
-export const CHATGPT_WEB_PRO_STANDARD_CONTEXT_WINDOW =
-  CHATGPT_WEB_PRO_STANDARD_MESSAGE_TOKEN_LIMIT + CHATGPT_WEB_PLATFORM_RESERVE_TOKENS + 1;
-export const CHATGPT_WEB_PRO_MODEL_CONTEXT_WINDOW =
-  CHATGPT_WEB_PRO_MODEL_MESSAGE_TOKEN_LIMIT + CHATGPT_WEB_PLATFORM_RESERVE_TOKENS + 1;
-/**
- * Zero Risk Pro keeps the same three-turn manual conversation budget as the default profile, but
- * sizes each turn from the measured ChatGPT Pro boundary. The launcher cannot verify that the user
- * actually selected Pro, so this profile is exposed only through an explicit user setting.
- */
-export const CHATGPT_WEB_ZERO_RISK_PRO_CONTEXT_WINDOW =
-  CHATGPT_WEB_PRO_MODEL_CONTEXT_WINDOW * 3;
-export const CHATGPT_WEB_ZERO_RISK_PRO_AUTO_COMPACT_TOKEN_LIMIT =
-  CHATGPT_WEB_PRO_AUTO_COMPACT_TOKEN_LIMIT * 3;
 export const CHATGPT_WEB_PRO_INSTANT_COMPOSER_CHAR_LIMIT = 545_000;
 export const CHATGPT_WEB_PRO_REASONING_COMPOSER_CHAR_LIMIT = 1_045_000;
 export const CHATGPT_WEB_PRO_MODEL_COMPOSER_CHAR_LIMIT = 1_635_000;
-/**
- * The underlying Luna model owns this context window. ChatGPT Free's much smaller browser request
- * envelope is enforced separately at the browser boundary; rolling checkpoints keep completed
- * history out of later browser requests without asking Codex to compact its canonical history.
- */
-export const CHATGPT_WEB_LUNA_CONTEXT_WINDOW = 1_050_000;
-
 export interface ChatGptWebContextLimits {
-  contextWindow: number;
+  contextWindow: number | null;
   effectiveContextWindowPercent: number;
-  autoCompactTokenLimit: number;
+  autoCompactTokenLimit: number | null;
 }
 
 export interface ChatGptWebTransportLimits {
-  browserMessageTokenLimit?: number;
   browserComposerCharLimit?: number;
 }
 
@@ -88,72 +45,18 @@ export function isChatGptWebZeroRiskBackendModel(
     || model === CHATGPT_WEB_ZERO_RISK_PRO_BACKEND_MODEL;
 }
 
-function contextLimits(
-  contextWindow: number,
-  autoCompactTokenLimit: number,
-): ChatGptWebContextLimits {
-  return {
-    contextWindow,
-    // Codex reports this effective window in its context indicator. Align it with the practical
-    // pre-compaction budget instead of exposing an unreachable underlying model window.
-    // A global Codex auto-compaction override is clamped to this effective window.
-    // Rounding up lets that override exceed the Web budget even with a capped maximum.
-    effectiveContextWindowPercent: Math.floor((autoCompactTokenLimit / contextWindow) * 100),
-    autoCompactTokenLimit,
-  };
-}
-
-/** Resolve the product limit for the selected visible ChatGPT mode. */
+/** ChatGPT owns the active context for every Web route, including manual submission. */
 export function resolveChatGptWebContextLimits(
   backendModel: ChatGptWebBackendModel,
   effort: ChatGptWebAdapterEffort,
   capabilities: ChatGptWebAccountCapabilities,
 ): ChatGptWebContextLimits {
-  if (isChatGptWebZeroRiskBackendModel(backendModel)) {
-    if (capabilities.experimentalBiggerContext) {
-      throw new Error("Zero Risk does not support Bigger Context");
-    }
-    if (backendModel === CHATGPT_WEB_ZERO_RISK_PRO_BACKEND_MODEL) {
-      return contextLimits(
-        CHATGPT_WEB_ZERO_RISK_PRO_CONTEXT_WINDOW,
-        CHATGPT_WEB_ZERO_RISK_PRO_AUTO_COMPACT_TOKEN_LIMIT,
-      );
-    }
-    return contextLimits(
-      CHATGPT_WEB_ZERO_RISK_CONTEXT_WINDOW,
-      CHATGPT_WEB_ZERO_RISK_AUTO_COMPACT_TOKEN_LIMIT,
-    );
+  if (isChatGptWebZeroRiskBackendModel(backendModel) && capabilities.experimentalBiggerContext) {
+    throw new Error("Zero Risk does not support Bigger Context");
   }
-  if (backendModel === CHATGPT_WEB_LUNA_BACKEND_MODEL) {
-    // Luna carries continuity through a private checkpoint on every completed browser turn. Codex
-    // internally clamps this field to 90% of the model window, but the reported active usage is the
-    // bounded payload actually sent to ChatGPT and therefore stays far below that threshold.
-    return contextLimits(CHATGPT_WEB_LUNA_CONTEXT_WINDOW, CHATGPT_WEB_LUNA_CONTEXT_WINDOW);
-  }
-
-  let limits: ChatGptWebContextLimits;
-  if (capabilities.proAvailable) {
-    const contextWindow = effort === "low"
-      ? CHATGPT_WEB_PRO_STANDARD_CONTEXT_WINDOW
-      : effort === "max"
-        ? CHATGPT_WEB_PRO_MODEL_CONTEXT_WINDOW
-        : CHATGPT_WEB_PRO_STANDARD_CONTEXT_WINDOW;
-    limits = contextLimits(contextWindow, CHATGPT_WEB_PRO_AUTO_COMPACT_TOKEN_LIMIT);
-  } else if (effort === "low") {
-    limits = contextLimits(
-      CHATGPT_WEB_INSTANT_CONTEXT_WINDOW,
-      CHATGPT_WEB_INSTANT_AUTO_COMPACT_TOKEN_LIMIT,
-    );
-  } else if (effort === "medium" || effort === "high") {
-    limits = contextLimits(
-      CHATGPT_WEB_MEDIUM_HIGH_CONTEXT_WINDOW,
-      CHATGPT_WEB_MEDIUM_HIGH_AUTO_COMPACT_TOKEN_LIMIT,
-    );
-  } else {
-    throw new Error(`ChatGPT Plus context limit is not defined for unavailable effort: ${effort}`);
-  }
-  // Partitioning or external evidence storage does not enlarge the model's active window.
-  return limits;
+  // No synthetic active-window or automatic-compaction budget. ChatGPT owns its
+  // conversation context; Codex can represent both limits as absent.
+  return { contextWindow: null, effectiveContextWindowPercent: 100, autoCompactTokenLimit: null };
 }
 
 /** Resolve limits of one visible ChatGPT composer message, independently of model context. */
@@ -175,18 +78,15 @@ export function resolveChatGptWebTransportLimits(
   }
   if (effort === "low") {
     return {
-      browserMessageTokenLimit: CHATGPT_WEB_PRO_STANDARD_MESSAGE_TOKEN_LIMIT,
       browserComposerCharLimit: CHATGPT_WEB_PRO_INSTANT_COMPOSER_CHAR_LIMIT,
     };
   }
   if (effort === "max") {
     return {
-      browserMessageTokenLimit: CHATGPT_WEB_PRO_MODEL_MESSAGE_TOKEN_LIMIT,
       browserComposerCharLimit: CHATGPT_WEB_PRO_MODEL_COMPOSER_CHAR_LIMIT,
     };
   }
   return {
-    browserMessageTokenLimit: CHATGPT_WEB_PRO_STANDARD_MESSAGE_TOKEN_LIMIT,
     browserComposerCharLimit: CHATGPT_WEB_PRO_REASONING_COMPOSER_CHAR_LIMIT,
   };
 }
@@ -236,7 +136,7 @@ export const CHATGPT_WEB_ZERO_RISK_MODEL_ROUTE: ChatGptWebZeroRiskModelRoute = {
 export const CHATGPT_WEB_ZERO_RISK_PRO_MODEL_ROUTE: ChatGptWebZeroRiskModelRoute = {
   slug: "chatgpt-web/zero-risk-pro",
   displayName: "Maria Web — Manual Pro",
-  description: "Manual submission with a larger context budget. Requires selecting ChatGPT Pro in the launcher for each turn.",
+  description: "Manual submission for ChatGPT Pro. Select ChatGPT Pro yourself in the launcher for each turn.",
   interactionMode: "manual",
   backendModel: CHATGPT_WEB_ZERO_RISK_PRO_BACKEND_MODEL,
   codexEffort: "low",

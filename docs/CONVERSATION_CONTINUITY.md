@@ -36,11 +36,11 @@ even for incremental turns. Native routes continue to receive Codex's own histor
 
 ## Saved chat lifecycle
 
-Large-context transport uses two or three JSON attachments uploaded together, plus
-one short execution prompt. The browser sends once. The complete file contents
-count toward input usage, while only the short prompt counts toward the inline
-composer limit. Attachment count and byte budgets are checked before UI mutation.
-There is no model acknowledgement loop or temporary staging-model switch.
+Automatic Full context uses one browser prompt and acknowledged native reads for required
+records. Historical evidence and supplied documents are available on demand. Web
+models declare no numeric Codex context window or auto-compaction threshold; ChatGPT owns
+its active context. File/page byte bounds and task permissions remain enforced. See
+[Context delivery](context-delivery.md) for native preference migration and recovery.
 
 Automatic Full harness turns use normal saved ChatGPT documents. Completed chats
 are indexed under `runtime/saved-conversations.json`; local cursor files live

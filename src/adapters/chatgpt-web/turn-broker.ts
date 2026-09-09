@@ -940,7 +940,7 @@ export class TurnBroker implements TurnBrokerOwner {
       return { submitted: true };
     }
     if (request.method === "owner_status") {
-      return { protocolVersion: 5, contextProtocolVersion: 2, acceptingExternalOwners: this.acceptingExternalOwners };
+      return { protocolVersion: 5, contextProtocolVersion: 2, unboundedContextRetrieval: true, acceptingExternalOwners: this.acceptingExternalOwners };
     }
     if (request.method === "owner_register") {
       const environment = ownerEnvironment(request.environment);
@@ -1346,6 +1346,7 @@ export async function callTurnBroker<T>(
  */
 export class RemoteTurnBroker implements TurnBrokerOwner {
   private contextProtocolVerified = false;
+  private unboundedContextVerified = false;
   constructor(readonly socketPath: string) {}
 
   async assertCompatible(): Promise<void> {
@@ -1404,10 +1405,13 @@ export class RemoteTurnBroker implements TurnBrokerOwner {
   }
 
   async setContextFiles(token: string, contextFiles: NativeContextFile[], contextOptions: NativeContextOptions = {}): Promise<void> {
-    if (contextOptions.requireReceipts && !this.contextProtocolVerified) {
-      const status = await callTurnBroker<{ contextProtocolVersion?: number }>(this.socketPath, { method: "owner_status" });
-      if (status.contextProtocolVersion !== 2) throw new Error("The connected runtime must be updated before it can serve acknowledged context");
-      this.contextProtocolVerified = true;
+    if ((contextOptions.requireReceipts && !this.contextProtocolVerified)
+      || (contextOptions.optionalTokenBudget === null && !this.unboundedContextVerified)) {
+      const status = await callTurnBroker<{ contextProtocolVersion?: number; unboundedContextRetrieval?: boolean }>(this.socketPath, { method: "owner_status" });
+      if (contextOptions.requireReceipts && status.contextProtocolVersion !== 2) throw new Error("The connected runtime must be updated before it can serve acknowledged context");
+      if (contextOptions.optionalTokenBudget === null && status.unboundedContextRetrieval !== true) throw new Error("Update the connected runtime to let ChatGPT manage context retrieval without a local token ceiling");
+      this.contextProtocolVerified = status.contextProtocolVersion === 2;
+      this.unboundedContextVerified = status.unboundedContextRetrieval === true;
     }
     await callTurnBroker(this.socketPath, { method: "owner_context", token, contextFiles, contextOptions });
   }

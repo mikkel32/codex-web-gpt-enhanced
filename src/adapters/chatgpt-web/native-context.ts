@@ -14,7 +14,7 @@ export interface NativeContextFile {
   imageDetail?: string;
   source?: string;
 }
-export interface NativeContextOptions { requireReceipts?: boolean; optionalTokenBudget?: number }
+export interface NativeContextOptions { requireReceipts?: boolean; optionalTokenBudget?: number | null }
 
 export interface NativeContextPage {
   name: string;

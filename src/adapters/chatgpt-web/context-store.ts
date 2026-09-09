@@ -19,7 +19,7 @@ export class NativeContextStore {
   constructor(files: NativeContextFile[], readonly options: NativeContextOptions = {}) {
     if (!Array.isArray(files) || files.length < 1 || files.length > 512) throw new Error("Invalid context file count");
     if (options.requireReceipts !== undefined && typeof options.requireReceipts !== "boolean") throw new Error("Invalid context receipt policy");
-    if (options.optionalTokenBudget !== undefined && (!Number.isSafeInteger(options.optionalTokenBudget)
+    if (options.optionalTokenBudget !== undefined && options.optionalTokenBudget !== null && (!Number.isSafeInteger(options.optionalTokenBudget)
       || options.optionalTokenBudget < 0 || options.optionalTokenBudget > OPTIONAL_CONTEXT_TOKENS)) throw new Error("Invalid evidence retrieval budget");
     let bytes = 0;
     for (const file of files) {
@@ -75,7 +75,7 @@ export class NativeContextStore {
       : nativeContextPage(file, offset, this.options.requireReceipts ? end => this.issue(name, offset, end) : undefined);
     const end = file.kind === "image" ? 1 : offset + page.text.length;
     const chargeKey = JSON.stringify([name, offset, end]);
-    if (file.required === false && !this.charged.has(chargeKey)) {
+    if (file.required === false && this.options.optionalTokenBudget !== null && !this.charged.has(chargeKey)) {
       // All available images already have a vision reserve in the compiled input budget.
       const tokens = file.kind === "image" ? 0 : estimateTokens(page.text, "gpt-5.6-sol");
       if (this.optionalTokens + tokens > (this.options.optionalTokenBudget ?? OPTIONAL_CONTEXT_TOKENS)) {
@@ -116,7 +116,8 @@ export class NativeContextStore {
     const page: typeof matches = [];
     const response = () => ({ matches: page, total: matches.length,
       next_offset: offset + page.length < matches.length ? offset + page.length : null,
-      remaining_retrieval_tokens: (this.options.optionalTokenBudget ?? OPTIONAL_CONTEXT_TOKENS) - this.optionalTokens });
+      remaining_retrieval_tokens: this.options.optionalTokenBudget === null ? null
+        : (this.options.optionalTokenBudget ?? OPTIONAL_CONTEXT_TOKENS) - this.optionalTokens });
     for (const match of matches.slice(offset, offset + limit)) {
       page.push(match);
       if (Buffer.byteLength(JSON.stringify(nativeContextTextResult(response())), "utf8") > NATIVE_CONTEXT_RESULT_BYTE_LIMIT) { page.pop(); break; }

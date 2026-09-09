@@ -29,8 +29,8 @@ they do not establish ChatGPT Web's private protocol or service guarantees.
    IDs and malformed payloads with a precise reason. Preserve originals of unextracted formats for native tools.
 6. Serve Full-mode images through the bound native connection when supported; do not
    duplicate them as base64 text or rely on a successful-looking upload card.
-7. Bound page bytes, optional retrieval, deadlines and retries. Retire state and receipts
-   with the task. Keep images, role provenance, model budgets and same-chat identity.
+7. Bound page bytes, file sizes, deadlines and retries. Retire state and receipts
+   with the task. Keep images, role provenance and same-chat identity; ChatGPT owns context capacity.
 8. Keep manual mode and compaction contracts explicit. Do not advertise an untested
    fallback as supported, and do not infer that a green local health check proves delivery.
 
@@ -48,8 +48,8 @@ that every future network, model, file-format or account condition will succeed.
 
 - Required core records and higher-priority text attachments use receipt acknowledgements.
 - Historical successful tool bodies over 16,384 characters may be deferred only before the latest user request and outside the most recent eight messages. Instruction-file reads and errors stay required.
-- Evidence and supported attachment text are searchable, with a 32,000-token optional retrieval reserve. Actual model limits still apply.
-- Text pages contain at most 12,000 UTF-16 code units and 24 KiB serialized; image data stays multimodal. Original supplied attachments are bounded to 20 MB each / 50 MB total, and native image sets to 32 distinct images subject to model budget.
+- Evidence and supported attachment text are searchable, without a local token allowance. ChatGPT owns its active context.
+- Text pages contain at most 12,000 UTF-16 code units and 24 KiB serialized; image data stays multimodal. Original supplied attachments are bounded to 20 MB each / 50 MB total, and native image sets to 32 distinct images per supplied snapshot.
 - PDF extraction runs in a separate process with a 30-second deadline, 200-page and 4-million-character limits, and no network fetches. Text-only extraction does not establish visual understanding.
 - Private per-turn copies let native tools compute on a large original file without transferring all its contents to the model. Stable content references rehydrate files on delta turns. Normal retirement removes copies; orphan cleanup only targets marked cache directories whose owner process is gone.
 - Bridge-owned `ocx2:` checkpoints compress and preserve original document/image blocks and their roles. They are transparent bridge data, not OpenAI encryption. Native passthrough expands them into ordinary messages/attachments. Plain native compaction retains the native client's history policy.
@@ -78,7 +78,7 @@ with completed work, pending work, constraints and references. A missing retaine
 still fails explicitly rather than silently moving the task elsewhere. Attachments are
 rehydrated from canonical input with current paths and fresh receipts on every relevant turn.
 
-During Codex compaction, outstanding accepted tool results remain canonical. A newly
+During an explicit Codex checkpoint, outstanding accepted tool results remain canonical. A newly
 requested tool intercepted at the compaction boundary is explicitly marked unexecuted.
 The Web response settles, then the same retained conversation receives one structured
 handoff request. The bridge accepts only the matching checkpoint after physical settlement.
@@ -136,3 +136,32 @@ its own tool inventory, sandbox and approvals. Initial account sign-in, tunnel c
 and ChatGPT consent must be available; setup does not invent authorization or disable
 approval enforcement. Manual Zero Risk verification remains a local health check with
 manual connector selection and Send.
+
+## ChatGPT-managed active context
+
+All Web catalog rows set `context_window`, `max_context_window` and
+`auto_compact_token_limit` to null. There is no large-number substitute and no token-based
+preflight rejecting a task before ChatGPT receives it. Manual profiles retain manual selection and Send controls, also without a numeric window. Composer character capacity and per-file/page byte bounds are transport
+constraints, and composer errors use a distinct code rather than triggering Codex's
+context-length recovery.
+
+Codex 0.154.0-alpha.1 treats absent model limits as no token-triggered compaction, but a
+global config override would reapply a window. Setup therefore moves existing top-level
+`model_context_window` and `model_auto_compact_token_limit` preferences into native-only
+catalog metadata. Their exact original lines are retained privately in
+`maria-native-context-preferences.json` under the Codex home, with markers in config.toml.
+Writes participate in setup compensation. Disconnect and uninstall restore the original
+assignments; later explicit user edits take precedence. Native-only recovery mode also
+receives the preserved native values. Explicit per-profile or per-invocation overrides
+remain user-controlled and should not be used to impose a window on a Web task.
+
+Normal Full context plans send `optionalTokenBudget: null`; the broker must advertise
+`unboundedContextRetrieval` before a remote owner uses that mode. Required receipts, task
+isolation and transfer bounds remain enforced. Token estimates remain labelled estimates
+and are not falsified to hide context usage. Explicit checkpoint support remains available.
+
+Primary source verification:
+- https://raw.githubusercontent.com/openai/codex/rust-v0.154.0-alpha.1/codex-rs/protocol/src/openai_models.rs
+- https://raw.githubusercontent.com/openai/codex/rust-v0.154.0-alpha.1/codex-rs/core/src/session/context_window.rs
+- https://raw.githubusercontent.com/openai/codex/rust-v0.154.0-alpha.1/codex-rs/models-manager/src/model_info.rs
+- https://learn.chatgpt.com/docs/config-file/config-reference

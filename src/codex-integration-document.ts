@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { stripUtf8Bom } from "./config";
+import { nativeContextPreferences, readNativeContextPolicy } from "./codex-context-policy";
 import {
   MANAGED_COMMENT,
   MANAGED_ROUTE_COMMENT,
@@ -9,6 +10,7 @@ import {
   MANAGED_REMOTE_COMPACTION_LINE,
   MIN_COMPATIBILITY_V1_AGENT_DEPTH,
   getCodexConfigPath,
+  getCodexContextPolicyPath,
   managedAgentMaxDepthLine,
 } from "./codex-integration-shared";
 import type {
@@ -246,7 +248,15 @@ export function readCodexModelContextOverride(): CodexModelContextOverride | und
   const text = readFileSync(path, "utf8");
   const lines = splitLines(text);
   const contextWindow = findTopLevelPositiveInteger(lines, "model_context_window");
-  return contextWindow === undefined ? undefined : { contextWindow };
+  const autoCompactTokenLimit = findTopLevelPositiveInteger(lines, "model_auto_compact_token_limit");
+  const saved = nativeContextPreferences(text, readNativeContextPolicy(getCodexContextPolicyPath(), path));
+  const scopedToNative = saved.contextWindow !== undefined || saved.autoCompactTokenLimit !== undefined;
+  const combined = { contextWindow: contextWindow ?? saved.contextWindow,
+    autoCompactTokenLimit: autoCompactTokenLimit ?? saved.autoCompactTokenLimit };
+  return combined.contextWindow === undefined && combined.autoCompactTokenLimit === undefined ? undefined
+    : { ...(combined.contextWindow !== undefined ? { contextWindow: combined.contextWindow } : {}),
+      ...(combined.autoCompactTokenLimit !== undefined ? { autoCompactTokenLimit: combined.autoCompactTokenLimit } : {}),
+      ...(scopedToNative ? { scopedToNative: true as const } : {}) };
 }
 
 export function assignments(lines: string[]): Record<ManagedAssignmentKey, PreviousAssignment> {

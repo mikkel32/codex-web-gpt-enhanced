@@ -102,7 +102,9 @@ Codex remains the source of truth for your task history, instructions, tool resu
 and compaction checkpoints. In Automatic Full harness mode, Maria keeps a saved
 ChatGPT conversation for the same Codex task and Web model configuration.
 
-- **Large context:** two or three context files and any images are attached together, followed by one Send. No model acknowledgement messages or staging-model switches. File contents still count toward the configured context budget.
+Web models declare no numeric Codex context window or automatic-compaction threshold. ChatGPT manages its active context. Setup preserves existing global context preferences for native models only and restores those preferences when the bridge is disconnected or uninstalled. Normal evidence retrieval has no local token allowance; file bytes, page sizes and permissions remain bounded.
+
+- **Large context:** required records are read through the bound native connection, with historical output and document text retrieved on demand. One browser Send starts the turn. Page acknowledgements verify delivery.
 - **Follow-ups:** Maria sends only the new portion when the earlier input and final Web answer match a recorded local cursor. The cursor stores hashes, not another copy of your conversation.
 - **Native → Web:** any work done with native Codex after the last Web answer is included. Maria does not assume the last assistant message came from ChatGPT.
 - **Compaction:** the ChatGPT conversation identity stays the same. Codex's current checkpoint updates the task context without discarding the saved chat. Changed or unverifiable history uses the full current Codex context.

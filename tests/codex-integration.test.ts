@@ -113,6 +113,7 @@ describe("reversible native Codex route integration", () => {
 
     expect(readCodexModelContextOverride()).toEqual({
       contextWindow: 1_000_000,
+      autoCompactTokenLimit: 900_000,
     });
   });
 
@@ -143,6 +144,55 @@ describe("reversible native Codex route integration", () => {
     expect(readFileSync(configPath, "utf8")).toBe(original);
     expect(existsSync(getCodexJournalRecoveryPath())).toBe(false);
     expect(uninstallCodexIntegration()).toEqual({ changed: false });
+  });
+
+  test("global context preferences become native-only and round-trip on disconnect, reconnect and uninstall", () => {
+    const { codexHome } = fixture();
+    const path = join(codexHome, "config.toml");
+    const original = '\uFEFFmodel = "gpt-5.6-sol"\r\nmodel_context_window = 1_000_000 # native preference\r\nmodel_auto_compact_token_limit = 900_000\r\n\r\n[features]\r\ngoals = true\r\n';
+    writeFileSync(path, original);
+    installCodexIntegration(nativeConfig("full"));
+    const migrated = readFileSync(path, "utf8");
+    const parsed = Bun.TOML.parse(migrated.replace(/^\uFEFF/, ""));
+    expect(parsed).not.toHaveProperty("model_context_window");
+    expect(parsed).not.toHaveProperty("model_auto_compact_token_limit");
+    expect(readCodexModelContextOverride()).toEqual({ contextWindow: 1_000_000, autoCompactTokenLimit: 900_000, scopedToNative: true });
+    expect(activateCodexIntegration().changed).toBe(false);
+    deactivateCodexIntegration();
+    expect(readFileSync(path, "utf8")).toBe(original);
+    activateCodexIntegration();
+    expect(readCodexModelContextOverride()?.scopedToNative).toBe(true);
+    uninstallCodexIntegration();
+    expect(readFileSync(path, "utf8")).toBe(original);
+    expect(existsSync(join(codexHome, "maria-native-context-preferences.json"))).toBe(false);
+  });
+
+  test("later native preference edits win without turning into Web defaults after reconnect", () => {
+    const { codexHome } = fixture();
+    const path = join(codexHome, "config.toml");
+    writeFileSync(path, 'model_context_window = 500_000\n');
+    installCodexIntegration(nativeConfig("full"));
+    writeFileSync(path, 'model_context_window = 700_000 # later choice\n' + readFileSync(path, "utf8"));
+    expect(activateCodexIntegration().changed).toBe(true);
+    expect(readCodexModelContextOverride()).toEqual({ contextWindow: 700_000, scopedToNative: true });
+    uninstallCodexIntegration();
+    expect(readFileSync(path, "utf8")).toContain('model_context_window = 700_000 # later choice');
+    expect(readFileSync(path, "utf8")).not.toContain('500_000');
+  });
+
+  test("an invalid saved native preference cannot inject config lines during restoration", () => {
+    const { codexHome } = fixture();
+    const path = join(codexHome, "config.toml");
+    writeFileSync(path, 'model_context_window = 500_000\n');
+    installCodexIntegration(nativeConfig("full"));
+    const before = readFileSync(path, "utf8");
+    const saved = join(codexHome, "maria-native-context-preferences.json");
+    const policy = JSON.parse(readFileSync(saved, "utf8"));
+    for (const rawLine of ['model_context_window = 500_000\napproval_policy = "never"', 'model_context_window = 500_000_']) {
+      writeFileSync(saved, JSON.stringify({ ...policy, entries: { model_context_window: { value: 500_000, rawLine } } }));
+      expect(() => uninstallCodexIntegration()).toThrow("Invalid saved native context preference");
+      expect(readFileSync(path, "utf8")).toBe(before);
+    }
   });
 
   test("routes Codex without changing native compact or multi-agent feature flags", () => {

@@ -3,13 +3,12 @@ import { defaultConfig } from "../src/config";
 import {
   CHATGPT_WEB_LUNA_MODEL_ROUTE,
   CHATGPT_WEB_LUNA_MODEL_ROUTES,
-  CHATGPT_WEB_ZERO_RISK_CONTEXT_WINDOW,
   CHATGPT_WEB_ZERO_RISK_MODEL_ROUTE,
   CHATGPT_WEB_ZERO_RISK_PRO_MODEL_ROUTE,
   CHATGPT_WEB_MODEL_ROUTES,
   resolveChatGptWebContextLimits,
 } from "../src/chatgpt-web-models";
-import { augmentNativeModelCatalog } from "../src/model-catalog";
+import { applyNativeContextOverrides, augmentNativeModelCatalog } from "../src/model-catalog";
 
 function source(): Record<string, unknown> {
   return {
@@ -102,26 +101,42 @@ describe("native /models augmentation", () => {
     }
   });
 
-  test("keeps actual limits with Bigger Context in the Codex model catalog", () => {
+  test("keeps automatic context uncapped with Bigger Context in the Codex catalog", () => {
     const config = defaultConfig("full");
     config.proAvailable = true;
     config.experimentalBiggerContext = true;
     const models = augmentNativeModelCatalog(source(), config).models as Array<Record<string, unknown>>;
     const pro = models.find(model => model.slug === "chatgpt-web/pro")!;
-    expect(pro.context_window).toBe(112_193);
-    expect(pro.auto_compact_token_limit).toBe(95_000);
-    expect(Number(pro.context_window) * Number(pro.effective_context_window_percent) / 100).toBeLessThanOrEqual(95_000);
+    expect(pro.context_window).toBeNull();
+    expect(pro.auto_compact_token_limit).toBeNull();
+    expect(pro.max_context_window).toBeNull();
   });
 
-  test("native global context overrides cannot make Web effective windows exceed their compaction budgets", () => {
+  test("native preferences cannot introduce an automatic Web window", () => {
     for (const bigger of [false, true]) {
       const config = defaultConfig("full"); config.proAvailable = true; config.experimentalBiggerContext = bigger;
       const models = augmentNativeModelCatalog(source(), config, { contextWindow: 1_000_000 }).models as Array<Record<string, unknown>>;
       for (const model of models.filter(model => String(model.slug).startsWith("chatgpt-web/"))) {
-        expect(Math.floor(Number(model.max_context_window) * Number(model.effective_context_window_percent) / 100))
-          .toBeLessThanOrEqual(Number(model.auto_compact_token_limit));
+        expect(model.max_context_window).toBeNull();
+        expect(model.auto_compact_token_limit).toBeNull();
       }
     }
+  });
+
+  test("scoped native preferences survive native-only recovery without leaking into Web metadata", () => {
+    const original = source(), before = structuredClone(original);
+    const override = { contextWindow: 1_000_000, autoCompactTokenLimit: 900_000, scopedToNative: true as const };
+    const config = defaultConfig("full"); config.proAvailable = true;
+    const augmented = augmentNativeModelCatalog(original, config, override).models as Array<Record<string, unknown>>;
+    const recovery = applyNativeContextOverrides(original, override).models as Array<Record<string, unknown>>;
+    for (const model of [...recovery, ...augmented.filter(m => !String(m.slug).startsWith("chatgpt-web/"))]) {
+      expect(model.context_window).toBe(1_000_000);
+      expect(model.auto_compact_token_limit).toBe(900_000);
+    }
+    for (const model of augmented.filter(m => String(m.slug).startsWith("chatgpt-web/"))) {
+      expect(model.context_window).toBeNull(); expect(model.max_context_window).toBeNull(); expect(model.auto_compact_token_limit).toBeNull();
+    }
+    expect(original).toEqual(before);
   });
 
   test("keeps native Sol selectable in the bounded Compatibility V1 registry", () => {
@@ -204,9 +219,9 @@ describe("native /models augmentation", () => {
       effectiveContextWindowPercent: model.effective_context_window_percent,
       autoCompactTokenLimit: model.auto_compact_token_limit,
     }))).toEqual([
-      { contextWindow: 41_000, effectiveContextWindowPercent: 78, autoCompactTokenLimit: 32_000 },
-      { contextWindow: 90_000, effectiveContextWindowPercent: 88, autoCompactTokenLimit: 80_000 },
-      { contextWindow: 90_000, effectiveContextWindowPercent: 88, autoCompactTokenLimit: 80_000 },
+      { contextWindow: null, effectiveContextWindowPercent: 100, autoCompactTokenLimit: null },
+      { contextWindow: null, effectiveContextWindowPercent: 100, autoCompactTokenLimit: null },
+      { contextWindow: null, effectiveContextWindowPercent: 100, autoCompactTokenLimit: null },
     ]);
   });
 
@@ -222,9 +237,9 @@ describe("native /models augmentation", () => {
       display_name: CHATGPT_WEB_LUNA_MODEL_ROUTE.displayName,
       default_reasoning_level: "low",
       supported_reasoning_levels: [{ effort: "low", description: CHATGPT_WEB_LUNA_MODEL_ROUTE.displayName }],
-      context_window: 1_050_000,
+      context_window: null,
       effective_context_window_percent: 100,
-      auto_compact_token_limit: 1_050_000,
+      auto_compact_token_limit: null,
     });
   });
 
@@ -244,10 +259,10 @@ describe("native /models augmentation", () => {
       input_modalities: ["text"],
       default_reasoning_level: "low",
       supported_reasoning_levels: [{ effort: "low", description: CHATGPT_WEB_ZERO_RISK_MODEL_ROUTE.displayName }],
-      context_window: CHATGPT_WEB_ZERO_RISK_CONTEXT_WINDOW,
-      max_context_window: CHATGPT_WEB_ZERO_RISK_CONTEXT_WINDOW,
-      effective_context_window_percent: 78,
-      auto_compact_token_limit: 96_000,
+      context_window: null,
+      max_context_window: null,
+      effective_context_window_percent: 100,
+      auto_compact_token_limit: null,
     });
 
     config.zeroRiskProEnabled = true;
@@ -258,8 +273,8 @@ describe("native /models augmentation", () => {
       slug: CHATGPT_WEB_ZERO_RISK_PRO_MODEL_ROUTE.slug,
       display_name: CHATGPT_WEB_ZERO_RISK_PRO_MODEL_ROUTE.displayName,
       input_modalities: ["text"],
-      context_window: 336_579,
-      auto_compact_token_limit: 285_000,
+      context_window: null,
+      auto_compact_token_limit: null,
     });
   });
 
