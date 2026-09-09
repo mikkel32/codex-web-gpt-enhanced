@@ -1401,7 +1401,7 @@ export class ChatGptTurnDomHealthTracker {
   }
 }
 
-export const CHATGPT_STOPPED_THINKING_GRACE_MS = 5_000;
+export const CHATGPT_STOPPED_THINKING_GRACE_MS = 30_000;
 
 /**
  * Consecutive internal observation faults tolerated before a turn is abandoned.
@@ -1442,6 +1442,9 @@ export function chatGptExternalProgressSuppressesDomHealth(
 
 export class ChatGptStoppedThinkingTracker {
   private visibleSince?: number;
+  private previous?: { progressKey: string; at: number };
+
+  get pending(): boolean { return this.visibleSince !== undefined; }
 
   /**
    * Forgets an in-progress "Stopped thinking" window.
@@ -1460,13 +1463,56 @@ export class ChatGptStoppedThinkingTracker {
     }
   }
 
-  update(visible: boolean, now = Date.now()): boolean {
-    if (!visible) {
-      this.visibleSince = undefined;
+  update(state: {
+    visible: boolean;
+    responsePresent: boolean;
+    running: boolean | undefined;
+    progressKey: string;
+    externalProgressLive: boolean;
+  }, now = Date.now()): boolean {
+    const previous = this.previous;
+    this.previous = { progressKey: state.progressKey, at: now };
+    // A delayed/failed observation or a resumed renderer is not thirty seconds of stop evidence.
+    // Only consecutive idle observations of the same semantic content count.
+    if (!state.visible || !state.responsePresent || state.running !== false || state.externalProgressLive
+      || (previous && (previous.progressKey !== state.progressKey || now < previous.at || now - previous.at > 5_000))) {
+      this.clear();
       return false;
     }
     this.visibleSince ??= now;
     return now - this.visibleSince >= this.graceMs;
+  }
+}
+
+/** Back off quiet DOM polling without slowing active text/tool delivery. */
+export class ChatGptResponsePollDelay {
+  private key?: string;
+  private delayMs = 250;
+
+  update(key: string): number {
+    this.delayMs = key === this.key ? Math.min(this.delayMs * 2, 1_000) : 250;
+    this.key = key;
+    return this.delayMs;
+  }
+}
+
+export async function waitForChatGptResponsePoll(
+  delayMs: number,
+  afterProgressRevision: number,
+  progress?: ChatGptTurnProgressReader,
+  signal?: AbortSignal,
+): Promise<void> {
+  const waiterAbort = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timerDone = new Promise<void>(resolve => { timer = setTimeout(resolve, delayMs); });
+    await withBrowserTurnAbort(Promise.race([
+      timerDone,
+      ...(progress ? [progress.waitForChange(afterProgressRevision, waiterAbort.signal).then(() => {})] : []),
+    ]), signal);
+  } finally {
+    clearTimeout(timer);
+    waiterAbort.abort();
   }
 }
 
@@ -3899,16 +3945,19 @@ export class ChatGptBrowserWorker {
       }));
       const stoppedThinkingVisible = (() => {
         const stoppedLabel = new RegExp(options.stoppedThinkingLabelSource, "i");
-        const ariaMatch = [...root.querySelectorAll<HTMLElement>("[aria-label]")]
-          .some(candidate => stoppedLabel.test(candidate.getAttribute("aria-label")?.trim() ?? "") && renderedInDom(candidate));
-        if (ariaMatch) return true;
-        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-          if (!stoppedLabel.test(node.textContent?.replace(/\s+/g, " ").trim() ?? "")) continue;
-          const parent = node.parentElement;
-          if (parent && renderedInDom(parent)) return true;
-        }
-        return false;
+        // Inspect semantic status controls, never arbitrary answer/code/quoted text. Reuse the
+        // status candidates collected above instead of walking every text node in a large answer.
+        return [...candidates].some(([candidate, kind]) => kind === "status"
+          && candidate.closest(".markdown, pre, code, blockquote") === null
+          && !candidate.closest('[aria-hidden="true"], [hidden], [inert]')
+          && stoppedLabel.test(traceText(candidate).replace(/\s+/g, " ").trim())
+          && (() => {
+            for (let ancestor: HTMLElement | null = candidate; ancestor; ancestor = ancestor.parentElement) {
+              if (!renderedInDom(ancestor)) return false;
+              if (ancestor === root) break;
+            }
+            return true;
+          })());
       })();
       return {
         key: observerKey,
@@ -4441,7 +4490,10 @@ export class ChatGptBrowserWorker {
       };
       const domHealthTracker = new ChatGptTurnDomHealthTracker();
       const stoppedThinkingTracker = new ChatGptStoppedThinkingTracker();
+      const pollDelay = new ChatGptResponsePollDelay();
       const responseDomCache: ChatGptResponseDomCache = {};
+      let stopProgressSnapshot: ChatGptResponseDomSnapshot | undefined;
+      let stopProgressKey = "";
       let consecutiveObservationRebinds = 0;
       let internalObservationFaults = 0;
       let observedThisIteration = false;
@@ -4547,12 +4599,35 @@ export class ChatGptBrowserWorker {
           Date.now(),
         );
         const externalToolCallsInFlight = chatGptExternalToolCallsAreInFlight(externalProgressSnapshot);
-        // A stale "Stopped thinking" label is not terminal while the model is still driving tool
-        // calls, and the window must be forgotten rather than merely ignored.
-        if (externalProgressLive) stoppedThinkingTracker.clear();
-        else if (stoppedThinkingTracker.update(snapshot.stoppedThinkingVisible)) {
-          throw chatGptStoppedThinkingError();
+        const stop = page.locator(CHATGPT_STOP_BUTTON_SELECTOR).last();
+        const observedRunning = await stop.isVisible().catch(() => undefined);
+        // Unknown generation state must not become false evidence of a stopped/completed turn.
+        const running = observedRunning !== false;
+        if (running) sawRunning = true;
+        if (snapshot !== stopProgressSnapshot) {
+          stopProgressSnapshot = snapshot;
+          stopProgressKey = JSON.stringify([snapshot.visibleText, snapshot.traceBlocks.map(block => [block.kind, block.text])]);
         }
+        const wasStopPending = stoppedThinkingTracker.pending;
+        const stopped = stoppedThinkingTracker.update({
+          visible: snapshot.stoppedThinkingVisible,
+          responsePresent: snapshot.responsePresent,
+          running: observedRunning,
+          progressKey: stopProgressKey,
+          externalProgressLive,
+        });
+        if (stopped || wasStopPending !== stoppedThinkingTracker.pending) {
+          console.info(`[chatgpt-web] stopped-status trace=${turn.traceId} ${JSON.stringify({
+            state: stopped ? "confirmed" : stoppedThinkingTracker.pending ? "observing" : "cleared",
+            graceMs: CHATGPT_STOPPED_THINKING_GRACE_MS, running: observedRunning ?? "unknown",
+            responsePresent: snapshot.responsePresent, textChars: snapshot.visibleText.length,
+            completionActionVisible: snapshot.completionActionVisible, externalProgressLive,
+            activeToolCalls: externalProgressSnapshot?.activeToolCalls ?? 0,
+            progressRevision: externalProgressSnapshot?.revision ?? 0,
+            progressAgeMs: externalProgressSnapshot?.lastProgressAt === undefined ? null : Date.now() - externalProgressSnapshot.lastProgressAt,
+          })}`);
+        }
+        if (stopped) throw chatGptStoppedThinkingError();
         if (!snapshot.responsePresent && externalProgressLive) {
           // Current-turn MCP activity proves that ChatGPT is still executing even if its renderer
           // temporarily cannot expose the response subtree. DOM remains authoritative for text and
@@ -4561,9 +4636,6 @@ export class ChatGptBrowserWorker {
           await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
           continue;
         }
-        const stop = page.locator(CHATGPT_STOP_BUTTON_SELECTOR).last();
-        const running = await stop.isVisible().catch(() => false);
-        if (running) sawRunning = true;
         if (snapshot.responsePresent) {
           if (!capturedResponse) {
             capturedResponse = true;
@@ -4669,7 +4741,9 @@ export class ChatGptBrowserWorker {
           });
           if (domError) throw new Error(domError);
         }
-        await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
+        await waitForChatGptResponsePoll(pollDelay.update(
+          `${responseDomCache.key}:${externalProgressSnapshot?.revision ?? 0}:${observedRunning}`,
+        ), externalProgressSnapshot?.revision ?? 0, turn.externalProgress, turn.abortSignal);
        } catch (error) {
         // Only a defect in this worker is retried here. Every deliberate signal — adapter errors,
         // aborts, closed tabs, DOM-health verdicts — still fails the turn immediately.

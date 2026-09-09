@@ -152,6 +152,12 @@ export class ChatGptExternalTurnProgress extends ChatGptTurnProgressBroadcaster 
     this.advance(now, "tool_result");
   }
 
+  /** Context retrieval is real work but does not establish a native tool-answer boundary. */
+  recordContextActivity(now: number): void {
+    this.assertNotRetired();
+    this.advance(Math.max(now, this.lastProgressAt ?? now), "context");
+  }
+
   /** Retire every unresolved batch when the broker capability can no longer accept its result. */
   retire(error: Error): boolean {
     if (!(error instanceof Error)) throw new Error("ChatGPT external progress retirement requires an error");
@@ -176,7 +182,7 @@ export class ChatGptExternalTurnProgress extends ChatGptTurnProgressBroadcaster 
     this.assertNotRetired();
   }
 
-  private advance(now: number, event: "tool_batch" | "tool_result"): void {
+  private advance(now: number, event: "tool_batch" | "tool_result" | "context"): void {
     if (!Number.isFinite(now)) throw new Error("ChatGPT external progress timestamp must be finite");
     this.revision += 1;
     if (event === "tool_batch") this.lastToolBatchRevision = this.revision;

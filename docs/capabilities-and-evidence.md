@@ -35,6 +35,10 @@ A later optional lookup failure does not undo earlier edits or tests. Report ver
 
 The `turn-summary` runtime log records context acknowledgement and completed/failed outer tool-call counts without arguments, results, credentials or conversation text. Counts are diagnostic: a nested tool can fail inside a successful execution cell, and a completed call does not by itself prove a mutation. Consult the correlated tool result for that distinction.
 
+A visible "Stopped thinking" label is a hint, not a user cancellation. The bridge excludes answer text and hidden controls, checks generation state first, and requires 30 seconds of consecutive idle observations with no semantic progress. New text, tool/context activity, uncertain generation state, and long observation gaps reset that evidence. A confirmed upstream stop reports `chatgpt_generation_stopped` without replaying the submitted prompt; explicit Codex cancellation keeps its existing behavior.
+
+Successful context reads and searches are forwarded to the browser helper as liveness without inventing a native tool batch or bypassing required-context receipts. Their broker observation waits for changes instead of polling. Quiet response polling backs off to one check per second, returns to 250 ms on changes, and wakes immediately for recorded context/tool progress. `stopped-status` logs record observing/cleared/confirmed transitions and numeric progress evidence without message contents or credentials.
+
 ## Hosted subagents
 
 ChatGPT-hosted delegation is distinct from Maria/Codex creating tasks or tabs. Use a hosted delegation tool only when the selected ChatGPT environment exposes it. A prompt can request delegation but cannot establish that the tool exists or that private orchestration occurred. Do not count a model's claim of parallel reasoning as observed agent launches.

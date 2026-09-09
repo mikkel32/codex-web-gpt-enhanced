@@ -52,6 +52,11 @@ interface SafeWaiter<T> {
   onAbort?: () => void;
 }
 
+export interface ContextProgress {
+  revision: number;
+  lastProgressAt: number;
+}
+
 interface SafeTurnControl {
   state: SafeTurnState;
   surfaceNonce: string;
@@ -85,6 +90,8 @@ interface TurnChannel {
   completedActivities: Set<string>;
   /** Monotonic across activity start/end so a completed request cannot disappear across a fence. */
   activityRevision: number;
+  contextProgress: ContextProgress;
+  contextProgressWaiters: Set<SafeWaiter<ContextProgress>>;
   completionCommitted: boolean;
   completionRevision?: number;
   retirementWaiters: Set<SafeWaiter<void>>;
@@ -111,6 +118,7 @@ interface BrokerRequest {
     | "owner_completion_fence_begin"
     | "owner_completion_fence_commit"
     | "owner_wait_retirement"
+    | "owner_wait_context_progress"
     | "owner_revoke"
     | "owner_safe_wait_start"
     | "owner_safe_wait_completion"
@@ -244,6 +252,7 @@ export interface TurnBrokerOwner {
   beginCompletionFence(token: string): number | undefined | Promise<number | undefined>;
   commitCompletionFence(token: string, revision: number): boolean | Promise<boolean>;
   waitForRetirement(token: string, signal?: AbortSignal): Promise<void>;
+  waitForContextProgress?(token: string, afterRevision: number, signal?: AbortSignal): Promise<ContextProgress>;
   revoke(token: string, reason?: Error): void | Promise<void>;
 }
 
@@ -323,6 +332,8 @@ export class TurnBroker implements TurnBrokerOwner {
       activities: new Set(),
       completedActivities: new Set(),
       activityRevision: 0,
+      contextProgress: { revision: 0, lastProgressAt: 0 },
+      contextProgressWaiters: new Set(),
       completionCommitted: false,
       retirementWaiters: new Set(),
     };
@@ -488,6 +499,7 @@ export class TurnBroker implements TurnBrokerOwner {
     }
     channel.completionCommitted = true;
     channel.completionRevision = revision;
+    this.rejectSafeWaiters(channel.contextProgressWaiters, new Error("Context progress turn is terminal"));
     console.info(
       `[chatgpt-web] broker trace=${channel.traceId} committed browser completion revision=${revision}`,
     );
@@ -504,6 +516,25 @@ export class TurnBroker implements TurnBrokerOwner {
     const channel = this.channels.get(token);
     if (!channel) return Promise.resolve();
     return this.waitForSafeState(channel.retirementWaiters, signal, "turn retirement wait aborted");
+  }
+
+  waitForContextProgress(token: string, afterRevision: number, signal?: AbortSignal): Promise<ContextProgress> {
+    this.prune();
+    if (!Number.isSafeInteger(afterRevision) || afterRevision < 0) throw new Error("Invalid context progress revision");
+    const channel = this.channels.get(token);
+    if (!channel || channel.completionCommitted) return Promise.reject(new Error("Context progress turn is terminal"));
+    if (afterRevision > channel.contextProgress.revision) throw new Error("Context progress revision is ahead of the broker");
+    if (signal?.aborted) return Promise.reject(new DOMException("Context progress wait aborted", "AbortError"));
+    if (channel.contextProgress.revision > afterRevision) return Promise.resolve({ ...channel.contextProgress });
+    return this.waitForSafeState(channel.contextProgressWaiters, signal, "Context progress wait aborted");
+  }
+
+  private recordContextProgress(channel: TurnChannel): void {
+    channel.contextProgress = {
+      revision: channel.contextProgress.revision + 1,
+      lastProgressAt: Math.max(Date.now(), channel.contextProgress.lastProgressAt),
+    };
+    this.resolveSafeWaiters(channel.contextProgressWaiters, { ...channel.contextProgress });
   }
 
   requestCompaction(token: string, queuedResult: BrokerToolResult): number {
@@ -657,6 +688,7 @@ export class TurnBroker implements TurnBrokerOwner {
     }
     this.retire(this.retiredTokens, token, channel.traceId);
     this.resolveSafeWaiters(channel.retirementWaiters, undefined);
+    this.rejectSafeWaiters(channel.contextProgressWaiters, reason);
     this.rejectChannel(channel, reason);
   }
 
@@ -915,7 +947,7 @@ export class TurnBroker implements TurnBrokerOwner {
     if (!request || typeof request !== "object" || typeof request.id !== "string" || request.id.length === 0 || request.id.length > 256) {
       throw new Error("turn broker request id is invalid");
     }
-    if (!["claim", "resolve", "release", "invoke", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_context", "read_context", "search_context", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "activity_complete", "submit_compaction_handoff"].includes(request.method)) {
+    if (!["claim", "resolve", "release", "invoke", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_context", "read_context", "search_context", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_wait_retirement", "owner_wait_context_progress", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "activity_complete", "submit_compaction_handoff"].includes(request.method)) {
       throw new Error("turn broker method is invalid");
     }
   }
@@ -1016,6 +1048,10 @@ export class TurnBroker implements TurnBrokerOwner {
     if (request.method === "owner_wait_retirement") {
       if (!request.token) throw new Error("turn owner token is required");
       return this.waitForRetirement(request.token, socketSignal).then(() => ({ retired: true }));
+    }
+    if (request.method === "owner_wait_context_progress") {
+      if (!request.token) throw new Error("turn owner token is required");
+      return this.waitForContextProgress(request.token, request.revision!, socketSignal);
     }
     if (request.method === "owner_revoke") {
       if (!request.token) throw new Error("turn owner token is required");
@@ -1149,8 +1185,13 @@ export class TurnBroker implements TurnBrokerOwner {
       const channel = binding.channel;
       if (channel.completionCommitted || channel.compactionRequested) throw new Error("Native context turn is already terminal");
       if (!channel.context) throw new Error("No canonical context is stored for this task");
-      if (request.method === "search_context") return channel.context.search(request.query ?? "", request.contextOffset, request.limit);
+      if (request.method === "search_context") {
+        const result = channel.context.search(request.query ?? "", request.contextOffset, request.limit);
+        this.recordContextProgress(channel);
+        return result;
+      }
       const page = channel.context.read(request.contextName ?? "", request.contextOffset!, request.contextReceipt);
+      this.recordContextProgress(channel);
       const resultBytes = Buffer.byteLength(JSON.stringify(nativeContextResult(page)), "utf8");
       console.info(`[chatgpt-web] broker trace=${channel.traceId} context-read file=${page.name} offset=${page.offset} chars=${page.text.length} complete=${page.next_offset === null} acknowledged=${page.acknowledged === true} resultBytes=${resultBytes}`);
       return page;
@@ -1548,6 +1589,14 @@ export class RemoteTurnBroker implements TurnBrokerOwner {
       signal,
     );
     if (response.retired !== true) throw new Error("DEV turn owner received an invalid retirement result");
+  }
+
+  async waitForContextProgress(token: string, afterRevision: number, signal?: AbortSignal): Promise<ContextProgress> {
+    const response = await callTurnBroker<ContextProgress>(this.socketPath,
+      { method: "owner_wait_context_progress", token, revision: afterRevision }, null, signal);
+    if (!Number.isSafeInteger(response.revision) || response.revision <= afterRevision
+      || !Number.isFinite(response.lastProgressAt)) throw new Error("Invalid broker context progress response");
+    return response;
   }
 
   async revoke(token: string, _reason?: Error): Promise<void> {
