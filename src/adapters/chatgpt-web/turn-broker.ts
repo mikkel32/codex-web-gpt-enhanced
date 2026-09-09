@@ -72,6 +72,8 @@ interface TurnChannel {
   queuedCallIds: string[];
   deliveredCallIds: Set<string>;
   invocations: Map<string, PendingInvocation>;
+  completedToolCalls: number;
+  failedToolCalls: number;
   waiters: Set<ToolWaiter>;
   compactionRequested: boolean;
   compactionResult?: BrokerToolResult;
@@ -313,6 +315,8 @@ export class TurnBroker implements TurnBrokerOwner {
       queuedCallIds: [],
       deliveredCallIds: new Set(),
       invocations: new Map(),
+      completedToolCalls: 0,
+      failedToolCalls: 0,
       waiters: new Set(),
       compactionRequested: false,
       compactionDeliveryCount: 0,
@@ -453,6 +457,8 @@ export class TurnBroker implements TurnBrokerOwner {
       throw new Error(`tool call was completed before it was delivered: ${callId}`);
     }
     channel.invocations.delete(callId);
+    channel.completedToolCalls++;
+    if (result.isError) channel.failedToolCalls++;
     console.info(`[chatgpt-web] broker trace=${channel.traceId} completed call=${callId.slice(0, 17)} pending=${channel.invocations.size}`);
     invocation.resolve(result);
   }
@@ -485,6 +491,11 @@ export class TurnBroker implements TurnBrokerOwner {
     console.info(
       `[chatgpt-web] broker trace=${channel.traceId} committed browser completion revision=${revision}`,
     );
+    console.info(`[chatgpt-web] turn-summary trace=${channel.traceId} ${JSON.stringify({
+      contextInstalled: !!channel.context, requiredContextAcknowledged: true,
+      completedToolCalls: channel.completedToolCalls, failedToolCalls: channel.failedToolCalls,
+      completedMcpActivities: channel.completedActivities.size,
+    })}`);
     return true;
   }
 

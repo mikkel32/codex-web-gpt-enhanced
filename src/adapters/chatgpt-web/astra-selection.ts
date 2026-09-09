@@ -30,7 +30,13 @@ async function closePicker(page: Page, menu: Locator, control: Locator, signal?:
   signal?.throwIfAborted();
   await page.keyboard.press("Escape");
   // Wait for the exiting menu to release its focus trap before the Send boundary.
-  await until(async () => !await menu.isVisible() ? true : undefined, "the closed picker", signal);
+  await until(async () => {
+    if (!await menu.isVisible()) return true;
+    // ChatGPT can force-mount a closed, transparent Radix menu. Playwright's
+    // visibility check ignores opacity; use the owning menu's state as well.
+    const owner = menu.locator('xpath=ancestor-or-self::*[@role="menu"][1]');
+    return await owner.getAttribute("data-state") === "closed" ? true : undefined;
+  }, "the closed picker", signal);
   await until(async () => await control.getAttribute("aria-expanded") !== "true" ? true : undefined, "the closed model control", signal);
 }
 // These controls retain their ARIA structure when their visible names are translated.
@@ -43,16 +49,62 @@ async function modelListVisible(menu: Locator): Promise<boolean> {
   return await menu.locator('[role="menuitem"][aria-expanded="true"]').isVisible()
     || !await power.isVisible() || await power.getAttribute("aria-disabled") === "true";
 }
-async function readyPower(menu: Locator, signal?: AbortSignal) {
+async function readyPower(menu: Locator, signal?: AbortSignal, requirePro = true) {
   const power = powerControl(menu), slider = power.locator('[role="slider"]');
   return until(async () => {
     if (await menu.locator('[role="menuitem"][aria-expanded="true"]').isVisible()
       || !await power.isVisible() || await power.getAttribute("aria-disabled") === "true") return undefined;
     const state = parseChatGptEffortSliderState(await slider.getAttribute("aria-valuemin"), await slider.getAttribute("aria-valuemax"), await slider.getAttribute("aria-valuenow"));
     if (!state) return undefined;
-    if (state.min !== 0 || state.max !== 4) throw unavailable("the regular-Chat Pro power range");
+    if (state.min !== 0 || (requirePro ? state.max !== 4 : state.max < 2 || state.max > 4)) throw unavailable("the regular-Chat power range");
     return state;
   }, "the enabled Power control", signal);
+}
+
+const solControl = (menu: Locator) => menu.getByRole("menuitemradio", { name: /^(?:GPT[- ]?)?5[.,]6(?:\s+Sol)?$/i });
+
+/** Sol is a separate model choice. Changing only Power can leave Latest/Astra selected. */
+export async function selectChatGptSolModel(page: Page, control: Locator, signal?: AbortSignal): Promise<void> {
+  await verifySolPicker(page, control, undefined, true, signal);
+}
+
+export async function assertChatGptSolReady(page: Page, control: Locator, effort: number, signal?: AbortSignal): Promise<void> {
+  await verifySolPicker(page, control, effort, false, signal);
+}
+
+async function verifySolPicker(page: Page, control: Locator, effort: number | undefined, select: boolean, signal?: AbortSignal) {
+  let phase = "opening the picker";
+  try {
+    signal?.throwIfAborted();
+    const { menu } = await activateChatGptEffortMenu(page, control, { signal });
+    phase = "opening the model list";
+    await latestChoice(menu, signal); // Open the shared model submenu, without choosing Latest.
+    const sol = solControl(menu);
+    if (!await sol.isVisible() || await sol.getAttribute("aria-disabled") === "true") throw new Error("GPT-5.6 Sol is unavailable");
+    if (!select && await sol.getAttribute("aria-checked") !== "true") throw new Error("GPT-5.6 Sol is not selected");
+    signal?.throwIfAborted();
+    phase = "selecting Sol";
+    await sol.press("Enter", { timeout: 5_000 });
+    phase = "waiting for Power";
+    let state = await readyPower(menu, signal, false);
+    if (select) {
+      phase = "reading back Sol";
+      await latestChoice(menu, signal);
+      if (await solControl(menu).getAttribute("aria-checked") !== "true") throw new Error("GPT-5.6 Sol selection did not stick");
+      signal?.throwIfAborted();
+      await solControl(menu).press("Enter", { timeout: 2_000 });
+      state = await readyPower(menu, signal, false);
+    }
+    if (effort !== undefined && state.value !== effort) throw new Error("The requested Power is not selected");
+    phase = "closing the picker";
+    await closePicker(page, menu, control, signal);
+    signal?.throwIfAborted();
+  } catch (error) {
+    preserveCancellation(error, signal);
+    if (error instanceof ChatGptWebAdapterError && error.code !== "astra_pro_unavailable") throw error;
+    throw new ChatGptWebAdapterError(`Could not verify GPT-5.6 Sol while ${phase}. Select GPT-5.6 Sol in the model menu and the requested Power; Latest selects Astra.`,
+      { status: 400, errorType: "invalid_request_error", code: "sol_model_unavailable", retryable: false, cause: error });
+  }
 }
 async function latestChoice(menu: Locator, signal?: AbortSignal): Promise<Locator> {
   const opening = await until(async () => {

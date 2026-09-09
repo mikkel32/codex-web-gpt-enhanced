@@ -87,7 +87,11 @@ const RETIRED_TURN_HANDLE = /\b(turn|request|binding)_[A-Za-z0-9_-]{24,}/g;
  * the current turn is supplied by the contract text, never by the replayed context.
  */
 export function withoutRetiredTurnHandles(contextJson: string): string {
-  return contextJson.replace(RETIRED_TURN_HANDLE, (_handle, kind: string) => `[retired ${kind} handle]`);
+  // Match decoded strings: an escaped newline before a handle is otherwise seen as
+  // the word character 'n', hiding the boundary from the regular expression.
+  return JSON.stringify(JSON.parse(contextJson, (_key, value) => typeof value === "string"
+    ? value.replace(RETIRED_TURN_HANDLE, (_handle, kind: string) => `[retired ${kind} handle]`)
+    : value));
 }
 
 function visibleCurrentUserRequest(parsed: CodexParsedRequest): string[] {
@@ -288,6 +292,13 @@ function messageEnvelope(
   return { role: message.role, content: inputContent(message.content, images, budget, files, message.role === "developer") };
 }
 
+/** Rebuild searchable evidence from canonical history without repeating it in the prompt. */
+export function canonicalEvidenceRecords(messages: readonly CodexMessage[]): MultipartContextRecord[] {
+  return messages.map((message, message_index) => ({ kind: "message", message_index,
+    message: JSON.parse(withoutRetiredTurnHandles(JSON.stringify(messageEnvelope(message, [], { seen: 0, dropped: 0, native: true })))),
+  }));
+}
+
 type MultipartContextRecord =
   | { kind: "system"; system_index: number; content: string }
   | { kind: "message"; message_index: number; message: Record<string, unknown> };
@@ -430,6 +441,7 @@ export function compileChatGptWebPrompt(
         : "Each image_attachment in the context refers to the correspondingly named image attached to this ChatGPT message; inspect it directly.",
     "If a ChatGPT-native capability renders a rich card, widget, chart, or other non-text result, also provide the relevant result as ordinary Markdown in the final answer. A private ChatGPT UI widget never replaces the Markdown answer returned to Codex.",
     "Never copy a ChatGPT widget's HTML, CSS, class names, or DOM markup into the answer unless the user explicitly requested that source markup.",
+    "A later retrieval or tool failure does not undo earlier work. Preserve verified edits, commands and results from this chat and the supplied task history. Report completed work, the exact failed operation and what remains unverified separately; never infer that no files changed merely because a later lookup failed. Before reporting completion or a blocker, reconcile your answer with the actions already taken.",
     "Do not mention this transport contract, context packaging, or capability routing in the user-facing answer unless the user explicitly asks how the bridge works.",
   ];
   const transportContract = parsed._compactionRequest
@@ -449,6 +461,10 @@ export function compileChatGptWebPrompt(
       "Call a Codex Native tool only when the latest active request requires a local effect or fresh local evidence that is not already present in the supplied context; otherwise answer the request directly without a tool call.",
       "Use actual Codex Native results as evidence for local observations and effects.",
       "Use the attached inventory tool to discover additional tools, then invoke only the exact returned wire_name through the declared tool-call gateway. read and exec_command are not aliases for the bridge's public codex_* tools. Never guess a tool name from a cached plugin schema.",
+      "Discover capabilities relevant to the task with focused inventory queries, such as computer, browser, screenshot, image, the app/plugin name, or task history. Follow next_offset when a matching catalog is paginated; read the returned description and schema before invoking a tool. Installed plugins and deferred tools can be called through this gateway when the current native harness supplies them. An empty search is not proof that all tools are unavailable; try the precise operation or tool family, without guessing callable names.",
+      "For computer use, follow the discovered tool's own initialization and API instructions. Inspect fresh UI state before acting, preserve its persistent session, and inspect the returned screenshot when visual evidence is needed. A saved image path or successful screenshot command alone does not prove what the image shows. Prefer purpose-built tools for operations they support.",
+      "For large tool results, use the discovered native execution gateway to filter or summarize relevant data before emitting it when supported. Await independent read calls together and inspect every result; keep dependent actions sequential. Preserve errors, structured results, images and resource references. Follow the gateway's yielded-cell wait protocol until completion before using its result.",
+      "ChatGPT-hosted subagents and Codex/native task delegation are different capabilities. Use only the delegation surface actually available and permitted by the user; never substitute a new Codex task or browser tab for requested ChatGPT-hosted agents. A model or effort label alone does not prove that a delegation tool exists.",
       "The inventory's environment describes this claimed Codex turn: cwd, roots, writable_roots, and sandbox. Do not substitute another connector's computer or map a Mac /Users path to a Windows or virtual root because their folder names look similar.",
       "A Tool not found or Unknown root error is not evidence of a missing user permission. Check the current tool contract and workspace before retrying; do not broaden access, replay a mutation, or switch computers to hide a deterministic failure.",
       "A Codex Native MCP tool result may require context compaction. If it does, follow the compaction instructions in that result exactly.",

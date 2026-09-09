@@ -320,7 +320,7 @@ function gatewayToolCatalogPage(response: {
   return { tools, total: catalog.total as number };
 }
 
-function execGatewayResultProgram(invocation: string[]): string {
+export function execGatewayResultProgram(invocation: string[]): string {
   return [
     ...invocation,
     "const emit = value => {",
@@ -332,12 +332,36 @@ function execGatewayResultProgram(invocation: string[]): string {
     "    if (typeof value.image_url === \"string\" && typeof value.output_hint === \"string\") { generatedImage(value); return; }",
     "    if (typeof value.image_url === \"string\") { image(value.image_url, value.detail ?? \"auto\"); return; }",
     "    if (typeof value.audio_url === \"string\") { audio(value.audio_url); return; }",
-    "    if (Array.isArray(value.content)) { for (const item of value.content) emit(item); return; }",
+    "    if (Array.isArray(value.content)) {",
+    // MCP _meta is client-only data. Preserve model-visible structured results and errors,
+    // including tools whose human-readable content is empty or only a short status message.
+    "      const structured = value.structuredContent;",
+    "      const duplicate = structured !== undefined && value.content.some(item => {",
+    "        if (item?.type !== \"text\" || typeof item.text !== \"string\") return false;",
+    "        try { return JSON.stringify(JSON.parse(item.text)) === JSON.stringify(structured); } catch { return false; }",
+    "      });",
+    "      if (value.isError === true || (structured !== undefined && !duplicate)) text({",
+    "        ...(value.isError === true ? { isError: true } : {}),",
+    "        ...(structured !== undefined && !duplicate ? { structuredContent: structured } : {}),",
+    "      });",
+    "      for (const item of value.content) emit(item); return;",
+    "    }",
     "  }",
     "  text(value);",
     "};",
     "emit(result);",
   ].join("\n");
+}
+
+function gatewayMcpResult<T extends { content: unknown[]; isError?: boolean }>(value: T): T {
+  // Only apply to bridge-generated programs. An exec cell can succeed while its nested
+  // MCP operation failed; retain that distinction in the public tool result too.
+  const failed = value.content.some(item => {
+    if (!item || typeof item !== "object" || !("type" in item) || item.type !== "text"
+      || !("text" in item) || typeof item.text !== "string") return false;
+    try { return JSON.parse(item.text)?.isError === true; } catch { return false; }
+  });
+  return failed ? { ...value, isError: true } : value;
 }
 
 function execGatewayProgram(
@@ -606,7 +630,7 @@ export async function runChatGptMcpServer(options: {
     }
     return invoke(bindingId, bound, gateway, {
       input: execGatewayProgram(nestedToolName, freeform, payload, bound.tools.map(wireName)),
-    }, signal);
+    }, signal).then(gatewayMcpResult);
   };
 
   server.registerTool(
@@ -654,7 +678,7 @@ export async function runChatGptMcpServer(options: {
         }
         return invoke(claimed.bindingId, bound, gateway, {
           input: execCommandGatewayProgram(execCommandArguments, shellCommandArguments),
-        }, extra.signal);
+        }, extra.signal).then(gatewayMcpResult);
       },
     ),
   );
@@ -941,7 +965,7 @@ export async function runChatGptMcpServer(options: {
             input: execGatewayProgram(wire_name, input !== undefined, {
               ...(input !== undefined ? { input } : { arguments: invocationArguments }),
             }, bound.tools.map(wireName)),
-          }, extra.signal);
+          }, extra.signal).then(gatewayMcpResult);
         }
         if (tool.freeform) {
           if (input === undefined) throw new Error(`Freeform Codex tool ${wire_name} requires input`);

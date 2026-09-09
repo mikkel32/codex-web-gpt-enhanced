@@ -27,7 +27,7 @@ import { chatGptEnvironmentProvenanceCounts, extractChatGptTurnEnvironment, extr
 import { CHATGPT_WEB_LUNA_MODEL_ID, resolveChatGptWebModelMode, type ChatGptWebCapabilities } from "./model";
 import { canonicalAttachmentAssets, chatGptReadOnlyContextWarning, compileChatGptWebPrompt } from "./prompt";
 import { nativeContextPrompt } from "./native-context";
-import { buildContextPlan } from "./context-plan";
+import { buildContextPlan, canonicalHistoricalEvidence } from "./context-plan";
 import { createChatGptStructuredOutputValidator } from "./output-validation";
 import { chatGptWebTurnRetryPolicy } from "./retry-policy";
 import { TurnBroker, type BrokerToolRequest, type BrokerToolResult, type TurnBrokerOwner } from "./turn-broker";
@@ -753,19 +753,20 @@ export function createChatGptWebAdapter(
         );
         if (!input._compactionRequest && broker.setContextFiles) {
           const assets = canonicalAttachmentAssets(checkpointInput.parsed.context.messages);
+          const historicalEvidence = canonicalHistoricalEvidence(checkpointInput.parsed.context.messages);
           const currentImages = new Set(compiled.images.map(image => image.ref));
           const mergeAssets = () => {
             compiled.files = assets.files;
             compiled.images = assets.images.map(image => ({ ...image, required: currentImages.has(image.ref) }));
           };
           mergeAssets();
-          if (!compiled.multipart && (compiled.images.length || compiled.files?.length)) {
+          if (!compiled.multipart && (compiled.images.length || compiled.files?.length || historicalEvidence.length)) {
             compiled = compileChatGptWebPrompt(input, turnCapabilities, turnToken, { ...compileOptionsFor(input), conversationState, experimentalMultipartParts: 2 });
             mergeAssets();
           }
           if (compiled.multipart) {
             let plan;
-            try { plan = await buildContextPlan(compiled, environment, browserAbort.signal); }
+            try { plan = await buildContextPlan(compiled, environment, browserAbort.signal, historicalEvidence); }
             catch (error) { if (browserAbort.signal.aborted) throw error; throw new ChatGptWebAdapterError(error instanceof Error ? error.message : "Context preparation failed", {
               status: 400, errorType: "invalid_request_error", code: "context_preparation_failed", retryable: false, cause: error,
             }); }

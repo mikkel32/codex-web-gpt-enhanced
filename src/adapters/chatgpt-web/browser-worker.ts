@@ -71,7 +71,7 @@ import {
 } from "../../chatgpt-web-models";
 import { LauncherBrowserHelperClient } from "./launcher-helper-client";
 import { MAX_CHATGPT_BROWSER_TABS } from "./concurrency";
-import { assertChatGptAstraProReady, selectChatGptAstraPro } from "./astra-selection";
+import { assertChatGptAstraProReady, selectChatGptAstraPro, assertChatGptSolReady, selectChatGptSolModel } from "./astra-selection";
 import {
   ChatGptWebAdapterError,
   chatGptBrowserTabClosedError,
@@ -2203,6 +2203,15 @@ export class ChatGptBrowserWorker {
       await captureDiagnostic?.("astra-pro-confirmed");
       return mode;
     }
+    await throwIfChatGptSessionFailureAlert(page);
+    try { await selectChatGptSolModel(page, currentEffort, abortSignal); }
+    catch (error) {
+      abortSignal?.throwIfAborted();
+      await throwIfChatGptSessionFailureAlert(page);
+      await throwIfChatGptRateLimitDialog(page);
+      throw error;
+    }
+    await captureDiagnostic?.("sol-model-confirmed");
     const activation = await activateChatGptEffortMenu(page, currentEffort);
     if (activation.method === "pointerdown") {
       await captureDiagnostic?.("effort-menu-pointerdown-fallback");
@@ -3288,7 +3297,7 @@ export class ChatGptBrowserWorker {
     captureDiagnostic?: (checkpoint: string) => Promise<void>,
     abortSignal?: AbortSignal,
     externalProgress?: ChatGptTurnProgressReader,
-    submissionLifecycle?: Pick<BrowserTurn, "onSendActivated" | "onSubmitted"> & Partial<Pick<BrowserTurn, "modelId">>,
+    submissionLifecycle?: Pick<BrowserTurn, "onSendActivated" | "onSubmitted"> & Partial<Pick<BrowserTurn, "modelId" | "reasoning" | "capabilities">>,
     completionTracker?: ChatGptCompletionTracker,
     recoverObservation?: ChatGptObservationRecovery,
     expectedFileNames: readonly string[] = [],
@@ -3318,6 +3327,13 @@ export class ChatGptBrowserWorker {
       const control = composer.locator("xpath=ancestor::form[1]")
         .locator(CHATGPT_EFFORT_CONTROL_SELECTOR).filter({ visible: true }).last();
       await assertChatGptAstraProReady(control, abortSignal, page);
+    }
+    if (submissionLifecycle?.modelId === CHATGPT_WEB_MODEL_ID) {
+      const control = composer.locator("xpath=ancestor::form[1]")
+        .locator(CHATGPT_EFFORT_CONTROL_SELECTOR).filter({ visible: true }).last();
+      if (!submissionLifecycle.capabilities) throw new Error("Missing Sol selection capabilities before Send");
+      const mode = resolveChatGptWebModelMode(submissionLifecycle.modelId, submissionLifecycle.reasoning, submissionLifecycle.capabilities);
+      await assertChatGptSolReady(page, control, mode.uiEffortIndex!, abortSignal);
     }
     const initialToolBatchRevision = externalProgress?.snapshot().lastToolBatchRevision ?? 0;
     if (expectedPrompt !== undefined) await this.assertPromptAttached(page, expectedPrompt, abortSignal);

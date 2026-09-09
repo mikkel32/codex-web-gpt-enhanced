@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Locator, Page } from "playwright-core";
-import { assertChatGptAstraProReady, selectChatGptAstraPro } from "../src/adapters/chatgpt-web/astra-selection";
+import { assertChatGptAstraProReady, selectChatGptAstraPro, assertChatGptSolReady, selectChatGptSolModel } from "../src/adapters/chatgpt-web/astra-selection";
 import { activateChatGptEffortMenu } from "../src/chatgpt-session";
 import { ChatGptBrowserWorker } from "../src/adapters/chatgpt-web/browser-worker";
 import { resolveChatGptWebModelMode } from "../src/adapters/chatgpt-web/model";
@@ -15,12 +15,14 @@ function picker(options: { badge?: string; closedBadge?: string; maximum?: numbe
     evaluate: async () => raw(selected ? options.badge ?? "6 Pro" : "5.6 Pro") };
   const latest = { isVisible: async () => submenu, getAttribute: async (name: string) => name === "aria-checked" ? String(selected) : "false",
     press: async () => { if (!options.ignoreLatest) selected = true; submenu = false; actions.push("Latest"); options.onLatest?.(); } };
+  const sol = { isVisible: async () => submenu, getAttribute: async (name: string) => name === "aria-checked" ? String(!selected) : "false",
+    press: async () => { if (!options.ignoreLatest) selected = false; submenu = false; actions.push("Sol"); options.onLatest?.(); } };
   const power = { isVisible: async () => true, locator: () => slider,
     getAttribute: async () => options.powerDisabled || submenu ? "true" : "false",
     press: async (key: string) => { actions.push(key); position += options.jump ?? 1; } };
   const menu = { isVisible: async () => open, filter() { return this; }, last() { return this; },
     locator: (selector: string) => selector.includes("data-model-reasoning-effort-slider") ? power : selector.includes(":not(:has") ? model : ({ isVisible: async () => submenu }),
-    getByRole: (_role: string, query: { name: RegExp }) => query.name.test(options.latestLabel ?? "Latest") ? latest : ({ isVisible: async () => false }) };
+    getByRole: (_role: string, query: { name: RegExp }) => query.name.test(options.latestLabel ?? "Latest") ? latest : query.name.test("GPT-5.6 Sol") ? sol : ({ isVisible: async () => false }) };
   const control = { getAttribute: async (name: string) => name === "aria-controls" ? "owned-menu" : "false",
     evaluate: async () => raw(options.closedBadge ?? options.badge ?? "6 Pro"), click: async () => { open = true; } };
   const page = { locator: () => menu, keyboard: { press: async (key: string) => { actions.push(key); open = false; } } };
@@ -32,6 +34,21 @@ test("Astra Pro selects Latest, reaches Pro in verified steps, and reads back La
   const fixture = picker();
   await selectChatGptAstraPro(fixture.page, fixture.control);
   expect(fixture.actions).toEqual(["Latest", "ArrowRight", "ArrowRight", "Latest", "Escape"]);
+});
+
+test("Sol explicitly replaces Latest and verifies the model separately from Power", async () => {
+  for (const latestLabel of ["Latest", "Seneste", "Nyeste"]) for (const initialPosition of [2, 3, 4]) {
+    const fixture = picker({ latestLabel, initialLatest: true, initialPosition });
+    await selectChatGptSolModel(fixture.page, fixture.control);
+    expect(fixture.actions).toEqual(["Sol", "Sol", "Escape"]);
+    await assertChatGptSolReady(fixture.page, fixture.control, initialPosition);
+    fixture.setState(true, initialPosition);
+    await expect(assertChatGptSolReady(fixture.page, fixture.control, initialPosition)).rejects.toMatchObject({ code: "sol_model_unavailable", retryable: false });
+    fixture.setState(false, (initialPosition + 1) % 5);
+    await expect(assertChatGptSolReady(fixture.page, fixture.control, initialPosition)).rejects.toMatchObject({ code: "sol_model_unavailable" });
+  }
+  const ignored = picker({ initialLatest: true, ignoreLatest: true });
+  await expect(selectChatGptSolModel(ignored.page, ignored.control)).rejects.toMatchObject({ code: "sol_model_unavailable" });
 });
 
 test("Latest plus Pro is accepted without a numeric label, including already-selected state", async () => {
@@ -97,12 +114,12 @@ test("cancellation while checking Latest cannot authorize submission", async () 
   await expect(assertChatGptAstraProReady(fixture.control, controller.signal, fixture.page)).rejects.toMatchObject({ name: "AbortError" });
 });
 
-test("the real Send boundary rechecks Astra after preparation, including reused conversations", async () => {
+test("the real Send boundary rechecks both model and Power after preparation, including reused conversations", async () => {
   const send = (ChatGptBrowserWorker.prototype as unknown as {
     sendAttachedPrompt(page: Page, baseline: unknown, capture: (checkpoint: string) => Promise<void>, signal: AbortSignal,
-      progress: undefined, lifecycle: { modelId: string; onSendActivated(): Promise<void> }): Promise<string>;
+      progress: undefined, lifecycle: { modelId: string; reasoning: string; capabilities: { localToolsEnabled: boolean; solAvailable: boolean; proAvailable: boolean }; onSendActivated(): Promise<void> }): Promise<string>;
   }).sendAttachedPrompt;
-  for (const latestLabel of ["Latest", "Seneste"]) for (const state of [{ initialLatest: true, initialPosition: 4 }, { initialLatest: false, initialPosition: 4 }, { initialLatest: true, initialPosition: 2 }]) {
+  for (const astra of [true, false]) for (const latestLabel of ["Latest", "Seneste"]) for (const state of [{ initialLatest: true, initialPosition: 4 }, { initialLatest: false, initialPosition: 4 }, { initialLatest: true, initialPosition: 2 }, { initialLatest: false, initialPosition: 2 }]) {
     let sends = 0, activated = 0;
     const fixture = picker({ latestLabel, initialLatest: true, initialPosition: 4, badge: "Pro", closedBadge: "Pro" });
     const hidden = { filter() { return this; }, last() { return this; }, isVisible: async () => false };
@@ -114,11 +131,12 @@ test("the real Send boundary rechecks Astra after preparation, including reused 
     const result = send.call(worker, page, {}, async checkpoint => {
       if (checkpoint === "send-ready") fixture.setState(state.initialLatest, state.initialPosition);
     },
-      new AbortController().signal, undefined, { modelId: CHATGPT_WEB_ASTRA_BACKEND_MODEL, onSendActivated: async () => { activated++; } });
-    if (state.initialLatest && state.initialPosition === 4) {
+      new AbortController().signal, undefined, { modelId: astra ? CHATGPT_WEB_ASTRA_BACKEND_MODEL : "gpt-5.6-sol", reasoning: "max",
+        capabilities: { localToolsEnabled: true, solAvailable: true, proAvailable: true }, onSendActivated: async () => { activated++; } });
+    if (state.initialLatest === astra && state.initialPosition === 4) {
       await expect(result).resolves.toBe("user_turn"); expect(sends).toBe(1); expect(activated).toBe(1);
     } else {
-      await expect(result).rejects.toMatchObject({ code: "astra_pro_unavailable", retryable: false });
+      await expect(result).rejects.toMatchObject({ code: astra ? "astra_pro_unavailable" : "sol_model_unavailable", retryable: false });
       expect(sends).toBe(0); expect(activated).toBe(0);
     }
   }

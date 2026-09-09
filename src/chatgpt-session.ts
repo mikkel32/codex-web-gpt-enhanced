@@ -58,6 +58,7 @@ async function visibleEffortSurface(
   page: Page,
   control: Locator,
 ): Promise<{ menu: Locator; slider: Locator } | undefined> {
+  if (await control.getAttribute("data-state").catch(() => null) === "closed") return undefined;
   const menu = await chatGptEffortMenuForControl(page, control);
   const slider = page.locator(CHATGPT_EFFORT_SLIDER_SELECTOR).filter({ visible: true }).last();
   if (await menu.isVisible().catch(() => false) || await slider.isVisible().catch(() => false)) {

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { buildContextPlan } from "../src/adapters/chatgpt-web/context-plan";
+import { buildContextPlan, canonicalHistoricalEvidence } from "../src/adapters/chatgpt-web/context-plan";
+import { NativeContextStore } from "../src/adapters/chatgpt-web/context-store";
 import { nativeContextPrompt } from "../src/adapters/chatgpt-web/native-context";
 import { compiledChatGptWebMessages, estimateCompiledChatGptWebInputTokens } from "../src/adapters/chatgpt-web/input-tokens";
 import { parseRequest } from "../src/responses/parser";
@@ -8,6 +9,42 @@ import { estimateChatGptWebInputTokens } from "../src/adapters/chatgpt-web/usage
 import type { ChatGptTurnEnvironment } from "../src/adapters/chatgpt-web/environment";
 
 const environment: ChatGptTurnEnvironment = { cwd: "/fixture/project", roots: ["/fixture/project"], writableRoots: [], sandboxPolicy: { type: "readOnly", networkAccess: false }, tools: [] };
+test("canonical historical evidence remains searchable in a delta without replaying omitted work", async () => {
+  const retired = "turn_abcdefghijklmnopqrstuvwx";
+  const body = "old log\n".repeat(8000) + "UNIQUE_PAST_EVIDENCE" + "tail\n".repeat(1000) + retired;
+  const input = [
+    { type: "function_call", call_id: "old-log", name: "exec_command", arguments: '{"cmd":"old work"}' },
+    { type: "function_call_output", call_id: "old-log", output: body },
+    ...Array.from({ length: 10 }, (_, i) => ({ role: "assistant", content: `Earlier progress ${i}` })),
+    { role: "user", content: "Continue using the old log." },
+  ];
+  const canonical = parseRequest({ model: "gpt-5.6-sol", reasoning: { effort: "xhigh" }, input });
+  const delta = { ...canonical, context: { ...canonical.context, messages: canonical.context.messages.slice(-1) } };
+  const compiled = compileChatGptWebPrompt(delta, { localToolsEnabled: true, solAvailable: true, proAvailable: true }, "turn_abcdefghijklmnopqrstuvwx", { nativeRetrieval: true, experimentalMultipartParts: 2, conversationState: "continuation" });
+  const history = canonicalHistoricalEvidence(canonical.context.messages);
+  expect(history).toHaveLength(1);
+  expect(history[0]!.text).not.toContain(retired);
+  expect(history[0]!.text).toContain("[retired turn handle]");
+  const plan = await buildContextPlan(compiled, environment, undefined, history);
+  try {
+    const store = new NativeContextStore(plan.files, plan.options);
+    let receipt: string | undefined;
+    for (const file of plan.files.filter(file => file.required !== false)) {
+      let offset = 0;
+      do { const page = store.read(file.name, offset, receipt); receipt = page.receipt ?? receipt; offset += page.text.length; } while (offset < file.text.length);
+      store.read(file.name, file.text.length, receipt);
+    }
+    const hit = store.search("UNIQUE_PAST_EVIDENCE").matches[0]!;
+    expect(hit.name).toBe(history[0]!.name);
+    expect(store.read(hit.name, hit.offset).text).toContain("UNIQUE_PAST_EVIDENCE");
+    const core = JSON.parse(plan.compiled.multipart!.parts[0]!).records;
+    expect(core).toHaveLength(1);
+    expect(JSON.stringify(core)).not.toContain("old-log");
+    expect(JSON.stringify(core)).not.toContain("UNIQUE_PAST_EVIDENCE");
+    expect(plan.compiled.multipart!.parts[1]).toContain(history[0]!.name);
+    expect(canonicalHistoricalEvidence(delta.context.messages)).toEqual([]);
+  } finally { plan.release(); }
+});
 test("large historical evidence is deferred while every instruction and action record is preserved", async () => {
   const body = "unimportant log line\n".repeat(25000) + "old-fact-only-in-archive\n" + "tail\n".repeat(1000);
   const messages = [

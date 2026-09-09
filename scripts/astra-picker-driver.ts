@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { setTimeout as sleep } from "node:timers/promises";
 import { chromium } from "playwright-core";
-import { selectChatGptAstraPro, assertChatGptAstraProReady } from "../src/adapters/chatgpt-web/astra-selection";
+import { selectChatGptAstraPro, assertChatGptAstraProReady, selectChatGptSolModel, assertChatGptSolReady } from "../src/adapters/chatgpt-web/astra-selection";
 import { verifyConnectorActivationFixture } from "./connector-activation-fixture";
 
 const browser = await chromium.connectOverCDP(process.argv[2]!);
@@ -15,6 +15,7 @@ try {
   await page.waitForFunction(() => typeof (window as unknown as { setCase?: unknown }).setCase === "function");
   for (const danish of [false, true]) for (const options of [{ noGeneration: true, latest: true, position: 4, verifyOnly: true },
     {}, { compact: true }, { hiddenGeneration: true }, { expanded: true, compact: true },
+    { forceMounted: true, latest: true, position: 4, verifyOnly: true },
     { compact: true, expanded: true, latest: true, position: 4, verifyOnly: true },
     { compact: true, expanded: true, modelsOnly: true },
     { compact: true, expanded: true, modelsOnly: true, latest: true, position: 4, verifyOnly: true },
@@ -30,11 +31,24 @@ try {
     } else {
       if (!options.verifyOnly) await selectChatGptAstraPro(page, control);
       await assertChatGptAstraProReady(control, undefined, page);
-      assert.equal(await page.getByRole("menu").isVisible(), false, "Picker must release focus before Send");
+      assert.equal(await page.getByRole("menu").getAttribute("data-state"), "closed", "Picker must release focus before Send");
     }
     const events = await page.evaluate(() => (window as unknown as { events: string[] }).events);
     assert(!events.includes("disabled-power"), "Pressed Power during a disabled transition");
   }
   console.log(`ASTRA_ELECTRON_PICKER_OK ${process.platform}/${process.arch} electron=${process.versions.electron} english danish-seneste structural-controls normal compact hidden-label expanded-menu model-list-only retained-compact latest-pro-no-generation already-selected rejects-nonlatest rejects-nonpro`);
+  for (const danish of [false, true]) for (const position of [2, 3, 4]) for (const expanded of [false, true]) for (const forceMounted of [false, true]) {
+    await page.evaluate(value => (window as unknown as { setCase(v: unknown): void }).setCase(value),
+      { latest: true, compact: true, modelsOnly: true, expanded, position, danish, forceMounted });
+    const control = page.getByTestId("model-switcher-dropdown-button");
+    await assert.rejects(assertChatGptSolReady(page, control, position), { code: "sol_model_unavailable" });
+    await selectChatGptSolModel(page, control);
+    await assertChatGptSolReady(page, control, position);
+    assert.equal(await page.getByRole("menu").getAttribute("data-state"), "closed");
+    const events = await page.evaluate(() => (window as unknown as { events: string[] }).events);
+    assert(events.includes("GPT-5.6 Sol"));
+    assert(!events.includes("Latest") && !events.includes("Seneste") && !events.includes("disabled-power"));
+  }
+  console.log("SOL_ELECTRON_PICKER_OK 24 cases English Danish High ExtraHigh Pro replaces-Latest rechecks-choice force-mounted-closed-menu");
   await verifyConnectorActivationFixture(page);
 } finally { await browser.close(); }

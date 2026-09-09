@@ -1,6 +1,7 @@
 import { estimateTokens } from "../../lib/token-estimate";
 import { createHash } from "node:crypto";
-import type { CompiledChatGptWebPrompt } from "./prompt";
+import { canonicalEvidenceRecords, type CompiledChatGptWebPrompt } from "./prompt";
+import type { CodexMessage } from "../../types";
 import type { ChatGptTurnEnvironment } from "./environment";
 import { chatGptImageFilePayloads } from "./browser-worker";
 import { extractInputDocument } from "./input-files";
@@ -19,16 +20,7 @@ export interface ContextPlan {
 }
 
 /** Selection is by role and lifecycle, never by inferred importance of instructions. */
-export async function buildContextPlan(compiled: CompiledChatGptWebPrompt, environment: ChatGptTurnEnvironment, signal?: AbortSignal): Promise<ContextPlan> {
-  const cache = new AttachmentCache();
-  try {
-  signal?.throwIfAborted();
-  if (!compiled.multipart) throw new Error("A native context plan requires canonical records");
-  const records: RecordEnvelope[] = compiled.multipart.parts.flatMap(part => {
-    const parsed = JSON.parse(part);
-    if (!Array.isArray(parsed.records)) throw new Error("Canonical context records are missing");
-    return parsed.records;
-  });
+function archiveRecords(records: readonly RecordEnvelope[], archives: Map<string, NativeContextFile>) {
   const messages = records.filter(record => record.kind === "message");
   const latestUser = Math.max(-1, ...messages.filter(record => record.message?.role === "user").map(record => record.message_index!));
   const recentBoundary = messages.slice(-8)[0]?.message_index ?? 0;
@@ -37,7 +29,6 @@ export async function buildContextPlan(compiled: CompiledChatGptWebPrompt, envir
     return record.message.content.filter(part => part?.type === "tool_call"
       && /(?:AGENTS|SKILL)\.md|skill:\/\//i.test(JSON.stringify(part.arguments))).map(part => part.id);
   }));
-  const archives = new Map<string, NativeContextFile>();
   let archivedResults = 0;
   const core = records.map(record => {
     const message = record.message;
@@ -57,6 +48,28 @@ export async function buildContextPlan(compiled: CompiledChatGptWebPrompt, envir
       content_reference: { name, chars: body.length, sha256: hash(body), status: "available_on_demand" },
     } };
   });
+  return { core, archivedResults };
+}
+
+export function canonicalHistoricalEvidence(messages: readonly CodexMessage[]): NativeContextFile[] {
+  const archives = new Map<string, NativeContextFile>();
+  archiveRecords(canonicalEvidenceRecords(messages), archives);
+  return [...archives.values()];
+}
+
+export async function buildContextPlan(compiled: CompiledChatGptWebPrompt, environment: ChatGptTurnEnvironment, signal?: AbortSignal,
+  historicalEvidence: readonly NativeContextFile[] = []): Promise<ContextPlan> {
+  const cache = new AttachmentCache();
+  try {
+  signal?.throwIfAborted();
+  if (!compiled.multipart) throw new Error("A native context plan requires canonical records");
+  const records: RecordEnvelope[] = compiled.multipart.parts.flatMap(part => {
+    const parsed = JSON.parse(part);
+    if (!Array.isArray(parsed.records)) throw new Error("Canonical context records are missing");
+    return parsed.records;
+  });
+  const archives = new Map(historicalEvidence.map(file => [file.name, file]));
+  const { core, archivedResults } = archiveRecords(records, archives);
   const attachments: Array<Record<string, unknown>> = [];
   let attachmentBytes = 0;
   for (const file of compiled.files ?? []) {
