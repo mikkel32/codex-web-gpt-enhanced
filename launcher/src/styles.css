@@ -833,6 +833,8 @@ code {
   color: #777777;
   font-size: var(--text-sm);
   place-items: center;
+  padding: 24px;
+  text-align: center;
 }
 
 .browser-empty {

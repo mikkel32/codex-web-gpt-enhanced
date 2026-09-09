@@ -1035,7 +1035,7 @@ test("closing the launcher page is an immediate terminal turn error", async () =
     responseDomSnapshot(responseTurn: unknown): Promise<unknown>;
   }).responseDomSnapshot;
   const responseTurn = {
-    evaluate: async () => { throw new Error("Target page has been closed"); },
+    evaluateAll: async () => { throw new Error("Target page has been closed"); },
     page: () => ({ isClosed: () => true }),
   };
 

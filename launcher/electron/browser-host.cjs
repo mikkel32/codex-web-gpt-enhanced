@@ -791,8 +791,8 @@ class BrowserHost {
     contents.on("did-start-navigation", (_event, url, inPlace, mainFrame) => {
       if (!mainFrame) return;
       tab.url = url;
-      tab.loading = true;
       if (!inPlace) {
+        tab.loading = true;
         tab.rendererReady = false;
         tab.deviceEmulationDirty = true;
       }
@@ -811,7 +811,12 @@ class BrowserHost {
     contents.on("did-navigate-in-page", (_event, url, mainFrame) => {
       if (!mainFrame) return;
       tab.url = url;
+      tab.loading = contents.isLoadingMainFrame?.() === true;
       this.rememberSubmittedConversationUrl(tab);
+    });
+    contents.on("dom-ready", () => {
+      tab.rendererReady = true;
+      this.syncViewVisibility();
     });
     contents.on("did-finish-load", () => {
       tab.url = contents.getURL();
@@ -1439,8 +1444,9 @@ class BrowserHost {
 
   hiddenTurnBounds() {
     const [contentWidth, contentHeight] = this.window.getContentSize();
-    const width = Math.max(HIDDEN_TURN_VIEWPORT.width, Math.round(contentWidth || 0));
-    const height = Math.max(HIDDEN_TURN_VIEWPORT.height, Math.round(contentHeight || 0));
+    // Hidden chats need an operational viewport, not a full-size copy of the user's
+    // monitor. Keeping its size fixed also avoids relayout in every chat on resize.
+    const { width, height } = HIDDEN_TURN_VIEWPORT;
     return {
       // Electron collapses a hidden WebContentsView's renderer viewport to 0x0. Keep running
       // turn views visible to Chromium and move them wholly outside the launcher content area so
@@ -1530,6 +1536,11 @@ class BrowserHost {
     if (this.authView) this.closeAuthView(this.authView, true);
     this.selectedTabId = tabId;
     this.syncViewVisibility();
+    // Reattach the selected native view at the top of the child stack. This repairs
+    // a stale/blank Windows presentation without navigating or disturbing the turn.
+    if (this.visible && this.surfaceActive && this.boundsReady) {
+      this.window?.contentView?.addChildView(this.activeView());
+    }
     if (this.visible && this.surfaceActive) this.activeView().webContents.focus();
     this.publishState?.(this.snapshot());
     this.writeDescriptor();
@@ -2343,7 +2354,7 @@ class BrowserHost {
       existing.helperPid = helperPid;
       existing.traceId = traceId;
       existing.status = "running";
-      existing.loading = true;
+      existing.loading = existing.view.webContents.isLoadingMainFrame?.() === true;
       existing.message = "ChatGPT is working";
       if (!reused) {
         existing.bootstrapReady = false;

@@ -10,11 +10,15 @@ app.commandLine.appendSwitch('remote-debugging-port', '0');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 // Keep a strong reference on every OS; a collected BrowserWindow closes its page.
 let fixtureWindow;
+let concurrentViews;
 const stopFile = path.join(home, 'stop');
 fs.watchFile(stopFile, { interval: 100 }, current => { if (current.size) app.quit(); });
 app.whenReady().then(async () => {
   fixtureWindow = new BrowserWindow({ show: false, width: 900, height: 700, webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
   await fixtureWindow.loadFile(path.resolve(__dirname, '../../tests/fixtures/astra-picker.html'));
+  if (process.env.RESPONSE_CONCURRENT_FIXTURE === '1') {
+    concurrentViews = await require('./concurrent-view-fixture.cjs')(fixtureWindow, home);
+  }
 });
 app.on('will-quit', () => fs.unwatchFile(stopFile));
 app.on('window-all-closed', () => app.quit());

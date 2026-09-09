@@ -11,7 +11,7 @@ const electron = createRequire(join(root, "launcher/package.json"))("electron") 
 // Reuse the existing offline Electron shell, with a fresh profile and no production browser data.
 const args = [electron, join(root, "launcher/scripts/astra-picker-electron.cjs")];
 if (process.platform === "linux") { args.push("--no-sandbox"); args.unshift("xvfb-run", "-a"); }
-const environment: NodeJS.ProcessEnv = { ...process.env, ASTRA_PICKER_TEST_HOME: home };
+const environment: NodeJS.ProcessEnv = { ...process.env, ASTRA_PICKER_TEST_HOME: home, RESPONSE_CONCURRENT_FIXTURE: "1" };
 delete environment.ELECTRON_RUN_AS_NODE;
 const child = Bun.spawn(args, { cwd: root, env: environment, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
 const stderr = new Response(child.stderr).text();
@@ -19,12 +19,15 @@ try {
   const websocket = await waitForElectronDebugger(join(home, "DevToolsActivePort"), () => child.exitCode === null);
   const build = await Bun.build({ entrypoints: [join(root, "scripts/response-state-driver.ts")], target: "node", format: "esm", outdir: home, naming: "driver.mjs" });
   assert(build.success, `Response driver build failed: ${build.logs.join("\n")}`);
-  const driver = Bun.spawn([electron, join(home, "driver.mjs"), websocket], {
+  const driver = Bun.spawn([electron, join(home, "driver.mjs"), websocket, home, String(child.pid)], {
     cwd: root, env: { ...environment, ELECTRON_RUN_AS_NODE: "1" }, stdout: "pipe", stderr: "pipe",
   });
-  const [status, stdout, errors] = await Promise.all([driver.exited, new Response(driver.stdout).text(), new Response(driver.stderr).text()]);
+  const timer = setTimeout(() => driver.kill(), 120_000);
+  const [status, stdout, errors] = await Promise.all([driver.exited, new Response(driver.stdout).text(), new Response(driver.stderr).text()])
+    .finally(() => clearTimeout(timer));
   assert.equal(status, 0, `Electron response-state fixture failed: ${errors}`);
   assert(stdout.includes("RESPONSE_STATE_ELECTRON_OK"));
+  assert(stdout.includes("CONCURRENT_BROWSER_ELECTRON_OK"));
   process.stdout.write(stdout);
 } finally {
   writeFileSync(join(home, "stop"), "stop");

@@ -966,6 +966,13 @@ export class ChatGptBrowserObservationTimeoutError extends Error {
   }
 }
 
+export class ChatGptBrowserObservationReadError extends Error {
+  constructor(cause: unknown) {
+    super("The ChatGPT response could not be observed", { cause });
+    this.name = "ChatGptBrowserObservationReadError";
+  }
+}
+
 export async function withChatGptBrowserObservationTimeout<T>(
   operation: Promise<T>,
   timeoutMs = CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS,
@@ -3652,7 +3659,9 @@ export class ChatGptBrowserWorker {
     responseTurn: Locator,
     cache?: ChatGptResponseDomCache,
   ): Promise<ChatGptResponseDomSnapshot> {
-    const observed = await responseTurn.evaluate((element, options) => {
+    const observed = await withChatGptBrowserObservationTimeout(responseTurn.evaluateAll((elements, options) => {
+      const element = elements[0];
+      if (!element) return { key: "" };
       const root = element as HTMLElement;
       type ObserverState = { id: number; revision: number; observer: MutationObserver };
       type ObserverRegistry = { documentId: string; nextId: number; states: WeakMap<Element, ObserverState> };
@@ -4009,13 +4018,16 @@ export class ChatGptBrowserWorker {
       knownKey: cache?.key,
       stoppedThinkingLabelSource: CHATGPT_STOPPED_THINKING_LABEL.source,
       attributeFilter: [...CHATGPT_DOM_REVISION_ATTRIBUTES],
-    }, { timeout: 2_000 }).catch(() => undefined);
-    if (!observed) {
+    })).catch(error => {
       if (responseTurn.page().isClosed()) {
         throw chatGptBrowserTabClosedError();
       }
-      return absentResponseDomSnapshot();
-    }
+      if (error instanceof ChatGptBrowserObservationTimeoutError || error instanceof TypeError) throw error;
+      throw new ChatGptBrowserObservationReadError(error);
+    });
+    // Absence was observed successfully. A slow or failed read must never masquerade
+    // as a missing response or fall back to an old cached completion.
+    if (!observed.key) return absentResponseDomSnapshot();
     const snapshot = observed.snapshot ?? cache?.snapshot ?? absentResponseDomSnapshot();
     if (observed.snapshot && cache) {
       cache.key = observed.key;
@@ -4567,9 +4579,10 @@ export class ChatGptBrowserWorker {
           continue;
         }
 
-        let snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
-        if (!snapshot.responsePresent) {
-          try {
+        let snapshot: ChatGptResponseDomSnapshot;
+        try {
+          snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
+          if (!snapshot.responsePresent) {
             const rebound = await withChatGptBrowserObservationTimeout(
               this.reconcileAssistantTurnBinding(
                 page,
@@ -4584,13 +4597,15 @@ export class ChatGptBrowserWorker {
               responseDomCache.snapshot = undefined;
               snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
             }
-          } catch (error) {
-            if (!(error instanceof ChatGptBrowserObservationTimeoutError) || !launcherSurfaceId) throw error;
+          }
+        } catch (error) {
+            if (!(error instanceof ChatGptBrowserObservationTimeoutError || error instanceof ChatGptBrowserObservationReadError)) throw error;
+            if (!launcherSurfaceId) throw chatGptResponseObservationError(error.message, error);
             consecutiveObservationRebinds += 1;
             if (consecutiveObservationRebinds > MAX_CHATGPT_BROWSER_PAGE_REBINDS) {
-              throw new Error(
-                `ChatGPT browser DOM remained unresponsive after ${MAX_CHATGPT_BROWSER_PAGE_REBINDS} same-page rebinds`,
-                { cause: error },
+              throw chatGptResponseObservationError(
+                `ChatGPT browser observation failed after ${MAX_CHATGPT_BROWSER_PAGE_REBINDS} same-page rebinds`,
+                error,
               );
             }
             await rebindLauncherPage(consecutiveObservationRebinds, error, turn.abortSignal);
@@ -4611,7 +4626,6 @@ export class ChatGptBrowserWorker {
             responseDomCache.snapshot = undefined;
             await diagnostics.capture(page, "response-page-rebound");
             continue;
-          }
         }
         if (snapshot.responsePresent) consecutiveObservationRebinds = 0;
         // The page was read successfully, so the fault budget is genuinely consecutive even when

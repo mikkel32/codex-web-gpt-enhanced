@@ -186,6 +186,25 @@ export async function inspectLauncherBrowserHostLiveness(
   });
 }
 
+async function boundedLauncherObservation<T>(operation: Promise<T>, timeoutMs: number, signal?: AbortSignal): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        onAbort = () => reject(new DOMException("Launcher browser connection aborted", "AbortError"));
+        if (signal?.aborted) { onAbort(); return; }
+        signal?.addEventListener("abort", onAbort, { once: true });
+        timer = setTimeout(() => reject(new Error("Launcher browser surface observation timed out")), Math.max(1, timeoutMs));
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
+  }
+}
+
 export async function selectLauncherPage(
   browser: Browser,
   descriptor: LauncherBrowserHostDescriptor,
@@ -193,19 +212,31 @@ export async function selectLauncherPage(
   surfaceId = descriptor.surfaceId,
   abortSignal?: AbortSignal,
 ): Promise<{ context: BrowserContext; page: Page }> {
-  const deadline = Date.now() + timeoutMs;
+  const deadline = performance.now() + timeoutMs;
+  // A slow unrelated renderer must not hold every helper's ownership lookup open. Keep
+  // at most one outstanding read per page, including across timed-out polling rounds.
+  const pending = new Map<Page, Promise<unknown>>();
   do {
     if (abortSignal?.aborted) {
       throw new DOMException("Launcher browser connection aborted", "AbortError");
     }
     const candidates = browser.contexts().flatMap(context => context.pages().map(page => ({ context, page })));
-    const inspected = await Promise.all(candidates.map(async candidate => ({
-      ...candidate,
-      surfaceId: await candidate.page.evaluate(
-        () => (globalThis as typeof globalThis & { __CODEX_WEB_GPT_SURFACE_ID__?: unknown })
-          .__CODEX_WEB_GPT_SURFACE_ID__,
-      ).catch(() => undefined),
-    })));
+    const inspected = await Promise.all(candidates.map(async candidate => {
+      let probe = pending.get(candidate.page);
+      if (!probe) {
+        probe = Promise.resolve().then(() => candidate.page.evaluate(
+          () => (globalThis as typeof globalThis & { __CODEX_WEB_GPT_SURFACE_ID__?: unknown })
+            .__CODEX_WEB_GPT_SURFACE_ID__,
+        )).catch(() => undefined);
+        pending.set(candidate.page, probe);
+        const current = probe;
+        void probe.then(() => { if (pending.get(candidate.page) === current) pending.delete(candidate.page); });
+      }
+      const observed = await boundedLauncherObservation(probe, Math.min(500, deadline - performance.now()), abortSignal)
+        .catch(error => { if (abortSignal?.aborted) throw error; return undefined; });
+      return { ...candidate, surfaceId: observed };
+    }));
+    if (abortSignal?.aborted) throw new DOMException("Launcher browser connection aborted", "AbortError");
     const owned = inspected.filter(candidate => candidate.surfaceId === surfaceId);
     if (owned.length === 1) {
       return { context: owned[0].context, page: owned[0].page };
@@ -213,8 +244,10 @@ export async function selectLauncherPage(
     if (owned.length > 1) {
       throw new Error(`Launcher browser host exposed ${owned.length} surfaces with the same ownership id`);
     }
-    await new Promise(resolve => setTimeout(resolve, 100));
-  } while (Date.now() < deadline);
+    if (performance.now() >= deadline) break;
+    await boundedLauncherObservation(new Promise<never>(() => {}), Math.min(100, deadline - performance.now()), abortSignal)
+      .catch(error => { if (abortSignal?.aborted) throw error; });
+  } while (performance.now() < deadline);
   throw new Error("Launcher browser host did not expose its owned browser surface");
 }
 
@@ -243,7 +276,7 @@ export async function connectLauncherBrowserHost(
   );
   let browser: Browser;
   try {
-    browser = await chromium.connectOverCDP(webSocketDebuggerUrl, { timeout: remaining() });
+    browser = await chromium.connectOverCDP(webSocketDebuggerUrl, { timeout: remaining(), noDefaults: true });
   } catch (error) {
     throw new Error(`Could not connect Playwright to the launcher browser: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -260,6 +293,13 @@ export async function connectLauncherBrowserHost(
       surfaceId,
       abortSignal,
     );
+    if (surfaceId) {
+      // Focus emulation belongs to this helper's exact page, not every concurrent chat.
+      await boundedLauncherObservation((async () => {
+        const session = await context.newCDPSession(page);
+        await session.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+      })(), remaining(), abortSignal);
+    }
     return { descriptor, browser, context, page };
   } catch (error) {
     await browser.close().catch(() => {});

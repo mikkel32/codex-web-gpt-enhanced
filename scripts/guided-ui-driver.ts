@@ -127,6 +127,9 @@ try {
         && document.querySelector(".manual-turn-guide")!.getBoundingClientRect().top >= bottom - 1;
     }), true, `Wrapped browser controls must not overlap review/${width}`);
     await screenshot(`turn-review-${width}`);
+    await page.getByRole("button", { name: "Restore view", exact: true }).click();
+    assert.equal(await page.evaluate(() => (window as unknown as GuidedFixtureWindow).guidedFixture.snapshot.browser?.activeTabId), "review-task");
+    assert.equal(await page.evaluate(() => (window as unknown as GuidedFixtureWindow).guidedFixture.calls.filter(action => action === "selectBrowserTab").length), 1);
     await page.evaluate(() => {
       const fixture = (window as unknown as GuidedFixtureWindow).guidedFixture;
       if (!fixture.snapshot.browser) throw new Error("Missing review browser fixture");

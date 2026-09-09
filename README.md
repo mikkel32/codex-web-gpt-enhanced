@@ -14,7 +14,20 @@ stay together in Codex.
 
 > **Setup and recovery:** start with **Set up automatically** in Overview. The launcher reuses saved credentials and guides only the steps that need you. For `Tool read not found` or `Unknown root "/Users"`, see [connector recovery](docs/CONNECTOR_RECOVERY.md); changing folder permissions is not the default fix.
 
-## Maria 5.20.2: stable interrupted-turn recovery
+## Maria 5.20.3: concurrent-chat stability
+
+**5.20.3** bounds browser ownership checks so one unresponsive tab cannot indefinitely
+block other tasks. Helpers preserve unrelated pages' focus and display settings,
+and failed response reads recover observation of the same chat instead of pretending
+the response disappeared. Hidden chats keep an 800 x 600 viewport across window
+resizes, while existing idle-page reclamation stays enabled.
+
+**Restore view** in Browser reapplies the current native page presentation without
+reloading or resending. Chat reuse and in-page navigation no longer leave a false
+loading state. See the [5.20.3 release notes](docs/release-5.20.3.md) for verification
+scope and remaining live-service limitations.
+
+## Interrupted-turn recovery
 
 **5.20.2** keeps interrupted chats available for inspection instead of closing the
 tab and leaving an unrecoverable in-flight record. In Browser, **I reviewed this

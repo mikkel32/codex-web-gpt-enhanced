@@ -896,6 +896,10 @@ function BrowserSurface({
               : copy.passkeySignIn}
           </button>
         ) : null}
+        {visible && browser?.activeTabId ? (
+          <button className="toolbar-text-button" onClick={() => void selectTab(browser.activeTabId)}
+            title={copy.restoreBrowserViewBody} type="button">{copy.restoreBrowserView}</button>
+        ) : null}
         <button className="toolbar-text-button" onClick={() => void toggle()} type="button">
           {visible ? copy.hideBrowser : copy.openChatgpt}
         </button>
@@ -958,7 +962,7 @@ function BrowserSurface({
           </div>
         ) : (
           <div className="browser-underlay" aria-hidden="true">
-            <span>{copy.loading}</span>
+            <span>{browser?.loading ? copy.loading : copy.restoreBrowserViewBody}</span>
           </div>
         )}
       </div>
