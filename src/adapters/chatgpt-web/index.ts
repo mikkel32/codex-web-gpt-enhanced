@@ -486,9 +486,11 @@ export function createChatGptWebAdapter(
       return answer;
     });
     const browserAbort = new AbortController();
+    const contextObservationAbort = new AbortController();
     let browserOwnerSettled = false;
     const trackBrowserOwner = (browser: Promise<string>): Promise<string> => browser.finally(() => {
       browserOwnerSettled = true;
+      contextObservationAbort.abort();
     });
     const trace = new ChatGptTraceFeed();
     const text = new ChatGptTextFeed();
@@ -499,6 +501,26 @@ export function createChatGptWebAdapter(
     ): void => {
       if (observedCapabilityTokens.has(turnToken)) return;
       observedCapabilityTokens.add(turnToken);
+      if (!manualRequest && broker.waitForContextProgress) {
+        const signal = AbortSignal.any([browserAbort.signal, contextObservationAbort.signal]);
+        // Park one IPC request until a successful context read/search; no per-tick broker polling.
+        void (async () => {
+          let revision = 0;
+          while (!signal.aborted && !browserOwnerSettled) {
+            const progress = await broker.waitForContextProgress!(turnToken, revision, signal);
+            if (signal.aborted || browserOwnerSettled) break;
+            revision = progress.revision;
+            externalProgress.recordContextActivity(progress.lastProgressAt);
+          }
+        })().catch(error => {
+          // Old remote brokers can lack this observational extension. Never replay or cancel an
+          // accepted request merely because its additional liveness channel is unavailable.
+          if (!signal.aborted && !browserOwnerSettled
+            && !(error instanceof Error && error.message === "Context progress turn is terminal")) console.warn(
+            `[chatgpt-web] context-progress trace=${traceId} unavailable error=${error instanceof Error ? error.name : "unknown"}`,
+          );
+        });
+      }
       void broker.waitForRetirement(turnToken).then(
         () => {
           const retirement = new Error("Codex Native retired the turn binding before its tool work completed");

@@ -10,6 +10,7 @@ import { CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
 import { CHATGPT_CONNECTOR_NAME, DEV_CHATGPT_CONNECTOR_NAME, defaultChromeExecutable, legacyChatGptConnectorMigrationMessage } from "../src/config";
 import { parseChatGptEffortSliderState } from "../src/chatgpt-session";
 import { ChatGptExternalTurnProgress, chatGptExternalToolCallsAreInFlight } from "../src/adapters/chatgpt-web/turn-progress";
+import { waitForChatGptResponsePoll } from "../src/adapters/chatgpt-web/browser-worker";
 import type { CodexProviderConfig } from "../src/types";
 
 const idleConnectorActivation = (): ChatGptConnectorActivationSnapshot => ({
@@ -3048,20 +3049,54 @@ test("localized stopped-thinking status does not match ordinary prose", () => {
   }
 });
 
-test("persistent Stopped thinking is a terminal cancelled turn", () => {
-  expect(CHATGPT_STOPPED_THINKING_GRACE_MS).toBe(5_000);
+const idleStoppedState = { visible: true, responsePresent: true, running: false, progressKey: "unchanged", externalProgressLive: false };
+
+test("quiet response polling wakes for context/tool activity and cancels parked waits", async () => {
+  const progress = new ChatGptExternalTurnProgress();
+  const contextWait = waitForChatGptResponsePoll(60_000, 0, progress);
+  progress.recordContextActivity(Date.now());
+  await contextWait;
+  const toolWait = waitForChatGptResponsePoll(60_000, progress.snapshot().revision, progress);
+  progress.recordToolBatch(1);
+  await toolWait;
+  const abort = new AbortController();
+  const cancelled = waitForChatGptResponsePoll(60_000, progress.snapshot().revision, progress, abort.signal).catch(error => error);
+  abort.abort();
+  expect(await cancelled).toMatchObject({ name: "AbortError" });
+});
+
+test("Stopped thinking needs sustained idle evidence and is not a user cancellation", () => {
   const tracker = new ChatGptStoppedThinkingTracker();
-  expect(tracker.update(true, 1_000)).toBeFalse();
-  expect(tracker.update(true, 5_999)).toBeFalse();
-  expect(tracker.update(false, 6_000)).toBeFalse();
-  expect(tracker.update(true, 10_000)).toBeFalse();
-  expect(tracker.update(true, 15_000)).toBeTrue();
+  for (let now = 0; now < CHATGPT_STOPPED_THINKING_GRACE_MS; now += 1_000) {
+    expect(tracker.update(idleStoppedState, now)).toBeFalse();
+  }
+  expect(CHATGPT_STOPPED_THINKING_GRACE_MS).toBeGreaterThan(5_000);
+  expect(tracker.update(idleStoppedState, CHATGPT_STOPPED_THINKING_GRACE_MS)).toBeTrue();
   expect(chatGptStoppedThinkingError()).toMatchObject({
-    status: 499,
-    errorType: "client_closed_request",
-    code: "client_cancelled",
+    status: 502,
+    errorType: "server_error",
+    code: "chatgpt_generation_stopped",
     retryable: false,
   });
+});
+
+test("generation, tool work, new text and uncertain observations reset stop evidence", () => {
+  for (const change of [{ running: true }, { running: undefined }, { externalProgressLive: true },
+    { progressKey: "new answer" }, { visible: false }, { responsePresent: false }]) {
+    const tracker = new ChatGptStoppedThinkingTracker(4_000);
+    tracker.update(idleStoppedState, 0);
+    expect(tracker.update(idleStoppedState, 3_000)).toBeFalse();
+    expect(tracker.update({ ...idleStoppedState, ...change }, 4_000)).toBeFalse();
+    expect(tracker.pending).toBeFalse();
+    expect(tracker.update(idleStoppedState, 5_000)).toBeFalse();
+  }
+  const stalled = new ChatGptStoppedThinkingTracker(4_000);
+  stalled.update(idleStoppedState, 0);
+  expect(stalled.update(idleStoppedState, 60_000)).toBeFalse();
+  expect(stalled.update(idleStoppedState, 61_000)).toBeFalse();
+  expect(stalled.update(idleStoppedState, 62_000)).toBeFalse();
+  expect(stalled.update(idleStoppedState, 64_999)).toBeFalse();
+  expect(stalled.update(idleStoppedState, 65_000)).toBeTrue();
 });
 
 test("visible DOM trace keeps a complete action phrase instead of a nested count", () => {
@@ -3265,11 +3300,11 @@ test("the launcher helper transport carries MCP progress into the out-of-process
   expect(helper).toMatch(/externalProgress: progress/);
 });
 
-test("turn cancellation heuristics defer to proven MCP progress in the single response loop", () => {
+test("the response loop checks generation and context progress before inferring a stop", () => {
   const worker = readFileSync("src/adapters/chatgpt-web/browser-worker.ts", "utf8");
-  // A stale "Stopped thinking" label must not cancel a turn that is still driving tool calls, and
-  // the one response loop keeps the liveness guard after atomic attachment transport.
-  expect((worker.match(/stoppedThinkingTracker\.clear\(\)/g) ?? []).length).toBe(1);
+  const check = worker.indexOf("const stopped = stoppedThinkingTracker.update(");
+  expect(worker.lastIndexOf("const observedRunning =", check)).toBeGreaterThan(0);
+  expect(worker.slice(check, check + 350)).toContain("externalProgressLive");
   expect((worker.match(/domHealthTracker\.clearMissingResponse\(\)/g) ?? []).length).toBe(1);
 });
 
@@ -3410,14 +3445,14 @@ test("proven progress forgets a Stopped thinking window rather than merely ignor
 
   // The label appears while a tool call is outstanding. Clearing progress also clears the window,
   // so the next observation starts a new grace period.
-  expect(tracker.update(true, 1_000)).toBeFalse();
-  expect(tracker.update(true, 3_000)).toBeFalse();
+  expect(tracker.update(idleStoppedState, 1_000)).toBeFalse();
+  expect(tracker.update(idleStoppedState, 3_000)).toBeFalse();
   tracker.clear();
 
   // Progress has ended and the window starts again from here, not from the original sighting.
-  expect(tracker.update(true, 6_500)).toBeFalse();
-  expect(tracker.update(true, 11_499)).toBeFalse();
-  expect(tracker.update(true, 11_500)).toBeTrue();
+  expect(tracker.update(idleStoppedState, 6_500)).toBeFalse();
+  expect(tracker.update(idleStoppedState, 11_499)).toBeFalse();
+  expect(tracker.update(idleStoppedState, 11_500)).toBeTrue();
 });
 
 test("the shipped commentary classifier separates answer Markdown from reasoning in a real DOM", () => {

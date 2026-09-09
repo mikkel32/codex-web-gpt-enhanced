@@ -31,7 +31,7 @@ try {
     } else {
       if (!options.verifyOnly) await selectChatGptAstraPro(page, control);
       await assertChatGptAstraProReady(control, undefined, page);
-      assert.equal(await page.getByRole("menu").getAttribute("data-state"), "closed", "Picker must release focus before Send");
+      assert.equal(await page.getByRole("menu", { includeHidden: true }).getAttribute("data-state"), "closed", "Picker must release focus before Send");
     }
     const events = await page.evaluate(() => (window as unknown as { events: string[] }).events);
     assert(!events.includes("disabled-power"), "Pressed Power during a disabled transition");
@@ -44,7 +44,7 @@ try {
     await assert.rejects(assertChatGptSolReady(page, control, position), { code: "sol_model_unavailable" });
     await selectChatGptSolModel(page, control);
     await assertChatGptSolReady(page, control, position);
-    assert.equal(await page.getByRole("menu").getAttribute("data-state"), "closed");
+    assert.equal(await page.getByRole("menu", { includeHidden: true }).getAttribute("data-state"), "closed");
     const events = await page.evaluate(() => (window as unknown as { events: string[] }).events);
     assert(events.includes("GPT-5.6 Sol"));
     assert(!events.includes("Latest") && !events.includes("Seneste") && !events.includes("disabled-power"));

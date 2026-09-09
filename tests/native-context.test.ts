@@ -10,6 +10,7 @@ import { nativeContextPrompt, nativeContextPage, nativeContextResult, NATIVE_CON
 import { chatGptPromptFilePayloads } from "../src/adapters/chatgpt-web/browser-worker";
 import { compiledChatGptWebMessages, estimateCompiledChatGptWebInputTokens } from "../src/adapters/chatgpt-web/input-tokens";
 import type { ChatGptTurnEnvironment } from "../src/adapters/chatgpt-web/environment";
+import { ChatGptExternalTurnProgress, ChatGptMirroredTurnProgress, chatGptExternalProgressIsLive } from "../src/adapters/chatgpt-web/turn-progress";
 
 function pageOf(response: unknown): NativeContextPage {
   const content = (response as { content: Array<{ type: string; text: string }> }).content;
@@ -54,11 +55,24 @@ test("context retrieval is paginated, immutable after claim, task-isolated, and 
       .toMatchObject({readOnlyHint:true,destructiveHint:false,openWorldHint:false});
     expect((await client.listTools()).tools.find(tool => tool.name === "codex_context_search")?.annotations?.readOnlyHint).toBe(true);
     expect((await read(other,files[0]!.name,0)).isError).toBe(true);
+    const contextProgress = remote.waitForContextProgress(token, 0);
     const first=await read(token,files[0]!.name,0);
+    const activity = await contextProgress;
+    expect(activity.revision).toBe(1);
+    const progress = new ChatGptExternalTurnProgress();
+    progress.recordContextActivity(activity.lastProgressAt);
+    const mirror = new ChatGptMirroredTurnProgress();
+    mirror.apply(progress.snapshot());
+    expect(mirror.snapshot()).toMatchObject({ activeToolCalls: 0, lastToolBatchRevision: 0, revision: 1 });
+    expect(chatGptExternalProgressIsLive(mirror.snapshot(), activity.lastProgressAt + 5_001, 60_000)).toBe(true);
     expect(first.isError).not.toBe(true);
     expect(first.structuredContent).toBeUndefined();
     expect(pageOf(first)).toMatchObject({offset:0,next_offset:NATIVE_CONTEXT_PAGE_CHARS});
     expect((await read(token,files[0]!.name,NATIVE_CONTEXT_PAGE_CHARS+1)).isError).toBe(true);
+    const waitAbort = new AbortController();
+    const invalidReadProgress = remote.waitForContextProgress(token, activity.revision, waitAbort.signal).catch(error => error);
+    waitAbort.abort();
+    expect(await invalidReadProgress).toBeInstanceOf(Error);
     await expect(remote.setContextFiles(token,files)).rejects.toThrow("unclaimed");
     const premature=await client.callTool({name:"codex_tool_call",arguments:{turn_token:token,wire_name:"read_file",arguments:{}}});
     expect(premature.isError).toBe(true);
@@ -72,12 +86,24 @@ test("context retrieval is paginated, immutable after claim, task-isolated, and 
     expect(call!.wireName).toBe("read_file");
     broker.completeTool(token,call!.callId,{content:[{type:"text",text:"fixture-ok"}]});
     expect((await work).isError).not.toBe(true);
+    const latestProgress = await remote.waitForContextProgress(token, activity.revision);
+    expect(latestProgress.revision).toBe(4); // Failed reads and native work are not context progress.
+    const retiredProgress = remote.waitForContextProgress(token, latestProgress.revision).catch(error => error);
     broker.revoke(token);
+    expect(await retiredProgress).toBeInstanceOf(Error);
+    const completedProgress = remote.waitForContextProgress(other, 0).catch(error => error);
+    const otherRevision = await remote.beginCompletionFence(other);
+    expect(await remote.commitCompletionFence(other, otherRevision!)).toBe(true);
+    expect(await completedProgress).toBeInstanceOf(Error);
     const revoked=await read(token,files[1]!.name,0);
     expect(revoked.isError).toBe(true);
     expect(JSON.stringify(revoked)).not.toContain(files[1]!.text);
   } finally {
-    await client.close(); broker.revoke(token); broker.revoke(other); await broker.close();
+    console.info("CONTEXT_FIXTURE_CLEANUP client");
+    await client.close(); broker.revoke(token); broker.revoke(other);
+    console.info("CONTEXT_FIXTURE_CLEANUP broker");
+    await broker.close();
+    console.info("CONTEXT_FIXTURE_CLEANUP complete");
   }
 },30000);
 

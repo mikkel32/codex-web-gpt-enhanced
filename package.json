@@ -1,6 +1,6 @@
 {
   "name": "codex-chatgpt-web",
-  "version": "5.20.0",
+  "version": "5.20.1",
   "private": true,
   "description": "A focused local Responses bridge that runs Codex tasks through a user-authenticated ChatGPT web session.",
   "repository": {
@@ -39,6 +39,7 @@
     "smoke": "bun run scripts/smoke-release.ts dist/runtime",
     "smoke:guided-ui": "bun run scripts/smoke-guided-ui.ts",
     "smoke:astra-picker": "bun run scripts/smoke-astra-picker.ts",
+    "smoke:response-state": "bun run scripts/smoke-response-state.ts",
     "smoke:web-compatibility": "bun run scripts/smoke-web-compatibility.ts",
     "smoke:codex": "bun run scripts/smoke-codex-catalog.ts",
     "smoke:cancel": "bun run scripts/smoke-codex-cancel.ts",

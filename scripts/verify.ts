@@ -28,6 +28,7 @@ try {
   await run(["run", "launcher:test"]);
   await run(["run", "launcher:build"]);
   await run(["run", "smoke:guided-ui"]);
+  await run(["run", "smoke:response-state"]);
   await run(["run", "scripts/build-runtime-bundle.ts", runtimeBundle]);
   await run([
     "run",

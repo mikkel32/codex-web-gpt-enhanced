@@ -14,16 +14,15 @@ stay together in Codex.
 
 > **Setup and recovery:** start with **Set up automatically** in Overview. The launcher reuses saved credentials and guides only the steps that need you. For `Tool read not found` or `Unknown root "/Users"`, see [connector recovery](docs/CONNECTOR_RECOVERY.md); changing folder permissions is not the default fix.
 
-## Maria 5.20: the breakthrough stable release
+## Maria 5.20.1: stable reliability update
 
-The working `5.15.0-alpha.10` implementation graduates to **5.20.0**, without the
-alpha label. The maintainer reports that the workflow is finally working with no
-issues in their current macOS setup.
+**5.20.1** fixes premature cancellation after "Stopped thinking". Context reads
+now count as progress, stale or quoted stop labels are ignored, and a confirmed
+upstream stop is reported separately from a user cancellation. Quiet polling does
+less work, and Windows broker connections close correctly after cancellation.
 
-This release brings forward acknowledged context delivery, retained conversation
-continuity, ChatGPT-managed Web context, verified native connection setup, and
-more reliable plugin evidence and model selection. See the
-[5.20.0 release notes](docs/release-5.20.0.md) for the changes and validation scope.
+The update preserves conversation continuity, context receipts, native tools and
+model selection. See the [5.20.1 release notes](docs/release-5.20.1.md) for details.
 
 ## Earlier interface and continuity improvements
 
