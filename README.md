@@ -14,7 +14,18 @@ stay together in Codex.
 
 > **Setup and recovery:** start with **Set up automatically** in Overview. The launcher reuses saved credentials and guides only the steps that need you. For `Tool read not found` or `Unknown root "/Users"`, see [connector recovery](docs/CONNECTOR_RECOVERY.md); changing folder permissions is not the default fix.
 
-## Maria 5.10
+## Maria 5.20: the breakthrough stable release
+
+The working `5.15.0-alpha.10` implementation graduates to **5.20.0**, without the
+alpha label. The maintainer reports that the workflow is finally working with no
+issues in their current macOS setup.
+
+This release brings forward acknowledged context delivery, retained conversation
+continuity, ChatGPT-managed Web context, verified native connection setup, and
+more reliable plugin evidence and model selection. See the
+[5.20.0 release notes](docs/release-5.20.0.md) for the changes and validation scope.
+
+## Earlier interface and continuity improvements
 
 Continuity now survives loss of the process-local conversation cache, and compaction
 failures preserve the original Web chat mapping. Large Automatic Full-harness
