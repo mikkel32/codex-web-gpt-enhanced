@@ -242,6 +242,31 @@ test("launcher turn control preserves a missing retained conversation as a typed
   }
 });
 
+test("launcher turn review conflicts survive HTTP transport without a generic channel error", async () => {
+  const { LauncherTurnReviewRequiredError } = await import("../src/launcher-browser-host");
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) { /* drain request */ }
+    response.writeHead(409, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: "Review the saved ChatGPT turn", code: "previous_turn_needs_attention" }));
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("test server has no port");
+    const error = await notifyLauncherTurn(descriptorFile(`http://127.0.0.1:${address.port}`), {
+      phase: "start", traceId: "review123456", helperPid: process.pid,
+      conversationKey: "a".repeat(64),
+    }).catch(caught => caught);
+    expect(error).toBeInstanceOf(LauncherTurnReviewRequiredError);
+    expect(error.message).toBe("Review the saved ChatGPT turn");
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
 test("launcher session verification uses the authenticated control channel instead of Bun CDP", async () => {
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];

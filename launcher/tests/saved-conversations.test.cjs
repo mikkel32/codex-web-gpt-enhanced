@@ -59,11 +59,11 @@ test("restart restores only the exact saved chat, then locks it against replay u
   assert.deepEqual(navigations, [url, url]);
 }));
 
-test("interrupted turns, wrong connectors and redirects never start replacement chats", withStore(async (store, file) => {
-  for (const overrides of [{ status: "in-flight" }, { connectorIdentity: "Unrelated" }, { connectorBound: false }, { url: null }]) {
+test("wrong connectors and redirects never start replacement chats", withStore(async (store, file) => {
+  for (const overrides of [{ connectorIdentity: "Unrelated" }, { connectorBound: false }, { url: null }]) {
     store.set(key, { ...entry(), ...overrides });
     const { host, navigations } = fixture(new SavedConversations(file));
-    await assert.rejects(host.beginTurn("trace_failed", false, process.pid, key, "Codex Native2"), /needs attention/);
+    await assert.rejects(host.beginTurn("trace_failed", false, process.pid, key, "Codex Native2"), /needs review/);
     assert.deepEqual(navigations, []);
   }
   store.set(key, entry());
@@ -71,6 +71,35 @@ test("interrupted turns, wrong connectors and redirects never start replacement 
   await assert.rejects(host.beginTurn("trace_redirect", false, process.pid, key, "Codex Native2"), /exact saved conversation/);
   assert.deepEqual(navigations, [url]);
   assert.equal(store.get(key).url, url);
+}));
+
+test("a failed turn remains inspectable and a restarted host restores it only for review", withStore(async (store, file) => {
+  store.set(key, entry());
+  const { host, navigations } = fixture(store);
+  await host.beginTurn("trace_failed", false, process.pid, key, "Codex Native2");
+  await host.rememberConversationSubmission("trace_failed", process.pid);
+  await host.endTurn("trace_failed", process.pid, "failed", false, "Observation lost");
+  assert.equal(host.turnTabs.size, 1);
+  assert.equal(host.turnTabs.get("saved-tab").status, "error");
+  assert.ok(host.turnTabs.get("saved-tab").recoveryId);
+  await assert.rejects(host.beginTurn("trace_retry", false, process.pid, key, "Codex Native2"), { code: "previous_turn_needs_attention" });
+  assert.deepEqual(navigations, [url]);
+  const next = fixture(new SavedConversations(file));
+  await assert.rejects(next.host.beginTurn("trace_restart", false, process.pid, key, "Codex Native2"), { code: "previous_turn_needs_attention" });
+  assert.deepEqual(next.navigations, [url]);
+  assert.equal(next.host.turnTabs.get("saved-tab").status, "error");
+  assert.equal(new SavedConversations(file).get(key).status, "in-flight");
+}));
+
+test("a reviewed conversation can be leased with explicit unverified connector state after restart", withStore(async (store, file) => {
+  store.set(key, { ...entry(), connectorBound: false, reviewedInterruption: true });
+  const { host, navigations } = fixture(new SavedConversations(file));
+  const lease = await host.beginTurn("trace_reviewed", false, process.pid, key, "Codex Native2");
+  assert.equal(lease.reused, true);
+  assert.equal(lease.connectorBound, false);
+  assert.deepEqual(navigations, [url]);
+  await host.rememberConversationSubmission("trace_reviewed", process.pid);
+  assert.equal(new SavedConversations(file).get(key).reviewedInterruption, undefined);
 }));
 
 test("exact URL validation and explicit release protect durable ownership", withStore(async (store, file) => {

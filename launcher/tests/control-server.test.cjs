@@ -414,6 +414,27 @@ test("browser control server reports a missing retained conversation as a typed 
   }
 });
 
+test("browser control server preserves review-required conflicts as HTTP 409 with a typed code", async () => {
+  const { turnReviewRequiredError } = require("../electron/turn-review.cjs");
+  const host = { browserInteractionMode: () => "automatic", beginTurn: () => { throw turnReviewRequiredError(); } };
+  const server = await new BrowserControlServer({
+    logger: { info() {}, warn() {} }, getBrowserHost: () => host,
+    getPreferences: () => ({ showBrowserDuringTurns: false }),
+  }).start();
+  const descriptor = server.descriptor();
+  try {
+    const response = await fetch(`${descriptor.endpoint}/v1/turn/start`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${descriptor.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ phase: "start", traceId: "review123456", helperPid: process.pid, conversationKey: "a".repeat(64) }),
+    });
+    assert.equal(response.status, 409);
+    const body = await response.json();
+    assert.equal(body.code, "previous_turn_needs_attention");
+    assert.match(body.error, /I reviewed this chat/);
+  } finally { await server.close(); }
+});
+
 test("browser control server releases only ready tabs for an authenticated conversation key", async () => {
   const removed = [];
   const releaseEvents = [];

@@ -710,6 +710,8 @@ function BrowserSurface({
     && browser?.authenticated !== true;
   const selectedManualTab = browser?.tabs.find(tab => tab.active && tab.interactionMode === "manual");
   const navigationLocked = browser?.status === "running" || browser?.status === "testing";
+  const selectedReviewTab = browser?.tabs.find(tab => tab.active && tab.recoveryId);
+  const [reviewingTurn, setReviewingTurn] = useState(false);
   const passkeyWaiting = passkeyAvailable
     && operation?.name === "passkey-login"
     && operation.status === "running"
@@ -751,6 +753,17 @@ function BrowserSurface({
       await api!.closeBrowserTab(tabId);
     } catch (cause) {
       setError(messageOf(cause));
+    }
+  };
+  const confirmTurnReviewed = async () => {
+    if (!selectedReviewTab?.recoveryId || reviewingTurn) return;
+    setReviewingTurn(true);
+    try {
+      await api!.confirmBrowserTurnReviewed(selectedReviewTab.id, selectedReviewTab.recoveryId);
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setReviewingTurn(false);
     }
   };
   const openPasskeyLogin = () => {
@@ -897,6 +910,17 @@ function BrowserSurface({
           onSent={() => void confirmManualSent(selectedManualTab.id)}
           tab={selectedManualTab}
         />
+      ) : null}
+      {selectedReviewTab ? (
+        <div className="manual-turn-guide" role="status">
+          <div>
+            <strong>{copy.turnReviewTitle}</strong>
+            <p>{copy.turnReviewBody}</p>
+          </div>
+          <PrimaryButton disabled={reviewingTurn || !visible || !browser?.surfaceActive || browser?.webAccess?.status === "paused"} onClick={() => void confirmTurnReviewed()}>
+            {reviewingTurn ? copy.turnReviewChecking : copy.turnReviewConfirm}
+          </PrimaryButton>
+        </div>
       ) : null}
       <WebAccessNotice access={browser?.webAccess} />
       <div className="browser-viewport" ref={browserSlotRef}>

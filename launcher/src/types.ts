@@ -66,6 +66,7 @@ export interface BrowserTabState {
   manualDeadlineAt?: string;
   canCopyPrompt?: boolean;
   canConfirmSent?: boolean;
+  recoveryId?: string;
 }
 
 export interface LogRecord {
@@ -163,6 +164,7 @@ export interface LauncherApi {
   zoomBrowser(action: "in" | "out" | "reset"): Promise<BrowserState>;
   selectBrowserTab(tabId: string): Promise<BrowserState>;
   closeBrowserTab(tabId: string): Promise<BrowserState>;
+  confirmBrowserTurnReviewed(tabId: string, recoveryId: string): Promise<BrowserState>;
   copyManualPrompt(tabId: string): Promise<BrowserState>;
   confirmManualSent(tabId: string): Promise<BrowserState>;
   openLogin(): Promise<BrowserState>;

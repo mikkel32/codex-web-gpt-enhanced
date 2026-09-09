@@ -4,6 +4,7 @@ const { createHash, randomBytes } = require("node:crypto");
 const { clipboard, WebContentsView, powerMonitor, powerSaveBlocker, shell } = require("electron");
 const { writePrivateFileAtomic } = require("./atomic-file.cjs");
 const { SavedConversations, savedConversationUrl } = require("./saved-conversations.cjs");
+const { confirmTurnReviewed, openSavedTurnForReview, retainTurnForReview, turnReviewRequiredError } = require("./turn-review.cjs");
 const { BrowserAccessGate, BrowserAccessPausedError } = require("./browser-access.cjs");
 const {
   runBrowserHelperOperation,
@@ -508,6 +509,7 @@ class BrowserHost {
       loading: tab.loading === true,
       active: this.selectedTabId === tab.id,
       closable: true,
+      ...(tab.recoveryId && ["error", "aborted"].includes(tab.status) ? { recoveryId: tab.recoveryId } : {}),
     };
     if (tab.interactionMode === "manual") {
       Object.assign(snapshot, {
@@ -523,6 +525,10 @@ class BrowserHost {
 
   selectedTurnTab() {
     return this.turnTabs.get(this.selectedTabId) || null;
+  }
+
+  confirmTurnReviewed(tabId, recoveryId) {
+    return confirmTurnReviewed(this, tabId, recoveryId);
   }
 
   async createTurnTab(traceId, helperPid, conversationKey, connectorIdentity) {
@@ -2257,12 +2263,15 @@ class BrowserHost {
       || sameTrace.connectorIdentity !== connectorIdentity)) {
       throw new Error(`ChatGPT browser turn ${traceId} conversation metadata does not match its owned tab`);
     }
+    const saved = conversationKey ? this.savedConversations?.get(conversationKey) : null;
     const retainedMatches = conversationKey ? [...this.turnTabs.values()].filter((tab) => (
       tab.interactionMode === "automatic"
       && tab.status === "ready"
       && tab.conversationKey === conversationKey
       && tab.connectorIdentity === connectorIdentity
-      && (!connectorIdentity || tab.connectorBound === true)
+      && (!connectorIdentity || tab.connectorBound === true
+        || (saved?.status === "ready" && saved.reviewedInterruption === true
+          && saved.connectorIdentity === connectorIdentity && Boolean(saved.url)))
     )) : [];
     if (retainedMatches.length > 1) {
       throw new Error(`ChatGPT retained conversation ${conversationKey} owns multiple browser tabs`);
@@ -2275,10 +2284,14 @@ class BrowserHost {
       throw new Error("This ChatGPT conversation already has an active turn. Wait for it to finish.");
     }
     let existing = sameTrace?.status === "running" ? sameTrace : exactRetained;
-    const saved = conversationKey ? this.savedConversations?.get(conversationKey) : null;
     if (!existing && saved) {
-      if (saved.status !== "ready" || !saved.url || saved.connectorIdentity !== (connectorIdentity || "") || !saved.connectorBound) {
-        throw new Error("The previous ChatGPT turn needs attention. Its saved conversation was kept; no prompt was resent or replacement chat opened.");
+      if (!saved.url || saved.connectorIdentity !== (connectorIdentity || "")
+        || (saved.status === "ready" && !saved.connectorBound && saved.reviewedInterruption !== true)) {
+        throw turnReviewRequiredError();
+      }
+      if (saved.status !== "ready") {
+        await openSavedTurnForReview(this, traceId, helperPid, conversationKey, connectorIdentity, saved);
+        throw turnReviewRequiredError();
       }
       const restored = await this.createTurnTab(traceId, helperPid, conversationKey, connectorIdentity);
       try {
@@ -2294,7 +2307,7 @@ class BrowserHost {
         await this.markTurnTabSurface(restored);
         restored.initializingSurface = false;
         restored.status = "ready";
-        restored.connectorBound = true;
+        restored.connectorBound = saved.connectorBound === true;
         restored.bootstrapReady = true;
         existing = restored;
       } catch (error) {
@@ -2304,11 +2317,17 @@ class BrowserHost {
     }
     if (existing) {
       const reused = existing.status === "ready";
-      if (reused && saved && saved.status !== "ready") throw new Error("The previous ChatGPT submission has not settled. No prompt was resent.");
+      if (reused && saved && saved.status !== "ready") {
+        retainTurnForReview(this, existing);
+        throw turnReviewRequiredError();
+      }
       if (!reused && existing.initializingSurface) throw new Error("The saved ChatGPT surface is still being restored. Wait before continuing.");
       const url = this.savedConversations ? savedConversationUrl(existing.view.webContents.getURL()) : null;
       if (reused && saved?.url && url !== saved.url) throw new Error("The retained ChatGPT tab moved away from its saved conversation. No prompt was sent.");
-      if (reused) existing.submissionActivated = false;
+      if (reused) {
+        existing.submissionActivated = false;
+        existing.reviewedTraceId = undefined;
+      }
       if (existing.status === "running" && existing.helperPid !== helperPid) {
         if (processRunning(existing.helperPid)) {
           throw new Error(`ChatGPT browser turn ${traceId} is owned by another helper process`);
@@ -2432,6 +2451,7 @@ class BrowserHost {
       );
     }
     const cancelledByUser = this.userCancelledTurnOwners.get(traceId) === helperPid;
+    if (tab.reviewedTraceId === traceId && tab.status === "ready") return { cancelledByUser };
     if (accessIssue) this.pauseWebAccess(accessIssue, undefined, tab.id);
     tab.status = status === "completed" ? "ready" : status === "aborted" ? "aborted" : "error";
     this.syncPowerSaveBlocker();
@@ -2459,6 +2479,13 @@ class BrowserHost {
       this.publishState?.(this.snapshot());
       this.writeDescriptor();
       return { cancelledByUser };
+    }
+    if (status !== "completed") {
+      BrowserHost.prototype.rememberSubmittedConversationUrl.call(this, tab);
+      if (retainTurnForReview(this, tab)) {
+        this.logger.info("browser.interrupted_tab_retained", { tabId: tab.id, traceId });
+        return { cancelledByUser };
+      }
     }
     if (this.accessGate?.snapshot().status === "paused") {
       tab.message = this.accessGate.message();

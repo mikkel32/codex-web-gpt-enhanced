@@ -113,6 +113,39 @@ try {
       if (width !== 700) await screenshot(`${name}-${width}`);
     }
   }
+  // The interrupted-turn action is bound to its current tab and is unavailable when hidden.
+  for (const width of [1180, 390]) {
+    await open("review", width);
+    await navigation(2);
+    const review = page.getByRole("button", { name: "I reviewed this chat", exact: true });
+    assert.equal(await review.isEnabled(), true);
+    await assertLayout(`turn review/${width}`);
+    assert.equal(await page.evaluate(() => {
+      const toolbar = document.querySelector(".browser-toolbar")!;
+      const bottom = toolbar.getBoundingClientRect().bottom;
+      return [...toolbar.children].every(child => child.getBoundingClientRect().bottom <= bottom + 1)
+        && document.querySelector(".manual-turn-guide")!.getBoundingClientRect().top >= bottom - 1;
+    }), true, `Wrapped browser controls must not overlap review/${width}`);
+    await screenshot(`turn-review-${width}`);
+    await page.evaluate(() => {
+      const fixture = (window as unknown as GuidedFixtureWindow).guidedFixture;
+      if (!fixture.snapshot.browser) throw new Error("Missing review browser fixture");
+      fixture.snapshot.browser.visible = false;
+      fixture.emit("onBrowserState", fixture.snapshot.browser);
+    });
+    await page.waitForFunction(() => [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .some(button => button.textContent === "I reviewed this chat" && button.disabled));
+    await page.evaluate(() => {
+      const fixture = (window as unknown as GuidedFixtureWindow).guidedFixture;
+      if (!fixture.snapshot.browser) throw new Error("Missing review browser fixture");
+      fixture.snapshot.browser.visible = true;
+      fixture.emit("onBrowserState", fixture.snapshot.browser);
+    });
+    await review.click();
+    await page.waitForFunction(() => !(window as unknown as GuidedFixtureWindow).guidedFixture.snapshot.browser?.tabs[0]?.recoveryId);
+    assert.equal(await page.evaluate(() => (window as unknown as GuidedFixtureWindow).guidedFixture.calls
+      .filter(action => action === "confirmBrowserTurnReviewed").length), 1);
+  }
   // Verify idle and high-volume Activity behavior in the same actual Electron renderer.
   await open("ready");
   await page.locator(".guided-setup.is-ready").waitFor();

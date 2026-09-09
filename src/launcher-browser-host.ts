@@ -20,6 +20,10 @@ export class LauncherBrowserAccessPausedError extends Error {
   constructor(message: string) { super(message); this.name = "LauncherBrowserAccessPausedError"; }
 }
 
+export class LauncherTurnReviewRequiredError extends Error {
+  constructor(message: string) { super(message); this.name = "LauncherTurnReviewRequiredError"; }
+}
+
 export class LauncherRetainedConversationUnavailableError extends Error {
   constructor(message: string) {
     super(message);
@@ -626,6 +630,9 @@ export async function notifyLauncherTurn(
       if (response.status === 409 && body.code === "browser_access_paused") {
         throw new LauncherBrowserAccessPausedError(typeof body.error === "string" ? body.error : "Web sending is paused in Maria.");
       }
+      if (response.status === 409 && body.code === "previous_turn_needs_attention") {
+        throw new LauncherTurnReviewRequiredError(typeof body.error === "string" ? body.error : "Review the previous ChatGPT turn in Maria's Browser before continuing.");
+      }
       const detail = typeof body.error === "string" ? body.error : "";
       throw new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
     }
@@ -655,6 +662,7 @@ export async function notifyLauncherTurn(
     return {};
   } catch (error) {
     if (error instanceof LauncherBrowserTurnCancelledError
+      || error instanceof LauncherTurnReviewRequiredError
       || error instanceof LauncherBrowserAccessPausedError
       || error instanceof LauncherRetainedConversationUnavailableError) throw error;
     throw new Error(`Launcher browser control channel failed: ${error instanceof Error ? error.message : String(error)}`);

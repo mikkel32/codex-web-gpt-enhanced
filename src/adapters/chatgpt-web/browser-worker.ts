@@ -61,6 +61,7 @@ import {
   connectLauncherBrowserHost,
   LauncherBrowserTurnCancelledError,
   LauncherBrowserAccessPausedError,
+  LauncherTurnReviewRequiredError,
   LauncherRetainedConversationUnavailableError,
   LAUNCHER_TURN_HEARTBEAT_INTERVAL_MS,
   LAUNCHER_TURN_HEARTBEAT_TIMEOUT_MS,
@@ -77,6 +78,7 @@ import {
   chatGptBrowserTabClosedError,
   chatGptRetainedConversationUnavailableError,
   chatGptStoppedThinkingError,
+  chatGptResponseObservationError,
 } from "./adapter-error";
 import {
   ChatGptLunaCheckpointStream,
@@ -1254,6 +1256,7 @@ export function chatGptReboundTurnIdentity(
 
 export class ChatGptCompletionTracker {
   private candidate?: { text: string; markupKey: string; since: number };
+  private previousObservation?: { at: number; progressKey?: string };
   private lastToolBatchRevision = 0;
   private postToolAnswerBaselineText?: string;
   private missingPostToolAnswerSince?: number;
@@ -1262,6 +1265,12 @@ export class ChatGptCompletionTracker {
     private readonly stableMs = CHATGPT_COMPLETION_SETTLE_MS,
     private readonly missingPostToolAnswerMs = CHATGPT_COMPLETION_ACTION_GRACE_MS,
   ) {}
+
+  clearObservation(): void {
+    this.candidate = undefined;
+    this.missingPostToolAnswerSince = undefined;
+    this.previousObservation = undefined;
+  }
 
   needsToolBatchObservation(revision: number): boolean {
     if (!Number.isSafeInteger(revision) || revision < this.lastToolBatchRevision) {
@@ -1285,9 +1294,16 @@ export class ChatGptCompletionTracker {
     state: Parameters<typeof chatGptTurnIsComplete>[0] & {
       externalToolCallsInFlight?: boolean;
       currentRevision?: string;
+      progressKey?: string;
     },
     now = Date.now(),
   ): boolean {
+    const previous = this.previousObservation;
+    if (previous && (now < previous.at || now - previous.at > 5_000
+      || (state.progressKey !== undefined && state.progressKey !== previous.progressKey))) {
+      this.clearObservation();
+    }
+    this.previousObservation = { at: now, progressKey: state.progressKey };
     const markupKey = state.currentRevision ?? state.currentHtml ?? state.currentText;
     // An outstanding tool call proves the model has more to say, whatever the rendered message
     // currently looks like. Completing here would return a truncated answer and retire the turn
@@ -1305,7 +1321,7 @@ export class ChatGptCompletionTracker {
       }
       this.missingPostToolAnswerSince ??= now;
       if (now - this.missingPostToolAnswerSince >= this.missingPostToolAnswerMs) {
-        throw new Error("ChatGPT completed without producing a final answer after its last Codex tool call");
+        throw chatGptResponseObservationError("ChatGPT completed without producing a final answer after its last Codex tool call");
       }
       return false;
     }
@@ -1324,6 +1340,7 @@ export class ChatGptCompletionTracker {
 
 export class ChatGptTurnDomHealthTracker {
   private sawResponse = false;
+  private previousObservation?: { at: number; progressKey?: string };
   private missingResponseSince?: number;
   private emptyCompletionSince?: number;
   private missingCompletionAction?: { text: string; since: number };
@@ -1345,13 +1362,27 @@ export class ChatGptTurnDomHealthTracker {
     this.missingResponseSince = undefined;
   }
 
+  clear(): void {
+    this.missingResponseSince = undefined;
+    this.emptyCompletionSince = undefined;
+    this.missingCompletionAction = undefined;
+    this.previousObservation = undefined;
+  }
+
   update(state: {
     responsePresent: boolean;
     running: boolean;
     currentText: string;
     completionActionVisible: boolean;
     externalProgressLive?: boolean;
+    progressKey?: string;
   }, now = Date.now()): string | undefined {
+    const previous = this.previousObservation;
+    if (previous && (now < previous.at || now - previous.at > 5_000
+      || (state.progressKey !== undefined && previous.progressKey !== state.progressKey))) {
+      this.clear();
+    }
+    this.previousObservation = { at: now, progressKey: state.progressKey };
     if (state.responsePresent) this.sawResponse = true;
     if (state.externalProgressLive) {
       // Every conclusion below asserts that ChatGPT stopped producing this turn. A tool call that
@@ -4061,6 +4092,7 @@ export class ChatGptBrowserWorker {
       ...(turn.requireRetainedConversation ? { requireRetainedConversation: true } : {}),
     }).catch(error => {
       if (error instanceof LauncherBrowserAccessPausedError) throw new ChatGptWebAdapterError(error.message, { status: 409, errorType: "invalid_request_error", code: "chatgpt_web_paused", retryable: false });
+      if (error instanceof LauncherTurnReviewRequiredError) throw new ChatGptWebAdapterError(error.message, { status: 409, errorType: "invalid_request_error", code: "previous_turn_needs_attention", retryable: false });
       if (error instanceof LauncherBrowserTurnCancelledError) throw chatGptBrowserTabClosedError();
       if (error instanceof LauncherRetainedConversationUnavailableError) {
         throw chatGptRetainedConversationUnavailableError();
@@ -4112,7 +4144,7 @@ export class ChatGptBrowserWorker {
           throw error;
         });
         await turn.onSendActivated?.();
-      } }, surfaceId, undefined, reused);
+      } }, surfaceId, undefined, reused, lease.connectorBound === true);
     } catch (error) {
       originalError = error;
       terminal = (error instanceof DOMException && error.name === "AbortError")
@@ -4157,6 +4189,7 @@ export class ChatGptBrowserWorker {
     launcherSurfaceId?: string,
     maintenancePage?: Page,
     reuseConversation = false,
+    reuseConnector = reuseConversation,
   ): Promise<string> {
     if (turn.abortSignal?.aborted) throw new DOMException("ChatGPT web turn aborted", "AbortError");
     if ((turn.externalProgress !== undefined) !== (turn.completionFence !== undefined)) {
@@ -4378,7 +4411,7 @@ export class ChatGptBrowserWorker {
                 promptAbortSignal,
                 catalogRefreshAvailable,
                 connectorAttemptBudget,
-                reuseConversation,
+                reuseConnector,
                 turn.retainConversation === true,
               );
             },
@@ -4561,6 +4594,9 @@ export class ChatGptBrowserWorker {
               );
             }
             await rebindLauncherPage(consecutiveObservationRebinds, error, turn.abortSignal);
+            domHealthTracker.clear();
+            stoppedThinkingTracker.clear();
+            completionTracker.clearObservation();
             submissionBaseline = {
               ...submissionBaseline,
               userTurns: page.locator(CHATGPT_USER_TURN_SELECTOR),
@@ -4659,14 +4695,16 @@ export class ChatGptBrowserWorker {
             currentText: snapshot.visibleText,
             completionActionVisible: snapshot.completionActionVisible,
             externalProgressLive,
+            progressKey: stopProgressKey,
           });
-          if (domError) throw new Error(domError);
+          if (domError) throw chatGptResponseObservationError(domError);
           const completionReady = completionTracker.update({
             responsePresent: snapshot.responsePresent,
             running,
             currentText: snapshot.visibleText,
             currentHtml: snapshot.fullHtml,
             currentRevision: responseDomCache.key,
+            progressKey: stopProgressKey,
             completionActionVisible: snapshot.completionActionVisible,
             externalToolCallsInFlight,
           });
@@ -4738,8 +4776,9 @@ export class ChatGptBrowserWorker {
             currentText: "",
             completionActionVisible: false,
             externalProgressLive,
+            progressKey: stopProgressKey,
           });
-          if (domError) throw new Error(domError);
+          if (domError) throw chatGptResponseObservationError(domError);
         }
         await waitForChatGptResponsePoll(pollDelay.update(
           `${responseDomCache.key}:${externalProgressSnapshot?.revision ?? 0}:${observedRunning}`,
@@ -4751,6 +4790,9 @@ export class ChatGptBrowserWorker {
         // TypeError belongs to a consumer - Markdown buffering, text/trace callbacks, checkpoint
         // capture - and retrying it would rerun an iteration whose side effects already happened.
         if (!(error instanceof TypeError) || observedThisIteration) throw error;
+        domHealthTracker.clear();
+        stoppedThinkingTracker.clear();
+        completionTracker.clearObservation();
         internalObservationFaults += 1;
         if (internalObservationFaults > MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS) {
           throw new Error(

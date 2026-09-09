@@ -324,13 +324,15 @@ class BrowserControlServer {
       const manualOwnerLost = error?.code === "manual_turn_owner_lost";
       const manualTimedOut = error?.code === "manual_turn_timed_out";
       const accessPaused = error?.code === "browser_access_paused";
+      const reviewRequired = error?.code === "previous_turn_needs_attention";
       writeJson(
         response,
-        cancelled || retainedUnavailable || manualInspectionDisabled || manualOwnerLost || accessPaused
+        cancelled || retainedUnavailable || manualInspectionDisabled || manualOwnerLost || accessPaused || reviewRequired
           ? 409
           : manualTimedOut ? 408 : 400,
         {
         error: message,
+        ...(reviewRequired ? { code: "previous_turn_needs_attention" } : {}),
         ...(accessPaused ? { code: "browser_access_paused" } : {}),
         ...(cancelled ? { code: "turn_cancelled" } : {}),
         ...(retainedUnavailable ? { code: "retained_conversation_unavailable" } : {}),

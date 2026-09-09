@@ -14,15 +14,19 @@ stay together in Codex.
 
 > **Setup and recovery:** start with **Set up automatically** in Overview. The launcher reuses saved credentials and guides only the steps that need you. For `Tool read not found` or `Unknown root "/Users"`, see [connector recovery](docs/CONNECTOR_RECOVERY.md); changing folder permissions is not the default fix.
 
-## Maria 5.20.1: stable reliability update
+## Maria 5.20.2: stable interrupted-turn recovery
 
-**5.20.1** fixes premature cancellation after "Stopped thinking". Context reads
-now count as progress, stale or quoted stop labels are ignored, and a confirmed
-upstream stop is reported separately from a user cancellation. Quiet polling does
-less work, and Windows broker connections close correctly after cancellation.
+**5.20.2** keeps interrupted chats available for inspection instead of closing the
+tab and leaving an unrecoverable in-flight record. In Browser, **I reviewed this
+chat** enables a new message in the original Codex task after checking the exact
+saved conversation. It never resends the interrupted prompt or opens a replacement
+chat. The next request verifies the connector again.
 
-The update preserves conversation continuity, context receipts, native tools and
-model selection. See the [5.20.1 release notes](docs/release-5.20.1.md) for details.
+Response-health timers now restart after observation gaps, reader faults and new
+reasoning progress. Known DOM failures preserve their actual diagnostic reason,
+and saved-chat conflicts have a typed recovery message rather than generic HTTP
+400 errors. See the [5.20.2 release notes](docs/release-5.20.2.md) for recovery steps
+and limits. The [5.20.1 reliability fixes](docs/release-5.20.1.md) remain included.
 
 ## Earlier interface and continuity improvements
 
