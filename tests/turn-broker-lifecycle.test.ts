@@ -289,6 +289,20 @@ function unansweredBrokerEndpoint(name: string, onConnection: (socket: Socket) =
   };
 }
 
+test("same-tick cancellation opens no broker socket or named pipe", async () => {
+  let connections = 0;
+  const broker = unansweredBrokerEndpoint("cgw-cancel-before-connect-", socket => { connections++; socket.destroy(); });
+  await broker.listen();
+  try {
+    const abort = new AbortController();
+    const call = callTurnBroker(broker.socketPath, { method: "owner_wait_context_progress", token: "unused", revision: 0 }, null, abort.signal).catch(error => error);
+    abort.abort();
+    expect(await call).toMatchObject({ name: "AbortError" });
+    await Bun.sleep(25);
+    expect(connections).toBe(0);
+  } finally { await broker.close(); }
+});
+
 test("an unbounded broker call fails when the broker closes without answering", async () => {
   const broker = unansweredBrokerEndpoint("cgw-broker-closed-", socket => socket.on("data", () => socket.end()));
   await broker.listen();

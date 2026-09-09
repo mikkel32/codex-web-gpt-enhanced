@@ -1311,6 +1311,12 @@ export async function callTurnBroker<T>(
   timeoutMs: number | null = 5_000,
   signal?: AbortSignal,
 ): Promise<T> {
+  if (signal) {
+    // Give same-tick cancellation a chance to settle before opening a named pipe. Bun on Windows
+    // can leave the server side of a connect-then-immediately-destroy attempt alive through close().
+    await Promise.resolve();
+    if (signal.aborted) throw new DOMException("ChatGPT web turn broker call aborted", "AbortError");
+  }
   const id = opaqueId("request");
   const settleOnResponseFrame = timeoutMs === null;
   // The wire protocol requires a client-owned activity identity. Most callers never need to see
@@ -1359,7 +1365,10 @@ export async function callTurnBroker<T>(
     // The server owns response termination. Waiting for the pipe/socket to close before resolving
     // prevents callers from retiring the broker while Bun still has a named-pipe write in flight.
     socket.once("close", finishResponse);
-    socket.once("connect", () => socket.write(`${JSON.stringify({ id, ...wireRequest })}\n`));
+    socket.once("connect", () => {
+      if (settled) { socket.destroy(); return; }
+      socket.write(`${JSON.stringify({ id, ...wireRequest })}\n`);
+    });
     socket.on("data", chunk => {
       if (settled || response) return;
       buffered += chunk;

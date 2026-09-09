@@ -99,7 +99,11 @@ test("context retrieval is paginated, immutable after claim, task-isolated, and 
     expect(revoked.isError).toBe(true);
     expect(JSON.stringify(revoked)).not.toContain(files[1]!.text);
   } finally {
-    await client.close(); broker.revoke(token); broker.revoke(other); await broker.close();
+    console.info("CONTEXT_FIXTURE_CLEANUP client");
+    await client.close(); broker.revoke(token); broker.revoke(other);
+    console.info("CONTEXT_FIXTURE_CLEANUP broker");
+    await broker.close();
+    console.info("CONTEXT_FIXTURE_CLEANUP complete");
   }
 },30000);
 
