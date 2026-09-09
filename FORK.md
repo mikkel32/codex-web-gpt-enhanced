@@ -11,7 +11,7 @@ This repository is the maintained Maria WebGPT fork of `miuuyy/codex-chatgpt-web
 - The manual browser rows are displayed as **Maria Web — Manual** and **Maria Web — Manual Pro**. Existing `zero-risk` slugs and the `Codex Zero Risk` connector name remain protocol compatibility identifiers.
 - Closing Maria keeps the native daemon available; active browser work remains attached to its existing Codex task.
 
-See [docs/NATIVE_COEXISTENCE.md](docs/reference/native-coexistence.md) for the routing, migration, and continuity boundaries.
+See [Native coexistence](docs/reference/native-coexistence.md) for the routing, migration, and continuity boundaries.
 
 ## Upstream maintenance
 
