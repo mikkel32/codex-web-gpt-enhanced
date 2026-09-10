@@ -1,6 +1,6 @@
 {
   "name": "codex-web-gpt-launcher",
-  "version": "5.20.4",
+  "version": "5.20.5",
   "private": true,
   "description": "Desktop control center for Codex ChatGPT Web",
   "author": "Mikkel & Maria",
@@ -24,6 +24,7 @@
   "dependencies": {
     "motion": "^12.42.2",
     "nodemailer": "10.0.3",
+    "proper-lockfile": "4.1.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

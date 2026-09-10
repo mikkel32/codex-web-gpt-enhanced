@@ -48,7 +48,7 @@ test("agent evidence is bounded, redacted, deduplicated and cannot supply recipi
     recoveryAttempted: "Inspected the advertised schema", hypothesis: "An outdated catalog may be involved; unverified",
     attempts: 1, webResponse: "Observed Web text\npassword=do-not-export", codexResponse: "Observed Codex text" };
   const result = captureAgentIssue("trusted-trace", issue);
-  expect(result).toMatchObject({ recorded: true, deliveryState: "pending", emailAccepted: false, inboxVerified: false });
+  expect(result).toMatchObject({ recorded: true, deliveryState: "needs_sender", emailAccepted: false, inboxVerified: false });
   expect(result).not.toHaveProperty("emailSent", true);
   const duplicate = captureAgentIssue("trusted-trace", issue);
   expect(duplicate).toMatchObject({ duplicate: true, reportId: result.reportId });
@@ -91,11 +91,12 @@ test("agent reporting works through the real MCP broker with broken native execu
     expect(store.records()).toHaveLength(0);
     const inventory = await invoke("codex_tool_inventory", { turn_token: token, query: AGENT_REPORT_TOOL });
     expect(inventory.structuredContent).toMatchObject({ total: 1, tools: [{ wire_name: AGENT_REPORT_TOOL, kind: "function" }] });
-    const tools = await client.listTools(); expect(tools.tools).toHaveLength(8); // Public connector ABI stays stable.
+    const tools = await client.listTools(); expect(tools.tools).toHaveLength(11);
+    expect(tools.tools.find(tool => tool.name === AGENT_REPORT_TOOL)?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true });
     const args = { turn_token: token, wire_name: AGENT_REPORT_TOOL, arguments: { error: "Required context read failed", stage: "context", completedWork: "One previously verified change" } };
-    const first = await invoke("codex_tool_call", args);
+    const first = await invoke(AGENT_REPORT_TOOL, { turn_token: token, ...args.arguments });
     if (first.isError) throw new Error(`Agent-report integration failed: ${JSON.stringify(first.content)}`);
-    expect(first.structuredContent).toMatchObject({ recorded: true, deliveryState: "pending" });
+    expect(first.structuredContent).toMatchObject({ recorded: true, deliveryState: "needs_sender" });
     const duplicate = await invoke("codex_tool_call", args);
     expect(duplicate.structuredContent).toMatchObject({ duplicate: true });
     expect(store.records()).toHaveLength(1); expect(store.records()[0].traceId).toBe("trusted-broker-trace");
@@ -106,10 +107,40 @@ test("agent reporting works through the real MCP broker with broken native execu
     expect(command.isError).toBe(true);
     expect(JSON.stringify(command)).toContain("Required context acknowledgement is incomplete");
     store.configure({ ...store.settings(), enabled: false });
-    expect((await invoke("codex_tool_call", args)).isError).toBe(true);
+    expect((await invoke(AGENT_REPORT_TOOL, { turn_token: token, ...args.arguments })).isError).toBe(true);
     broker.revoke(token);
-    expect((await invoke("codex_tool_call", args)).isError).toBe(true);
+    expect((await invoke(AGENT_REPORT_TOOL, { turn_token: token, ...args.arguments })).isError).toBe(true);
     expect(store.records()).toHaveLength(1);
     console.log("AGENT_REPORT_MCP_OK no-native-execution unread-context fixed-recipient deduplicated isolated-probes-excluded no-permission-expansion");
   } finally { await client.close(); broker.revoke(token); broker.revoke(probeToken); await broker.close(); }
+}), 15000);
+
+test("connected Gmail delivery crosses the real MCP/native boundary and persists its receipt", () => fixture(async (home, store) => {
+  const profileName = "mcp__codex_apps__gmail_get_profile", sendName = "mcp__codex_apps__gmail_send_email";
+  store.configure({ enabled: true, recipient: "owner@gmail.com", includeResponses: false, deliveryMethod: "gmail" });
+  const { id } = store.capture({ source: "agent", traceId: "queued-before-this-task", error: "Observed issue" });
+  const base = join(tmpdir(), `mgm-${randomUUID().slice(0, 8)}`);
+  const socket = process.platform === "win32" ? defaultBrokerEndpoint(base, "win32") : `${base}.sock`;
+  const broker = TurnBroker.forSocket(socket);
+  const token = await broker.register({ cwd: home, roots: [home], writableRoots: [], sandboxPolicy: { type: "readOnly", networkAccess: false },
+    tools: [profileName, sendName].map(name => ({ name, description: "Native Gmail fixture", parameters: { type: "object" } })) }, 60000, "mail-task");
+  broker.setContextFiles(token, [{ name: "codex-context-1-of-2.json", text: "{}", required: false }], { allowAgentReporting: true });
+  const client = new Client({ name: "gmail-report-fixture", version: "1" });
+  const transport = new StdioClientTransport({ command: process.execPath, args: ["src/cli.ts", "mcp", "--broker-socket", socket],
+    cwd: process.cwd(), stderr: "pipe", env: { ...process.env, CODEX_CHATGPT_WEB_HOME: home } as Record<string, string> });
+  try {
+    await client.connect(transport);
+    const sending = client.callTool({ name: "maria_send_reports", arguments: { turn_token: token } });
+    const [profile] = await Promise.race([broker.nextToolBatch(token), sending.then(value => { throw new Error(`Delivery ended before native account check: ${JSON.stringify(value)}`); })]);
+    expect(profile?.wireName).toBe(profileName);
+    broker.completeTool(token, profile!.callId, { content: [], structuredContent: { email: "owner@gmail.com" } });
+    const [mail] = await broker.nextToolBatch(token);
+    expect(mail?.wireName).toBe(sendName); expect(mail?.arguments?.to).toBe("owner@gmail.com");
+    expect(store.read(id).delivery.state).toBe("sending");
+    broker.completeTool(token, mail!.callId, { content: [], structuredContent: { id: "native-gmail-id", label_ids: ["SENT"] } });
+    expect((await sending).structuredContent).toMatchObject({ delivered: true, messageId: "native-gmail-id", remaining: 0 });
+    expect(store.read(id).delivery).toMatchObject({ state: "sent", transport: "gmail", messageId: "native-gmail-id" });
+    expect((await client.callTool({ name: "maria_send_reports", arguments: { turn_token: token } })).structuredContent)
+      .toMatchObject({ delivered: false, remaining: 0 });
+  } finally { await client.close(); broker.revoke(token); await broker.close(); }
 }), 15000);

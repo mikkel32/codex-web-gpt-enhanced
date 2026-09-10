@@ -9,6 +9,9 @@ import type { ChatGptTurnEnvironment } from "./environment";
 import { CODEX_COMPACTION_CONTROL_WIRE_NAME } from "./native-compaction-control";
 import { nativeContextResult, nativeContextTextResult, type NativeContextPage } from "./native-context";
 import { CONTEXT_FILE_NAME } from "./context-store";
+import { projectInspectionCommand, projectInspectionSchema } from "./project-inspection";
+import { getConfigDir } from "../../config";
+const { deliverConnectedGmailReport } = require("../../../launcher/electron/connected-gmail-delivery.cjs");
 import { callTurnBroker, TurnBrokerTimeoutError, type BrokerToolResult } from "./turn-broker";
 
 interface ClaimedTurn {
@@ -22,6 +25,9 @@ export type ChatGptMcpContract = "native" | "safe";
 
 const BRIDGE_TOOL_NAMES = new Set([
   "codex_turn_start",
+  "codex_project_inspect",
+  AGENT_REPORT_TOOL,
+  "maria_send_reports",
   "codex_exec",
   "codex_write_stdin",
   "codex_apply_patch",
@@ -637,6 +643,56 @@ export async function runChatGptMcpServer(options: {
       input: execGatewayProgram(nestedToolName, freeform, payload, bound.tools.map(wireName)),
     }, signal).then(gatewayMcpResult);
   };
+
+  if (contract === "native") {
+    server.registerTool("maria_send_reports", {
+      title: "Deliver one queued report through connected Gmail",
+      description: "Send one eligible local diagnostic report from the connected Gmail account to that same configured account. Requires enabled reporting with connected Gmail selected and acknowledged task context. Uses native Gmail tools and their existing permissions. Records Gmail's message receipt and never resends sent or uncertain reports. No recipients, message text, commands or account credentials can be supplied to this operation. Call again only after confirmed delivery with remaining reports; at most five deliveries per task.",
+      inputSchema: { turn_token: turnTokenSchema },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    }, async (input, extra) => withClaimedTurn("maria_send_reports", input.turn_token, extra, async claimed => {
+      if (claimed.reportingEnabled !== true) throw new Error("Agent error reporting is not enabled for this task");
+      return result(await deliverConnectedGmailReport(getConfigDir(), async (name: string, args: Record<string, unknown>) => {
+        const direct = claimed.environment.tools.find(tool => wireName(tool) === name);
+        if (direct) return invoke(claimed.bindingId, claimed.environment, direct, { arguments: args }, extra.signal);
+        return invokeNestedNative(claimed.bindingId, claimed.environment, name, false, { arguments: args }, extra.signal);
+      }));
+    }));
+
+    server.registerTool("codex_project_inspect", {
+      title: "Inspect project files without changing them",
+      description: "List files, read bounded text, or search a literal string within this task's workspace roots using fixed ripgrep operations. Uses the outer native command tool and its existing permissions. Cannot accept shell code, write files, run project code, or access the network. Requires ripgrep on the native host. Output may be truncated; limits are per file and long lines are omitted. Use as the initial inspection tool when appropriate, never to retry or reroute a rejected operation.",
+      inputSchema: { turn_token: turnTokenSchema, ...projectInspectionSchema.shape },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    }, async (input, extra) => withClaimedTurn("codex_project_inspect", turnReference(contract, input), extra, async claimed => {
+      const { turn_token: _token, ...fields } = input;
+      const cmd = projectInspectionCommand(projectInspectionSchema.parse(fields), claimed.environment);
+      const execArgs = { cmd, workdir: claimed.environment.cwd, login: false, yield_time_ms: 1000, max_output_tokens: 6000 };
+      const shellArgs = { command: cmd, workdir: claimed.environment.cwd, timeout_ms: 10_000 };
+      const tool = exactTool(claimed.environment, "exec_command") ?? exactTool(claimed.environment, "shell_command");
+      if (tool) return invoke(claimed.bindingId, claimed.environment, tool, {
+        arguments: tool.name === "exec_command" ? execArgs : shellArgs,
+      }, extra.signal);
+      const gateway = execGateway(claimed.environment);
+      if (!gateway) throw new Error("This task has no native command tool for project inspection");
+      return invoke(claimed.bindingId, claimed.environment, gateway, {
+        input: execCommandGatewayProgram(execArgs, shellArgs),
+      }, extra.signal).then(gatewayMcpResult);
+    }));
+
+    server.registerTool(AGENT_REPORT_TOOL, {
+      title: "Record a task diagnostic and queue its email",
+      description: agentReportTool().description,
+      inputSchema: { turn_token: turnTokenSchema, ...agentIssueSchema.shape },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    }, async (input, extra) => withClaimedTurn(AGENT_REPORT_TOOL, turnReference(contract, input), extra, async claimed => {
+      if (claimed.reportingEnabled !== true) throw new Error("Agent error reporting is not enabled for this task");
+      const { turn_token: _token, ...fields } = input;
+      return result(await callTurnBroker<Record<string, unknown>>(options.brokerSocketPath, {
+        method: "invoke", bindingId: claimed.bindingId, wireName: AGENT_REPORT_TOOL, arguments: agentIssueSchema.parse(fields),
+      }, 10_000, extra.signal));
+    }));
+  }
 
   server.registerTool(
     "codex_exec",

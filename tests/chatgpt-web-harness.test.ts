@@ -2546,10 +2546,13 @@ describe("ChatGPT outer-native harness v4", () => {
         "codex_context_read",
         "codex_context_search",
         "codex_exec",
+        "codex_project_inspect",
         "codex_tool_call",
         "codex_tool_inventory",
         "codex_view_image",
         "codex_write_stdin",
+        "maria_report_issue",
+        "maria_send_reports",
       ]);
       const publicConnectorAbi = listed.tools.map(tool => ({
         name: tool.name,
@@ -2562,7 +2565,7 @@ describe("ChatGPT outer-native harness v4", () => {
       // ChatGPT caches the complete tools/list contract under a connector identity.
       // An intentional hash change therefore requires an explicit connector refresh or identity migration.
       expect(createHash("sha256").update(canonicalJson(publicConnectorAbi)).digest("hex"))
-        .toBe("15b42880f9c9b01bd42ae28ead76c1c7ead580e5231a4e087e04e576da546b0d");
+        .toBe("9a349e9e5163661d860a46bde5bacccb5d1a106c567dc3a11f2f7c38d8caa3a3");
       for (const tool of listed.tools) {
         const properties = tool.inputSchema.properties as Record<string, unknown>;
         expect(properties.turn_token).toEqual({ type: "string", minLength: 20, maxLength: 256 });
@@ -2605,6 +2608,21 @@ describe("ChatGPT outer-native harness v4", () => {
         idempotentHint: false,
         openWorldHint: true,
       });
+
+      expect(listed.tools.find(tool => tool.name === "codex_project_inspect")?.annotations)
+        .toMatchObject({ readOnlyHint: true, destructiveHint: false, openWorldHint: false });
+      const inspection = call("codex_project_inspect", { turn_token: token, operation: "files", path: "." });
+      const inspectionRequests = await broker.nextToolBatch(token);
+      expect(inspectionRequests).toHaveLength(1);
+      const inspectionRequest = inspectionRequests[0]!;
+      expect(inspectionRequest.wireName).toBe("exec");
+      expect(inspectionRequest.input).toContain("--no-config");
+      const rejection = "This tool call was blocked by OpenAI because we couldn't determine the safety status of the request.";
+      broker.completeTool(token, inspectionRequest.callId, { content: [{ type: "text", text: rejection }], isError: true });
+      const rejectedInspection = await inspection;
+      expect(rejectedInspection.isError).toBe(true);
+      expect(JSON.stringify(rejectedInspection)).toContain(rejection);
+      // The rejection settles normally; the wrapper never retries, broadens access, or swaps tools.
 
       const firstExec = call("codex_exec", {
         turn_token: token,

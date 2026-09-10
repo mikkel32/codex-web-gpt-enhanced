@@ -9,7 +9,7 @@ const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const REPORT_GRACE_MS = 30_000;
 const REPORT_NAME = /^[a-f0-9]{64}\.json$/;
 const DEFAULT_REPORT_RECIPIENT = "Mikkel.mynderup@gmail.com";
-const defaults = () => ({ version: 1, enabled: false, recipient: DEFAULT_REPORT_RECIPIENT, includeResponses: false, consentId: "" });
+const defaults = () => ({ version: 1, enabled: false, recipient: DEFAULT_REPORT_RECIPIENT, includeResponses: false, consentId: "", deliveryMethod: "smtp" });
 const AGENT_DETAIL_FIELDS = ["tool", "stage", "operation", "expected", "actual", "recoveryAttempted", "completedWork", "remainingWork", "hypothesis"];
 
 function agentDetails(input, includeResponses) {
@@ -104,16 +104,19 @@ class ErrorReportStore {
         || typeof value.consentId !== "string" || (value.enabled && !/^[a-f0-9-]{36}$/.test(value.consentId))) throw new Error("Invalid report settings");
       if (value.recipient) emailAddress(value.recipient);
       if (value.enabled && !value.recipient) throw new Error("Missing report recipient");
-      return { version: 1, enabled: value.enabled, includeResponses: value.includeResponses, recipient: value.recipient || DEFAULT_REPORT_RECIPIENT, consentId: value.consentId };
+      if (value.deliveryMethod !== undefined && !["smtp", "gmail"].includes(value.deliveryMethod)) throw new Error("Invalid delivery method");
+      return { version: 1, enabled: value.enabled, includeResponses: value.includeResponses, recipient: value.recipient || DEFAULT_REPORT_RECIPIENT, consentId: value.consentId, deliveryMethod: value.deliveryMethod || "smtp" };
     } catch (error) { if (error.code === "ENOENT") return defaults(); throw error; }
   }
-  configure({ enabled, recipient, includeResponses }) {
+  configure({ enabled, recipient, includeResponses, deliveryMethod }) {
     if (typeof enabled !== "boolean" || typeof includeResponses !== "boolean") throw new Error("Explicit reporting consent is required");
     const address = recipient ? emailAddress(recipient.trim()) : enabled ? "" : DEFAULT_REPORT_RECIPIENT;
     if (enabled && !address) throw new Error("A report recipient is required");
     const old = this.settings();
+    const method = deliveryMethod ?? old.deliveryMethod;
+    if (!["smtp", "gmail"].includes(method)) throw new Error("Invalid delivery method");
     const unchanged = old.enabled === enabled && old.recipient === address && old.includeResponses === includeResponses;
-    const next = { version: 1, enabled, recipient: address, includeResponses,
+    const next = { version: 1, enabled, recipient: address, includeResponses, deliveryMethod: method,
       consentId: unchanged && old.consentId ? old.consentId : randomUUID() };
     privateDirectory(this.directory);
     atomicJson(this.settingsFile, next);
@@ -127,7 +130,7 @@ class ErrorReportStore {
     if (!/^[a-f0-9]{64}$/.test(id)) throw new Error("Invalid report ID");
     const value = readPrivateJson(path.join(this.directory, `${id}.json`));
     if (value.version !== 1 || value.id !== id || !Number.isFinite(value.createdAt)
-      || !value.delivery || !["pending", "sending", "sent", "blocked", "failed", "uncertain"].includes(value.delivery.state)) throw new Error("Invalid report record");
+      || !value.delivery || !["pending", "needs_sender", "sending", "sent", "blocked", "failed", "uncertain"].includes(value.delivery.state)) throw new Error("Invalid report record");
     emailAddress(value.recipient);
     return value;
   }
@@ -162,7 +165,7 @@ class ErrorReportStore {
     if (fs.existsSync(file)) {
       // The helper and Responses server contribute to one incident, before delivery begins.
       const existing = this.read(id);
-      if (existing.delivery.state === "pending") {
+      if (["pending", "needs_sender"].includes(existing.delivery.state)) {
         const responses = { ...existing.responses };
         const details = { ...existing.agentDetails };
         for (const [name, value] of Object.entries(agentDetails(input.agentDetails, settings.includeResponses))) {
@@ -197,7 +200,8 @@ class ErrorReportStore {
         codex: section(settings.includeResponses ? input.codexResponse : undefined),
         toolFailure: section(settings.includeResponses ? input.toolFailure : undefined, 32 * 1024) },
       notes: section(input.notes, 4096).text,
-      delivery: { state: "pending", attempts: 0, nextAttemptAt: this.now() + REPORT_GRACE_MS } };
+      delivery: { state: settings.deliveryMethod === "gmail" || fs.existsSync(path.join(this.directory, "sender.json")) ? "pending" : "needs_sender",
+        attempts: 0, nextAttemptAt: this.now() + REPORT_GRACE_MS } };
     try { atomicJson(file, fitReport(report), true); }
     catch (error) { if (error.code === "EEXIST") return { captured: false, reason: "duplicate", id }; throw error; }
     return { captured: true, id };

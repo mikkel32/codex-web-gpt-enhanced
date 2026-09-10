@@ -111,6 +111,50 @@ test("authentication rejection pauses the queue without hammering the sender", a
   assert.equal(f.store.read(id).delivery.state, "blocked"); assert.equal(calls, 1);
 });
 
+test("missing sender is actionable, migrates old pending records, and resumes the original incident once", async t => {
+  const f = fixture(t); let configured = false;
+  f.sender.configured = () => configured;
+  const { id } = f.incident();
+  assert.equal(f.store.read(id).delivery.state, "needs_sender");
+  f.store.update(f.store.read(id), { state: "pending" }); // Upgrade from 5.20.4.
+  f.advance(31000); await f.queue.drain();
+  assert.equal(f.sent.length, 0);
+  assert.equal(f.store.read(id).delivery.attempts, 0);
+  assert.equal(f.queue.reportStatus(f.store.read(id)).state, "needs_sender");
+  f.incident("trace_one", { codexResponse: "Later evidence while setup is missing" });
+  assert.equal(f.store.read(id).responses.codex.text, "Later evidence while setup is missing");
+  configured = true;
+  await f.queue.drain(); await f.queue.drain();
+  assert.equal(f.sent.length, 1); assert.equal(f.sent[0].id, id);
+  assert.equal(f.store.read(id).delivery.state, "sent");
+});
+
+test("deleting the rejected report and changing capture settings cannot clear a sender authentication pause", async t => {
+  const f = fixture(t); const { id } = f.incident(); let calls = 0;
+  f.sender.send = async () => { calls++; throw { code: "EAUTH" }; };
+  f.advance(31000); await f.queue.drain(); f.store.remove(id);
+  f.store.configure({ ...f.store.settings(), includeResponses: false });
+  const next = f.incident("new_settings"); f.advance(3600001);
+  const restart = new ReportDeliveryQueue(f.store, f.sender, { now: f.now });
+  await restart.drain(); assert.equal(calls, 1);
+  assert.equal(restart.reportStatus(f.store.read(next.id)).state, "blocked");
+  restart.senderUpdated();
+  f.sender.send = async () => { calls++; return { accepted: true }; };
+  await restart.drain(); assert.equal(calls, 2);
+  assert.equal(f.store.read(next.id).delivery.state, "sent");
+});
+
+test("delivery limits provide a durable next attempt instead of an unexplained pending report", async t => {
+  const f = fixture(t);
+  for (let i = 0; i < 6; i++) f.incident(`limit_${i}`);
+  f.advance(31000);
+  for (let i = 0; i < 6; i++) await f.queue.drain();
+  const waiting = f.store.records().find(report => report.delivery.state !== "sent");
+  assert.equal(waiting.delivery.nextAttemptAt, f.now() + 3600000);
+  assert.equal(waiting.delivery.reason, "Delivery limit reached; retry scheduled");
+  f.advance(3600001); await f.queue.drain(); assert.equal(f.sent.length, 6);
+});
+
 test("safe connection failures retry with bounded backoff and stop at five attempts", async t => {
   const f = fixture(t); const { id } = f.incident(); let calls = 0;
   f.sender.send = async () => { calls++; throw { code: "ECONNECTION" }; };

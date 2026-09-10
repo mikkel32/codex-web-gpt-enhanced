@@ -16,10 +16,10 @@ export const agentIssueSchema = z.object({
   toolFailure: z.string().max(32768).optional(),
 }).strict();
 
-export function agentReportingPolicy(): { recipient: string; includeResponses: boolean } | undefined {
+export function agentReportingPolicy(): { recipient: string; includeResponses: boolean; deliveryMethod: string } | undefined {
   try {
     const value = new ErrorReportStore(getConfigDir()).settings();
-    return value.enabled ? { recipient: value.recipient, includeResponses: value.includeResponses } : undefined;
+    return value.enabled ? { recipient: value.recipient, includeResponses: value.includeResponses, deliveryMethod: value.deliveryMethod } : undefined;
   } catch { return undefined; }
 }
 
@@ -47,7 +47,11 @@ export function captureAgentIssue(traceId: string, input: unknown): Record<strin
   const report = store.read(outcome.id);
   return { recorded: true, duplicate: !outcome.captured, reportId: outcome.id, recipient: report.recipient,
     deliveryState: report.delivery.state, emailAccepted: report.delivery.state === "sent", inboxVerified: false,
+    actionRequired: policy.deliveryMethod === "gmail" && ["pending", "needs_sender"].includes(report.delivery.state)
+      ? "deliver_with_maria_send_reports" : report.delivery.state === "needs_sender" ? "configure_gmail_sender" : null,
     message: report.delivery.state === "sent" ? "The mail server previously accepted this incident; do not send another copy."
+      : policy.deliveryMethod === "gmail" ? "Incident saved locally. Use maria_send_reports for the selected connected Gmail delivery. It owns the queued incident and records the receipt; do not separately send it through another tool."
+      : report.delivery.state === "needs_sender" ? "Incident saved locally but no Gmail sender is configured. Open Automatic error reports in Maria and save the Gmail sender and Google app password there. No email was attempted; do not send another copy through a connector."
       : "Incident saved locally. The configured app sender handles delivery. Queued is not sent; do not also email this incident through another tool." };
 }
 
@@ -58,7 +62,8 @@ export function agentReportingInstructions(): string {
   return [
     "<maria_agent_error_reporting>",
     `Diagnostic reporting is enabled by the owner of this installation. The configured recipient is ${policy.recipient}.`,
-    `When a command, tool discovery, browser operation, context read or connection fails, report the observed issue once using codex_tool_inventory with query=${AGENT_REPORT_TOOL}, then codex_tool_call with that exact returned wire_name and schema. This also covers failures that never reach Maria's normal error stream.`,
+    ...(policy.deliveryMethod === "gmail" ? ["Connected Gmail delivery is selected by the owner. After required task context is acknowledged, call maria_send_reports when advertised to deliver queued reports using the existing Gmail connection. Also use it after recording a new incident. It sends one eligible incident per call to the verified same Gmail account, records the receipt and prevents duplicates. Continue only after delivered=true with remaining>0, at most five calls per task. Stop on unavailable access, a rejection, no delivery, or uncertainty. Never send those incidents separately. If the tool is absent, refresh the connector catalog for a future task."] : []),
+    `When a command, tool discovery, browser operation, context read or connection fails, report the observed issue once using the dedicated ${AGENT_REPORT_TOOL} tool if it is advertised. It has a fixed diagnostic schema and cannot execute project commands. If it is absent from a cached connector catalog, refresh the connector's tool list in ChatGPT settings for future turns. Older catalogs may discover the same operation using codex_tool_inventory with query=${AGENT_REPORT_TOOL}, then codex_tool_call with its exact schema. Choose one available path before calling; a rejected report must not be retried through the other path.`,
     "Include the exact available error, failed tool and operation, expected versus observed result, recovery already attempted, and verified completed work versus remaining work. Label hypotheses as unverified. Only include Web/Codex response text actually observed in this task when response reporting is enabled; never invent missing text.",
     `Response-text reporting is ${policy.includeResponses ? "enabled" : "disabled; do not include response text, tool output or detailed project content"}. Never include credentials, cookies, capability tokens, receipts, full prompts, hidden reasoning, system/developer instructions, unrelated chats or files.`,
     "If Maria's reporting path itself is unavailable, an independently available Gmail connector may send one minimal diagnostic email to the configured recipient under this reporting authorization. Discover its current schema first, use no additional recipients or file attachments, and include only the redacted error and verified task status. Do not send Gmail if the incident was already queued, sent, or delivery is uncertain.",

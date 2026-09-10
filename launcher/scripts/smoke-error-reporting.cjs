@@ -39,9 +39,12 @@ app.whenReady().then(async () => {
   await until(() => api.snapshot().enabled);
   assert.equal(api.snapshot().senderConfigured, false);
   assert.equal(api.snapshot().deliveryReady, false);
-  await until(() => page.executeJavaScript('document.getElementById("deliveryStatus").textContent.includes("queueing locally")'));
+  await until(() => page.executeJavaScript('document.getElementById("deliveryStatus").textContent.includes("Action required")'));
   assert.equal(await page.executeJavaScript('document.getElementById("test").disabled'), true);
   assert.equal(delivered.length, 0);
+  await page.executeJavaScript('document.getElementById("sender").value="editing@gmail.com"; document.getElementById("password").value="unsaved-input"; request({ action: "status" }, false)');
+  assert.equal(await page.executeJavaScript('document.getElementById("sender").value'), "editing@gmail.com");
+  assert.equal(await page.executeJavaScript('document.getElementById("password").value'), "unsaved-input");
   await page.executeJavaScript(`document.getElementById("recipient").value="owner@example.com";
     document.getElementById("sender").value="sender@gmail.com";
     document.getElementById("password").value="abcdefghijklmnop";
@@ -76,6 +79,8 @@ app.whenReady().then(async () => {
   }
   time += 30_001; await api.flush(); assert.equal(delivered.length, 1);
   assert.equal(delivered[0].recipient, "owner@example.com");
+  await until(() => page.executeJavaScript('document.querySelector("article strong").textContent.includes("sent")'));
+
   const message = formatIncidentEmail(delivered[0]);
   const mailWindow = new BrowserWindow({ show: false, width: 760, height: 1040,
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, partition: "mail-preview-fixture" } });
@@ -94,6 +99,11 @@ app.whenReady().then(async () => {
     }
   }
   mailWindow.destroy();
+  await page.executeJavaScript('document.getElementById("deliveryMethod").value="gmail"; document.getElementById("deliveryMethod").dispatchEvent(new Event("change")); document.getElementById("settings").requestSubmit()');
+  await until(() => api.snapshot().deliveryMethod === "gmail");
+  assert.equal(await page.executeJavaScript('document.getElementById("password").closest("label").hidden'), true);
+  assert(api.snapshot().deliveryStatus.includes("No app password"));
+
   await api.flush(); assert.equal(delivered.length, 1);
   await page.executeJavaScript('document.getElementById("forget").click()');
   await until(() => !api.snapshot().senderConfigured);

@@ -458,6 +458,7 @@ export function compileChatGptWebPrompt(
     : mode.localTools
     ? [
       "For local work required by the task, use the attached Codex Native tools directly according to their declared descriptions and schemas.",
+      "If codex_project_inspect is advertised, prefer its fixed read-only operations for initial workspace file listings, text reads and literal searches. It uses the native command tool under the existing permissions. Never use it to retry or reroute a previously rejected operation. If it is absent, the connector catalog may need a refresh in ChatGPT settings for future turns; do not guess an unadvertised tool name.",
       "Call a Codex Native tool only when the latest active request requires a local effect or fresh local evidence that is not already present in the supplied context; otherwise answer the request directly without a tool call.",
       "Use actual Codex Native results as evidence for local observations and effects.",
       "Use the attached inventory tool to discover additional tools, then invoke only the exact returned wire_name through the declared tool-call gateway. read and exec_command are not aliases for the bridge's public codex_* tools. Never guess a tool name from a cached plugin schema.",
