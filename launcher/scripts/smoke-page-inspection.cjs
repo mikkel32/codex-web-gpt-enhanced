@@ -23,6 +23,18 @@ async function waitFor(predicate, label, timeout = 10_000) {
 let window;
 const views = [];
 let observer;
+async function inspectorReady(contents, label) {
+  await waitFor(() => contents.isDevToolsOpened() && contents.devToolsWebContents
+    && !contents.devToolsWebContents.isLoading(), label);
+  const tools = contents.devToolsWebContents;
+  await waitFor(async () => !tools.isDestroyed()
+    && await tools.executeJavaScript("document.readyState === 'complete'"), `${label} frontend`);
+}
+async function closeInspector(contents) {
+  const tools = contents.devToolsWebContents;
+  contents.closeDevTools();
+  await waitFor(() => !contents.isDevToolsOpened() && (!tools || tools.isDestroyed()), "inspector destruction");
+}
 app.whenReady().then(async () => {
   // DevTools and fixture assets are local. No account endpoints may be contacted.
   session.defaultSession.webRequest.onBeforeRequest({ urls: ["http://*/*", "https://*/*"] }, (_details, callback) => callback({ cancel: true }));
@@ -70,6 +82,7 @@ app.whenReady().then(async () => {
   let inspections = 0;
   try {
     for (const [index, contents] of contentsList.entries()) {
+      console.log(`INSPECTION_STAGE surface=${index} context-menu`);
       for (const view of views) view.setBounds({ x: 1400, y: 900, width: 800, height: 600 });
       const view = views[index - 1];
       if (view) view.setBounds({ x: 180, y: 80, width: 800, height: 600 });
@@ -100,8 +113,10 @@ app.whenReady().then(async () => {
       // Invoke the actual native MenuItem callback after a real right-click created the menu.
       // OS-specific pointer selection is left to manual acceptance, not claimed by this fixture.
       lastMenu.closePopup(window);
+      // Let the native popup finish dismissal before opening another native window.
+      await new Promise(resolve => setImmediate(resolve));
       item.click(item, window, {});
-      await waitFor(() => contents.isDevToolsOpened() && contents.devToolsWebContents, `developer tools ${identity.id}`);
+      await inspectorReady(contents, `developer tools ${identity.id}`);
       for (const other of contentsList) if (other !== contents) assert.equal(other.isDevToolsOpened(), false);
       assert.equal(observerDisconnected, false);
       await waitFor(async () => (await page.evaluate(() => window.ticks)) > identity.ticks, "observer progress after inspection");
@@ -117,21 +132,20 @@ app.whenReady().then(async () => {
         const screenshot = await contents.devToolsWebContents.capturePage();
         fs.writeFileSync(path.join(process.env.MARIA_INSPECTION_OUTPUT, "inspection-devtools.png"), screenshot.toPNG());
       }
-      contents.closeDevTools();
-      await waitFor(() => !contents.isDevToolsOpened(), "close inspector");
+      await closeInspector(contents);
+      console.log(`INSPECTION_STAGE surface=${index} F12`);
       window.focus(); contents.focus();
       contents.sendInputEvent({ type: "keyDown", keyCode: "F12" });
       contents.sendInputEvent({ type: "keyUp", keyCode: "F12" });
-      await waitFor(() => contents.isDevToolsOpened(), "F12 inspector");
-      contents.closeDevTools();
-      await waitFor(() => !contents.isDevToolsOpened(), "close shortcut inspector");
+      await inspectorReady(contents, "F12 inspector");
+      await closeInspector(contents);
+      console.log(`INSPECTION_STAGE surface=${index} platform-shortcut`);
       window.focus(); contents.focus();
       const modifiers = process.platform === "darwin" ? ["meta", "alt"] : ["control", "shift"];
       contents.sendInputEvent({ type: "keyDown", keyCode: "I", modifiers });
       contents.sendInputEvent({ type: "keyUp", keyCode: "I", modifiers });
-      await waitFor(() => contents.isDevToolsOpened(), "platform inspector shortcut");
-      contents.closeDevTools();
-      await waitFor(() => !contents.isDevToolsOpened(), "close platform inspector");
+      await inspectorReady(contents, "platform inspector shortcut");
+      await closeInspector(contents);
       contents.off("did-start-navigation", onNavigation);
       inspections++;
     }

@@ -21,7 +21,7 @@ try {
     new Response(launched.stdout).text(),
     new Response(launched.stderr).text(),
   ]).finally(() => clearTimeout(timer));
-  assert.equal(status, 0, `Electron inspection fixture failed: ${stderr.slice(-6000)}`);
+  assert.equal(status, 0, `Electron inspection fixture failed: ${stdout.slice(-3000)}\n${stderr.slice(-6000)}`);
   assert(stdout.includes("PAGE_INSPECTION_ELECTRON_OK"));
   process.stdout.write(stdout);
 } finally {
