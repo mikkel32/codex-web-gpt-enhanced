@@ -26,9 +26,13 @@ export async function verifyConcurrentBrowserFixture(browser: Browser, websocket
     Object.defineProperty(globalThis, "__CODEX_WEB_GPT_SURFACE_ID__", { get: () => new Promise(() => {}), configurable: true });
   });
   const sentinelSession = await context.newCDPSession(sentinel);
+  // Fix both emulated properties so OS window activation cannot change the
+  // baseline while the five independent renderer scenarios are running.
+  await sentinelSession.send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await sentinelSession.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] });
   const sentinelState = () => sentinel.evaluate(() => ({ focus: document.hasFocus(), dark: matchMedia("(prefers-color-scheme: dark)").matches }));
   const before = await sentinelState();
+  assert.equal(before.focus, true);
   assert.equal(before.dark, true);
   const endpoint = new URL(websocket);
   const descriptor = join(home, "concurrent-descriptor.json");
