@@ -10,6 +10,24 @@
 - Choose a regular Codex model or a **Maria Web** model directly in Codex.
 - Use **Help & guide** inside Maria whenever you need these instructions.
 
+## Inspect the interface or a browser page
+
+Right-click the element and choose **Inspect element**. The inspector belongs to
+the page you clicked: the Maria interface and each embedded browser tab have
+separate developer tools. Use **Developer tools** in the same menu to open the
+console and other panels without selecting an element.
+
+With the page focused, press **F12**, **Command+Option+I** on macOS, or
+**Ctrl+Shift+I** on Windows/Linux. Tools open in a separate window; opening them
+does not reload the conversation, resend a prompt, or change its native bounds.
+Right-click menus also offer the applicable selection and editing actions.
+
+Inspection is available in installed builds as well as development builds. It is
+an explicit local action, including in Manual mode. It does not change Codex
+permissions or ChatGPT's service checks. Developer tools can show private chat and
+account information; review and redact anything before sharing it. Avoid pausing
+the debugger or editing a page while an automatic turn is running.
+
 ## Two ways to work
 
 ### Native Codex
@@ -159,3 +177,45 @@ your computer. Explicitly removing the integration stops its background connecti
 Maria does not automatically resend an accepted prompt. This avoids duplicate work
 when a network connection becomes uncertain. Both saved and Temporary Chat are
 processed by OpenAI. Account availability and limits still apply.
+## Automatic error emails
+
+Right-click the Maria interface or an embedded page and choose **Automatic error reports…**.
+Configure a Gmail sender and a recipient, then explicitly enable reporting on this installation.
+Enable **Include recorded Web and Codex response text** to include response content in the emails.
+The sender requires a Google app password for an eligible account with 2-Step Verification;
+enter it only in Maria's password field, never in a chat or source file.
+
+The browser helper records its observed Markdown and the Responses server records the text it
+emitted to Codex. Errors from the same identified turn are grouped into one report. Launcher
+errors and renderer crashes are also captured. A 30-second collection window lets the browser
+and server contribute before delivery. Missing sources are marked unavailable: this
+feature does not scan unrelated Codex sessions or independently inspect the native Codex UI.
+If the process or machine stops before an incident can be saved, a report cannot be guaranteed.
+
+Reports contain the error, source, available turn identifiers, version, platform, and optionally
+the recorded responses and a failing tool result. Known keys, bearer tokens, passwords, cookies,
+receipts and URL queries are redacted. Prompts, system/developer instructions, hidden reasoning,
+screenshots and credential files are excluded. Redaction cannot recognize every possible secret,
+so enable response content only for a recipient you trust. Response tails are bounded and any
+redaction, omission or truncation is marked. Each report is a JSON email attachment.
+
+The queue persists across restarts, holds at most 80 reports or 20 MiB, and expires reports after
+7 days. Delivery is capped at 5 attempts per hour and 20 per day, including retries. Proven
+connection failures retry with backoff at most five times. Authentication rejection pauses
+delivery until the sender is corrected. An uncertain SMTP result or a crash during sending
+requires inbox review and is never automatically resent. **Sent** means the mail server accepted
+the message, not that inbox arrival has been independently verified.
+
+**Preview report** shows the saved content. **Queue test email** creates a test without conversation
+text. **Disable & forget sender** disables reporting and removes the encrypted sender credential.
+Earlier queued reports remain tied to their original recipient and consent, and are not sent
+after those settings change. Delete them individually or let the retention limit expire.
+Disabling cannot recall an email already handed to the mail server.
+
+Credentials use Electron's operating-system secure storage; insecure Linux `basic_text` fallback
+is rejected. Queued reports are locally stored with owner-only POSIX permissions where supported.
+Reporting is disabled by default for every installation, and no developer inbox is hard-coded.
+
+References: [Google app passwords](https://support.google.com/accounts/answer/185833),
+[Nodemailer SMTP](https://nodemailer.com/smtp),
+[Electron credential storage](https://www.electronjs.org/docs/latest/api/safe-storage).

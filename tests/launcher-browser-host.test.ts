@@ -148,6 +148,7 @@ test("launcher turn control sends authenticated lifecycle events", async () => {
       status: "completed",
       retain: true,
       connectorBound: true,
+      requestId: expect.stringMatching(/^[A-Za-z0-9_-]{32}$/),
     });
   } finally {
     await new Promise<void>(resolve => server.close(() => resolve()));

@@ -3,6 +3,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, unlinkSync } from "node:fs
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { isWindowsPipeEndpoint } from "../../config";
+import { AGENT_REPORT_TOOL, agentReportingPolicy, captureAgentIssue } from "../../agent-reporting";
 import { nativeContextResult, type NativeContextFile, type NativeContextOptions } from "./native-context";
 import { NativeContextStore } from "./context-store";
 import {
@@ -1129,13 +1130,15 @@ export class TurnBroker implements TurnBrokerOwner {
         if (!existing || existing.token !== token || existing.channel !== activeChannel) {
           throw new Error("turn token binding state is inconsistent");
         }
-        return { bindingId: activeChannel.bindingId, activityId, environment: activeChannel.environment };
+        return { bindingId: activeChannel.bindingId, activityId, environment: activeChannel.environment,
+          ...(contract === "native" && activeChannel.context?.options.allowAgentReporting === true && agentReportingPolicy() ? { reportingEnabled: true } : {}) };
       }
       this.pending.delete(token);
       const bindingId = opaqueId("binding");
       activeChannel.bindingId = bindingId;
       this.bindings.set(bindingId, { token, channel: activeChannel });
-      return { bindingId, activityId, environment: activeChannel.environment };
+      return { bindingId, activityId, environment: activeChannel.environment,
+        ...(contract === "native" && activeChannel.context?.options.allowAgentReporting === true && agentReportingPolicy() ? { reportingEnabled: true } : {}) };
     }
 
     const bindingId = request.bindingId;
@@ -1181,6 +1184,15 @@ export class TurnBroker implements TurnBrokerOwner {
     }
     if (request.method === "resolve") return { environment: binding.channel.environment };
     this.assertSafeHarnessRunning(binding.channel);
+    if (request.method === "invoke" && request.wireName === AGENT_REPORT_TOOL) {
+      if (binding.channel.safe || binding.channel.completionCommitted || binding.channel.compactionRequested
+        || binding.channel.context?.options.allowAgentReporting !== true) {
+        throw new Error("Agent reporting requires an active Automatic turn");
+      }
+      // This fixed diagnostic sink cannot execute work, read files, redirect mail, or
+      // satisfy the required-context fence. It remains usable to report a failed read.
+      return captureAgentIssue(binding.channel.traceId, request.arguments);
+    }
     if (request.method === "read_context" || request.method === "search_context") {
       const channel = binding.channel;
       if (channel.completionCommitted || channel.compactionRequested) throw new Error("Native context turn is already terminal");

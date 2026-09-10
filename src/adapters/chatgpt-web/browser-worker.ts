@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { chatGptBrowserAbortError, chatGptBrowserAbortReason } from "./abort-reason";
 import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
@@ -4115,6 +4116,9 @@ export class ChatGptBrowserWorker {
     const reused = lease.reused === true;
     let terminal: "completed" | "failed" | "aborted" = "completed";
     let terminalMessage: string | undefined;
+    let reportResponse = "";
+    const captureResponse = responseReportingEnabled();
+    let reportTruncated = false;
     let originalError: unknown;
     let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
     let heartbeatInFlight = false;
@@ -4148,7 +4152,11 @@ export class ChatGptBrowserWorker {
       await turn.onPreparedSelected?.(reused);
       heartbeatTimer = setInterval(sendHeartbeat, LAUNCHER_TURN_HEARTBEAT_INTERVAL_MS);
       heartbeatTimer.unref?.();
-      return await this.runBrowserTurn({ ...turn, onSendActivated: async () => {
+      return await this.runBrowserTurn({ ...turn, onTextDelta: delta => {
+        if (captureResponse) reportResponse += delta;
+        if (reportResponse.length > 128 * 1024) { reportResponse = reportResponse.slice(-128 * 1024); reportTruncated = true; }
+        turn.onTextDelta(delta);
+      }, onSendActivated: async () => {
         await notifyLauncherTurn(this.config.browserHostDescriptorPath!, {
           phase: "heartbeat", traceId: turn.traceId, helperPid: process.pid, sendActivated: true,
         }, 15_000).catch(error => {
@@ -4159,11 +4167,21 @@ export class ChatGptBrowserWorker {
       } }, surfaceId, undefined, reused, lease.connectorBound === true);
     } catch (error) {
       originalError = error;
+      const reportAbortReason = chatGptBrowserAbortReason(turn.abortSignal?.reason);
+      if (!turn.abortSignal?.aborted || ["binding_retired", "retirement_observation_failed", "helper_protocol_failed"].includes(reportAbortReason)) captureIncident({ source: "web-runtime", traceId: turn.traceId,
+        model: turn.modelId, code: error instanceof ChatGptWebAdapterError ? error.code : "browser_turn_failed",
+        error: error instanceof Error ? error.message : String(error), webResponse: reportResponse,
+        notes: `Browser-helper Markdown observed before failure.${reportTruncated ? " Earlier text exceeded the 128 KiB capture budget and was omitted." : ""}` });
       terminal = (error instanceof DOMException && error.name === "AbortError")
         || (error instanceof ChatGptWebAdapterError && error.code === "client_cancelled")
         ? "aborted"
         : "failed";
-      terminalMessage = error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500);
+      terminalMessage = terminal === "aborted" && turn.abortSignal?.aborted
+        ? chatGptBrowserAbortError(chatGptBrowserAbortReason(turn.abortSignal.reason)).message
+        : error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500);
+      if (terminal === "aborted") console.info(
+        `[chatgpt-web] browser turn ${turn.traceId} interrupted cause=${chatGptBrowserAbortReason(turn.abortSignal?.reason)}`,
+      );
       throw error;
     } finally {
       if (heartbeatTimer) clearInterval(heartbeatTimer);
@@ -4188,6 +4206,9 @@ export class ChatGptBrowserWorker {
         if (controlError instanceof ChatGptWebAdapterError && controlError.code === "client_cancelled") {
           throw controlError;
         }
+        captureIncident({ source: "web-runtime", traceId: turn.traceId, model: turn.modelId,
+          code: "launcher_turn_end_failed", error: controlError instanceof Error ? controlError.message : String(controlError),
+          webResponse: reportResponse, notes: "Browser terminal acknowledgement failed. The recorded Web text may already be complete; no prompt was resent." });
         if (!originalError) throw controlError;
         console.error(
           `[chatgpt-web] launcher turn-end notification failed after browser error: ${controlError instanceof Error ? controlError.message : String(controlError)}`,
@@ -4558,7 +4579,7 @@ export class ChatGptBrowserWorker {
         if (turn.abortSignal?.aborted) {
           const stop = page.locator(CHATGPT_STOP_BUTTON_SELECTOR).last();
           if (await stop.isVisible().catch(() => false)) await stop.press("Enter").catch(() => {});
-          throw new DOMException("ChatGPT web turn aborted", "AbortError");
+          throw chatGptBrowserAbortError(chatGptBrowserAbortReason(turn.abortSignal.reason));
         }
         if (deadline !== undefined && Date.now() >= deadline) {
           throw new Error("ChatGPT web turn timed out");
@@ -4862,3 +4883,4 @@ export class ChatGptBrowserWorker {
     }
   }
 }
+import { captureIncident, responseReportingEnabled } from "../../error-reporting";

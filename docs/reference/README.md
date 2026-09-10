@@ -6,6 +6,7 @@ Implementation contracts and architecture. For everyday setup, start with the [u
 
 - [Architecture](architecture.md)
 - [Guided setup and connector recovery](connector-recovery.md)
+- [Diagnostic emails and agent-reported failures](agent-error-reporting.md)
 - [Context delivery design](context-delivery.md)
 - [Conversation continuity](conversation-continuity.md)
 - [Cooperative browser access](cooperative-access.md)

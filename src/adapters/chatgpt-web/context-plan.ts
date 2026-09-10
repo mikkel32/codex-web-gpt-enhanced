@@ -108,7 +108,7 @@ export async function buildContextPlan(compiled: CompiledChatGptWebPrompt, envir
     multipart: { parts, commit: compiled.multipart.commit }, contextReserveTokens: 0,
     contextRequiredTokens: optional.filter(file => file.required !== false).reduce((n, file) => n + estimateTokens(file.text, "gpt-5.6-sol"), 0) };
   return { compiled: result, files: [...coreFiles, ...optional, ...images], release: cache.dispose,
-    options: { requireReceipts: true, optionalTokenBudget: null },
+    options: { requireReceipts: true, optionalTokenBudget: null, allowAgentReporting: true },
     stats: { originalCharacters: compiled.multipart.parts.reduce((n, part) => n + part.length, 0),
       requiredCharacters: parts[0].length + parts[1].length, archivedCharacters: optional.reduce((n, file) => n + file.text.length, 0),
       archivedResults, attachments: attachments.length, images: images.length } };

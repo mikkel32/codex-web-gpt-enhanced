@@ -4,6 +4,7 @@ const { createHash, randomBytes } = require("node:crypto");
 const { clipboard, WebContentsView, powerMonitor, powerSaveBlocker, shell } = require("electron");
 const { writePrivateFileAtomic } = require("./atomic-file.cjs");
 const { SavedConversations, savedConversationUrl } = require("./saved-conversations.cjs");
+const { installPageInspection, removePageInspection } = require("./page-inspection.cjs");
 const { confirmTurnReviewed, openSavedTurnForReview, retainTurnForReview, turnReviewRequiredError } = require("./turn-review.cjs");
 const { BrowserAccessGate, BrowserAccessPausedError } = require("./browser-access.cjs");
 const {
@@ -309,6 +310,7 @@ class BrowserHost {
     control,
     cancelTurn,
     getConnectorName,
+    getLanguage = () => "en",
     helper,
     logger,
     loginWithPasskey,
@@ -335,6 +337,7 @@ class BrowserHost {
     this.control = control;
     this.cancelTurn = cancelTurn;
     this.getConnectorName = getConnectorName;
+    this.getLanguage = getLanguage;
     this.helper = helper;
     this.logger = logger;
     this.loginWithPasskey = loginWithPasskey;
@@ -739,6 +742,12 @@ class BrowserHost {
 
   bindShellZoomShortcuts(contents) {
     if (!contents || contents.isDestroyed() || this.shellZoomShortcutBindings.has(contents)) return;
+    installPageInspection(contents, {
+      ownerWindow: this.window,
+      title: contents === this.window.webContents ? "Maria WebGPT interface" : "Maria WebGPT browser",
+      getLanguage: this.getLanguage,
+      onError: action => this.logger.warn?.("browser.inspection_failed", { action }),
+    });
     const handler = (event, input) => {
       const navigation = require("./shell-shortcuts.cjs").shellNavigationForInput(input);
       if (navigation) {
@@ -2353,6 +2362,7 @@ class BrowserHost {
       }
       existing.helperPid = helperPid;
       existing.traceId = traceId;
+      existing.settledTurn = undefined;
       existing.status = "running";
       existing.loading = existing.view.webContents.isLoadingMainFrame?.() === true;
       existing.message = "ChatGPT is working";
@@ -2463,53 +2473,74 @@ class BrowserHost {
     }
     const cancelledByUser = this.userCancelledTurnOwners.get(traceId) === helperPid;
     if (tab.reviewedTraceId === traceId && tab.status === "ready") return { cancelledByUser };
-    if (accessIssue) this.pauseWebAccess(accessIssue, undefined, tab.id);
-    tab.status = status === "completed" ? "ready" : status === "aborted" ? "aborted" : "error";
-    this.syncPowerSaveBlocker();
-    tab.message = status === "completed" ? "Task completed" : message || `ChatGPT turn ${status}`;
-    tab.loading = false;
-    if (!tab.view.webContents.isDestroyed()) tab.view.webContents.setBackgroundThrottling(true);
-    if (status === "completed") {
-      this.logger.info("browser.tab_completed", { tabId: tab.id, traceId });
+    const settled = tab.settledTurn;
+    if (settled?.traceId === traceId && settled.helperPid === helperPid) {
+      // A helper can exit after the launcher accepted its result but before the daemon
+      // received that result. Teardown is not permission to revise an accepted outcome.
+      if (settled.status !== "completed" && status === "completed") {
+        throw new Error("Browser turn already ended without verified completion; review is required");
+      }
+      return { cancelledByUser: settled.cancelledByUser };
     }
-    if (status === "completed"
-      && retain
-      && tab.conversationKey
-      && (!tab.connectorIdentity || connectorBound)) {
-      tab.connectorBound = connectorBound === true;
+    const retainCompleted = status === "completed" && retain && tab.conversationKey
+      && (!tab.connectorIdentity || connectorBound);
+    if (retainCompleted) {
       const completedUrl = savedConversationUrl(tab.view.webContents.getURL?.());
       const saved = this.savedConversations?.get(tab.conversationKey);
       if (saved?.url && saved.url !== completedUrl) throw new Error("ChatGPT moved away from its saved task. Its original link was preserved.");
+      // Commit the durable state before changing status, throttling, or announcing success.
+      // A failed write leaves the running lease and the uncertain saved record unchanged.
       this.savedConversations?.set(tab.conversationKey, {
         url: completedUrl, connectorIdentity: tab.connectorIdentity || "",
-        connectorBound: tab.connectorBound, status: "ready",
+        connectorBound: connectorBound === true, status: "ready",
       });
-      tab.lastHeartbeatAt = Date.now();
-      if (hideAfterTurn && !this.activeTraceId) this.hide();
-      this.logger.info("browser.tab_retained", { tabId: tab.id, traceId });
-      this.publishState?.(this.snapshot());
-      this.writeDescriptor();
-      return { cancelledByUser };
+      tab.connectorBound = connectorBound === true;
     }
-    if (status !== "completed") {
-      BrowserHost.prototype.rememberSubmittedConversationUrl.call(this, tab);
-      if (retainTurnForReview(this, tab)) {
-        this.logger.info("browser.interrupted_tab_retained", { tabId: tab.id, traceId });
+    if (accessIssue) this.pauseWebAccess(accessIssue, undefined, tab.id);
+    tab.settledTurn = { traceId, helperPid, status, cancelledByUser };
+    tab.status = status === "completed" ? "ready" : status === "aborted" ? "aborted" : "error";
+    try {
+      this.syncPowerSaveBlocker();
+      tab.message = status === "completed" ? "Task completed" : message || `ChatGPT turn ${status}`;
+      tab.loading = false;
+      if (!tab.view.webContents.isDestroyed()) tab.view.webContents.setBackgroundThrottling(true);
+      if (status === "completed") {
+        this.logger.info("browser.tab_completed", { tabId: tab.id, traceId });
+      }
+      if (retainCompleted) {
+        tab.lastHeartbeatAt = Date.now();
+        if (hideAfterTurn && !this.activeTraceId) this.hide();
+        this.logger.info("browser.tab_retained", { tabId: tab.id, traceId });
+        this.publishState?.(this.snapshot());
+        this.writeDescriptor();
         return { cancelledByUser };
       }
-    }
-    if (this.accessGate?.snapshot().status === "paused") {
-      tab.message = this.accessGate.message();
-      this.publishState?.(this.snapshot());
-      this.writeDescriptor();
+      if (status !== "completed") {
+        BrowserHost.prototype.rememberSubmittedConversationUrl.call(this, tab);
+        if (retainTurnForReview(this, tab)) {
+          this.logger.info("browser.interrupted_tab_retained", { tabId: tab.id, traceId });
+          return { cancelledByUser };
+        }
+      }
+      if (this.accessGate?.snapshot().status === "paused") {
+        tab.message = this.accessGate.message();
+        this.publishState?.(this.snapshot());
+        this.writeDescriptor();
+        return { cancelledByUser };
+      }
+      // A browser tab represents an active Codex turn, not durable task history. The result already
+      // lives in Codex, so release the terminal browser document without touching concurrent turns.
+      this.removeTurnTab(tab, false);
+      if (hideAfterTurn && !this.activeTraceId) this.hide();
+      this.logger.info("browser.tab_released", { tabId: tab.id, traceId, status: tab.status });
+      return { cancelledByUser };
+    } catch (error) {
+      if (!retainCompleted) throw error;
+      // Presentation/descriptor refresh happens after the durable commit. Its failure must
+      // remain visible diagnostically, but cannot undo or downgrade the verified answer.
+      this.logger.warn("browser.completed_turn_presentation_failed", { tabId: tab.id, traceId });
       return { cancelledByUser };
     }
-    // A browser tab represents an active Codex turn, not durable task history. The result already
-    // lives in Codex, so release the terminal browser document without touching concurrent turns.
-    this.removeTurnTab(tab, false);
-    if (hideAfterTurn && !this.activeTraceId) this.hide();
-    this.logger.info("browser.tab_released", { tabId: tab.id, traceId, status: tab.status });
-    return { cancelledByUser };
   }
 
   async returnToIdle() {
@@ -3025,6 +3056,7 @@ class BrowserHost {
       if (current.pid === process.pid) fs.rmSync(this.descriptorPath, { force: true });
     } catch {}
     for (const [contents, handler] of this.shellZoomShortcutBindings) {
+      removePageInspection(contents);
       if (!contents.isDestroyed()) contents.off("before-input-event", handler);
     }
     this.shellZoomShortcutBindings.clear();

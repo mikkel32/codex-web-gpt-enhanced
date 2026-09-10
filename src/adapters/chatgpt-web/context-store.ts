@@ -19,6 +19,7 @@ export class NativeContextStore {
   constructor(files: NativeContextFile[], readonly options: NativeContextOptions = {}) {
     if (!Array.isArray(files) || files.length < 1 || files.length > 512) throw new Error("Invalid context file count");
     if (options.requireReceipts !== undefined && typeof options.requireReceipts !== "boolean") throw new Error("Invalid context receipt policy");
+    if (options.allowAgentReporting !== undefined && typeof options.allowAgentReporting !== "boolean") throw new Error("Invalid agent reporting policy");
     if (options.optionalTokenBudget !== undefined && options.optionalTokenBudget !== null && (!Number.isSafeInteger(options.optionalTokenBudget)
       || options.optionalTokenBudget < 0 || options.optionalTokenBudget > OPTIONAL_CONTEXT_TOKENS)) throw new Error("Invalid evidence retrieval budget");
     let bytes = 0;

@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ChatGptWebAdapterError } from "../src/adapters/chatgpt-web/adapter-error";
+import { chatGptBrowserAbortError, chatGptBrowserAbortReason } from "../src/adapters/chatgpt-web/abort-reason";
 import { LauncherBrowserHelperClient } from "../src/adapters/chatgpt-web/launcher-helper-client";
 import type { BrowserTurn, ResolvedBrowserConfig } from "../src/adapters/chatgpt-web/browser-worker";
 import { LAUNCHER_BROWSER_HOST_KIND, LAUNCHER_BROWSER_IDLE_URL } from "../src/launcher-browser-host";
@@ -215,9 +216,10 @@ test("launcher helper protocol preserves multipart context and the compaction fl
   expect(JSON.stringify(sent)).not.toContain("DO_NOT_FORWARD");
 });
 
-test("an abort dispatched during run submission cannot overtake the run frame", async () => {
+test.each(["native_interrupt", "binding_retired", "retirement_observation_failed", "helper_protocol_failed", "unknown"])("an abort preserves its classified cause across the helper protocol: %s", async reasonCode => {
   const controller = new AbortController();
   const messages: string[] = [];
+  const frames: unknown[] = [];
   let released = false;
   const client = new LauncherBrowserHelperClient({
     appName: "Codex Native",
@@ -231,17 +233,20 @@ test("an abort dispatched during run submission cannot overtake the run frame", 
   });
   const internal = client as unknown as {
     ensureChild(): Promise<void>;
-    send(message: { type: string; id?: string }): Promise<void>;
+    send(message: { type: string; id?: string; abortReason?: string }): Promise<void>;
     finishWithError(id: string, error: Error): void;
   };
   internal.ensureChild = async () => {};
   internal.send = async message => {
     messages.push(message.type);
-    if (message.type === "run") controller.abort();
+    frames.push(message);
+    if (message.type === "run") controller.abort(reasonCode === "unknown"
+      ? new Error("private synthetic details must not cross the pipe")
+      : chatGptBrowserAbortError(reasonCode));
     if (message.type === "abort" && message.id) {
       queueMicrotask(() => internal.finishWithError(
         message.id!,
-        new DOMException("ChatGPT web turn aborted", "AbortError"),
+        chatGptBrowserAbortError(message.abortReason),
       ));
     }
   };
@@ -261,7 +266,18 @@ test("an abort dispatched during run submission cannot overtake the run frame", 
   })).rejects.toMatchObject({ name: "AbortError" });
 
   expect(messages).toEqual(["run", "abort"]);
+  expect(frames[1]).toMatchObject({ abortReason: reasonCode });
+  expect(JSON.stringify(frames)).not.toContain("private synthetic details");
   expect(released).toBe(false);
+});
+
+test("abort classification keeps compaction distinct and rejects arbitrary helper diagnostic strings", () => {
+  const accepted = chatGptBrowserAbortError("compaction_accepted");
+  expect(accepted.message).toBe("Structured compaction handoff accepted");
+  expect(chatGptBrowserAbortReason(accepted)).toBe("compaction_accepted");
+  for (const value of ["constructor", "__proto__", "private/path/or/token", {}, undefined]) {
+    expect(chatGptBrowserAbortError(value).message).toBe("ChatGPT web turn aborted");
+  }
 });
 
 test("structured helper errors preserve the ChatGPT adapter failure contract", async () => {

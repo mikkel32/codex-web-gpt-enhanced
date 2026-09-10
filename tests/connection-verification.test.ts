@@ -43,6 +43,7 @@ for (const scenario of ["success", "unacknowledged", "invented-proof", "browser-
         expect(turn.reasoning).toBe("xhigh");
         expect(turn.modelId).toBe("gpt-5.6-sol");
         const prompt = await turn.prepare();
+        expect(prompt.text).not.toContain("<maria_agent_error_reporting>");
         token = prompt.text.match(/turn_token (turn_[A-Za-z0-9_-]+)/)![1]!;
         if (scenario === "browser-failure") throw new Error("Browser disconnected");
         if (scenario === "cancel") { controller.abort(new Error("User cancelled")); return "{}"; }

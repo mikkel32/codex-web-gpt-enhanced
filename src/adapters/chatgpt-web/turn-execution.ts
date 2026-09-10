@@ -8,6 +8,7 @@ import {
   extractChatGptTurnUserRevision,
 } from "./environment";
 import { MAX_CHATGPT_BROWSER_TABS } from "./concurrency";
+import { chatGptBrowserAbortReason } from "./abort-reason";
 import type { ChatGptExternalTurnProgress } from "./turn-progress";
 
 function awaitWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -754,12 +755,18 @@ export class ChatGptTurnSessions {
   }
 
   modelSelectionError(traceId: string): ChatGptWebAdapterError | undefined {
+    const error = this.requestStateError(traceId);
+    return error?.code === "astra_pro_unavailable" ? error : undefined;
+  }
+
+  requestStateError(traceId: string): ChatGptWebAdapterError | undefined {
     this.prune();
     for (const session of this.entries.values()) {
       if (session.traceId !== traceId) continue;
       const outcome = session.settledOutcome();
       if (outcome?.type === "error" && outcome.error instanceof ChatGptWebAdapterError
-        && outcome.error.code === "astra_pro_unavailable" && !outcome.error.retryable) return outcome.error;
+        && ["astra_pro_unavailable", "previous_turn_needs_attention"].includes(outcome.error.code)
+        && !outcome.error.retryable) return outcome.error;
     }
     return undefined;
   }
@@ -792,6 +799,9 @@ export class ChatGptTurnSessions {
     const existing = this.retirements.get(key);
     if (existing) return existing;
     const conversationKey = session.conversationKey();
+    if (session.isActive()) console.info(
+      `[chatgpt-web] browser retirement trace=${session.traceId ?? "unknown"} cause=${chatGptBrowserAbortReason(reason)}`,
+    );
     session.cancel(reason);
     const retirement = session.physicalSettlement;
     this.retirements.set(key, retirement);

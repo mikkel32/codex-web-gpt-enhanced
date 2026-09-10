@@ -1,6 +1,6 @@
 {
   "name": "codex-web-gpt-launcher",
-  "version": "5.20.3",
+  "version": "5.20.4-rc.1",
   "private": true,
   "description": "Desktop control center for Codex ChatGPT Web",
   "author": "Mikkel & Maria",
@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "motion": "^12.42.2",
+    "nodemailer": "10.0.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
@@ -60,8 +61,14 @@
       "package.json"
     ],
     "extraResources": [
-      { "from": "build/build-info.json", "to": "build-info.json" },
-      { "from": "../browser-connector/extension", "to": "browser-connector" },
+      {
+        "from": "build/build-info.json",
+        "to": "build-info.json"
+      },
+      {
+        "from": "../browser-connector/extension",
+        "to": "browser-connector"
+      },
       {
         "from": "build/runtime",
         "to": "runtime"
@@ -69,7 +76,10 @@
     ],
     "mac": {
       "extraResources": [
-        { "from": "build/safari/Build/Products/Release/Maria Browser Sign-in.app", "to": "Maria Browser Sign-in.app" }
+        {
+          "from": "build/safari/Build/Products/Release/Maria Browser Sign-in.app",
+          "to": "Maria Browser Sign-in.app"
+        }
       ],
       "category": "public.app-category.developer-tools",
       "icon": "assets/icon.png",

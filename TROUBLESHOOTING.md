@@ -8,6 +8,7 @@ editing Codex configuration, or opening a new issue.
 | Symptom | First action |
 | --- | --- |
 | Browser is blank or says Loading while Codex still updates | Use **Restore view**. This redraws the existing page without navigation or resending. |
+| Need to inspect the interface or embedded page | Right-click **Inspect element**, or focus the page and press **F12**. See [inspection shortcuts](docs/user-guide.md#inspect-the-interface-or-a-browser-page). |
 | Previous turn needs attention | Inspect the saved chat, choose **I reviewed this chat**, then continue in the original task. |
 | Tool not found or wrong workspace | Follow [connector recovery](docs/reference/connector-recovery.md); verify the exact runtime and tool catalog. |
 | Sign-in, verification or rate limit | Complete the required action and cooldown; resume without replaying the interrupted prompt. |

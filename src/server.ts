@@ -589,15 +589,16 @@ export async function responseRequest(
       headers: { "content-type": "application/json" },
     });
   }
-  const selectionError = traceId ? chatGptTurnSessions.modelSelectionError(traceId) : undefined;
+  const selectionError = traceId ? chatGptTurnSessions.requestStateError(traceId) : undefined;
   if (selectionError) {
-    // Native Codex retries unfamiliar SSE failure codes. The same failed selection
-    // must return a terminal HTTP response rather than another disconnected stream.
+    // Repeating an unchanged selection/review conflict cannot repair it. Preserve its
+    // exact cause in a terminal HTTP response, without reopening another SSE stream.
     return new Response(JSON.stringify({ error: { type: selectionError.errorType, code: selectionError.code, message: selectionError.message } }), {
       status: 400, headers: { "content-type": "application/json" },
     });
   }
   const adapter = adapterFactory(provider);
+  const errorCapture = createResponseErrorCapture(parsed, traceId);
   const queue = new AsyncEventQueue<AdapterEvent>();
   const abort = new AbortController();
   if (req.signal.aborted) abort.abort();
@@ -605,11 +606,13 @@ export async function responseRequest(
   const run = async () => {
     try {
       await adapter.runTurn!(parsed, { headers: req.headers, abortSignal: abort.signal }, event => {
+        errorCapture.record(event);
         options.onAdapterEvent?.(event);
         queue.push(event);
       });
     } catch (error) {
       const event: AdapterEvent = { type: "error", message: error instanceof Error ? error.message : String(error) };
+      if (!abort.signal.aborted) errorCapture.record(event);
       options.onAdapterEvent?.(event);
       queue.push(event);
     } finally {
@@ -1106,3 +1109,4 @@ export function startServer(
   process.once("SIGTERM", shutdown);
   return server;
 }
+import { createResponseErrorCapture } from "./error-reporting";

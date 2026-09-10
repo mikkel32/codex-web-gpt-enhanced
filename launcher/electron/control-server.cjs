@@ -1,6 +1,7 @@
 const { createServer } = require("node:http");
 const { randomBytes, timingSafeEqual } = require("node:crypto");
 const { releaseRetainedConversation } = require("./retained-turn-release.cjs");
+const { TurnSettlementLedger } = require("./turn-settlement.cjs");
 
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_MANUAL_START_BODY_BYTES = 3 * 1024 * 1024;
@@ -44,6 +45,7 @@ class BrowserControlServer {
     this.getPreferences = getPreferences;
     this.token = randomBytes(32).toString("base64url");
     this.port = 0;
+    this.turnSettlements = new TurnSettlementLedger();
     this.server = createServer((request, response) => {
       void this.handle(request, response).catch((error) => {
         const message = error instanceof Error ? error.message : String(error);
@@ -95,7 +97,8 @@ class BrowserControlServer {
     }
     const isTurn = request.url === "/v1/turn/start"
       || request.url === "/v1/turn/heartbeat"
-      || request.url === "/v1/turn/end";
+      || request.url === "/v1/turn/end"
+      || request.url === "/v1/turn/settlement";
     const isTurnRelease = request.url === "/v1/turn/release";
     const isSessionInspect = request.url === "/v1/session/inspect";
     const manualAction = new Map([
@@ -170,7 +173,7 @@ class BrowserControlServer {
       if (body.connectorBound !== undefined && typeof body.connectorBound !== "boolean") {
         throw new Error("connectorBound is invalid");
       }
-      if (body.accessIssue !== undefined && (request.url !== "/v1/turn/end" || !["rate-limit", "sign-in"].includes(body.accessIssue))) {
+      if (body.accessIssue !== undefined && (!["/v1/turn/end", "/v1/turn/settlement"].includes(request.url) || !["rate-limit", "sign-in"].includes(body.accessIssue))) {
         throw new Error("accessIssue is only valid for an automatic turn end");
       }
       if (body.refreshViewport !== undefined && typeof body.refreshViewport !== "boolean") {
@@ -301,7 +304,11 @@ class BrowserControlServer {
         return;
       } else {
         if (!['completed', 'failed', 'aborted'].includes(body.status)) throw new Error("turn status is invalid");
-        const release = await host.endTurn(
+        if (request.url === "/v1/turn/settlement") {
+          writeJson(response, 200, { ok: true, ...this.turnSettlements.inspect(body) });
+          return;
+        }
+        const finish = () => host.endTurn(
           body.traceId,
           body.helperPid,
           body.status,
@@ -311,6 +318,9 @@ class BrowserControlServer {
           body.connectorBound === true,
           ...(body.accessIssue ? [body.accessIssue] : []),
         );
+        // Older helpers retain their original contract. New helpers can reconcile the exact
+        // terminal operation after an HTTP response is lost, without repeating its effects.
+        const release = await (body.requestId === undefined ? finish() : this.turnSettlements.settle(body, finish));
         this.logger.info("browser.turn_ended", { traceId: body.traceId, status: body.status });
         writeJson(response, 200, { ok: true, ...release });
         return;

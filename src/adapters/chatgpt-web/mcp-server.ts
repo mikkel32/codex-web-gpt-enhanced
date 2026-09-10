@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import * as z from "zod/v4";
 import { namespacedToolName, type CodexTool } from "../../types";
 import { VERSION } from "../../version";
+import { AGENT_REPORT_TOOL, agentReportTool, agentIssueSchema } from "../../agent-reporting";
 import type { ChatGptTurnEnvironment } from "./environment";
 import { CODEX_COMPACTION_CONTROL_WIRE_NAME } from "./native-compaction-control";
 import { nativeContextResult, nativeContextTextResult, type NativeContextPage } from "./native-context";
@@ -14,6 +15,7 @@ interface ClaimedTurn {
   bindingId: string;
   activityId: string;
   environment: ChatGptTurnEnvironment & { expiresAt?: number };
+  reportingEnabled?: boolean;
 }
 
 export type ChatGptMcpContract = "native" | "safe";
@@ -588,6 +590,9 @@ export async function runChatGptMcpServer(options: {
       // A cancelled/timed-out MCP request no longer has a consumer for the native result. Revoke
       // the whole turn capability so the broker drops the pending invocation and every later call
       // from that abandoned ChatGPT response fails explicitly against its retired binding.
+      console.error(`[chatgpt-web-mcp] native invocation ended tool=${wireName(tool)} cause=${
+        error instanceof TurnBrokerTimeoutError ? "deadline" : signal?.aborted ? "request_cancelled" : "result_unavailable"
+      }; retiring its uncertain binding`);
       try {
         await callTurnBroker(options.brokerSocketPath, {
           method: "release",
@@ -794,7 +799,11 @@ export async function runChatGptMcpServer(options: {
         const { query, offset, limit, include_schema } = input;
         const bound = claimed.environment;
         const needle = query?.trim().toLowerCase();
-        const directMatches = safeVisibleTools(bound, contract).filter(tool => !needle || [
+        const reporting = contract === "native" && claimed.reportingEnabled === true;
+        const reportingOnly = reporting && needle === AGENT_REPORT_TOOL;
+        const available = safeVisibleTools(bound, contract).filter(tool => wireName(tool) !== AGENT_REPORT_TOOL);
+        if (reporting) available.push(agentReportTool());
+        const directMatches = available.filter(tool => !needle || [
           wireName(tool),
           tool.name,
           tool.namespace ?? "",
@@ -811,8 +820,8 @@ export async function runChatGptMcpServer(options: {
         let nestedTotal = 0;
         let nestedPage: Array<Record<string, unknown>> = [];
         const gateway = execGateway(bound);
-        if (gateway) {
-          const excludedGatewayNames = bound.tools.map(wireName);
+        if (gateway && !reportingOnly) {
+          const excludedGatewayNames = [...bound.tools.map(wireName), AGENT_REPORT_TOOL];
           const nestedOffset = Math.max(0, offset - directMatches.length);
           const nestedLimit = Math.max(0, limit - directPage.length);
           const response = await invoke(claimed.bindingId, bound, gateway, {
@@ -945,6 +954,14 @@ export async function runChatGptMcpServer(options: {
       }
       return withClaimedTurn("codex_tool_call", requestId, extra, async claimed => {
         const bound = claimed.environment;
+        if (wire_name === AGENT_REPORT_TOOL) {
+          if (contract !== "native" || claimed.reportingEnabled !== true) throw new Error("Agent error reporting is not enabled for this task");
+          if (input !== undefined) throw new Error("Agent reports require structured diagnostic fields, not executable input");
+          const issue = agentIssueSchema.parse(args);
+          return result(await callTurnBroker<Record<string, unknown>>(options.brokerSocketPath, {
+            method: "invoke", bindingId: claimed.bindingId, wireName: AGENT_REPORT_TOOL, arguments: issue,
+          }, 10_000, extra.signal));
+        }
         const tool = safeVisibleTools(bound, contract)
           .find(candidate => wireName(candidate) === wire_name);
         if (!tool) {

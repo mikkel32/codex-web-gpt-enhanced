@@ -22,6 +22,7 @@ const {
   Tray,
 } = require("electron");
 const { BrowserHost, navigationErrorForLog } = require("./browser-host.cjs");
+const { installPageInspection } = require("./page-inspection.cjs");
 const { BrowserControlServer } = require("./control-server.cjs");
 const { getAutostart, setAutostart } = require("./autostart.cjs");
 const {
@@ -355,6 +356,15 @@ function createWindow({ logger, stateStore, windowStatePath, startHidden }) {
     },
   });
   window.setMenuBarVisibility(false);
+  require("./error-reporting-app.cjs").installErrorReporting({
+    app, launcherWindow: window, coreHome: CORE_HOME, getBrowserHost: () => browserHost,
+  });
+  installPageInspection(window.webContents, {
+    ownerWindow: window,
+    title: "Maria WebGPT interface",
+    getLanguage: () => stateStore.read().language,
+    onError: action => logger.warn("launcher.inspection_failed", { action }),
+  });
   const guardRendererNavigation = (event, url) => {
     if (rendererNavigationAllowed(url)) return;
     event.preventDefault();
@@ -1072,6 +1082,7 @@ async function start() {
     control: browserControl.descriptor(),
     cancelTurn: IS_DEV_PROFILE ? undefined : traceId => runtimeSupervisor.cancelBrowserTurn(traceId),
     getConnectorName: () => runtimeHost.browserConnectorName(),
+    getLanguage: () => stateStore.read().language,
     helper: { executable: process.execPath, script: BROWSER_HELPER_PATH },
     logger,
     loginWithPasskey: () => runtimeHost.capturePasskeyLogin(),

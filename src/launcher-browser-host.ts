@@ -4,6 +4,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from "playwrig
 import { expandUserPath } from "./config";
 import { processRunning } from "./process";
 import { waitForLauncherCdp, waitForLauncherCdpConnection } from "./launcher-cdp-readiness";
+import { LauncherControlHttpError, reconcileLauncherTurnEnd } from "./launcher-turn-settlement";
 
 export const LAUNCHER_BROWSER_HOST_KIND = "codex-web-gpt-launcher";
 export const LAUNCHER_BROWSER_IDLE_URL = "data:text/html;charset=utf-8,%3C!doctype%20html%3E%3Chtml%3E%3Chead%3E%3Cmeta%20charset%3D%22utf-8%22%3E%3Ctitle%3ECodex%20Web%20GPT%3C%2Ftitle%3E%3C%2Fhead%3E%3Cbody%3E%3C%2Fbody%3E%3C%2Fhtml%3E#codex-web-gpt-browser-host";
@@ -643,6 +644,24 @@ export async function notifyLauncherTurn(
   cancelledByUser?: boolean;
 }> {
   const descriptor = readLauncherBrowserHostDescriptor(descriptorPath);
+  if (activity.phase === "end") {
+    // Pin the descriptor once: recovery must never move a delayed result to another runtime.
+    return reconcileLauncherTurnEnd(async (action, body, requestTimeout) => {
+      const response = await fetch(`${descriptor.control.endpoint}/v1/turn/${action}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${descriptor.control.token}`, "content-type": "application/json" },
+        body: JSON.stringify(body), signal: AbortSignal.timeout(requestTimeout),
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({})) as Record<string, unknown>;
+        if (response.status === 409 && detail.code === "turn_cancelled") {
+          throw new LauncherBrowserTurnCancelledError(typeof detail.error === "string" ? detail.error : "Browser turn was cancelled");
+        }
+        throw new LauncherControlHttpError(response.status, typeof detail.error === "string" ? detail.error : "");
+      }
+      return await response.json() as Record<string, unknown>;
+    }, activity, timeoutMs);
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -692,12 +711,6 @@ export async function notifyLauncherTurn(
         reused: body.reused,
         connectorBound: body.connectorBound,
       };
-    }
-    if (activity.phase === "end") {
-      if (typeof body.cancelledByUser !== "boolean") {
-        throw new Error("Launcher browser control channel returned an invalid turn release result");
-      }
-      return { cancelledByUser: body.cancelledByUser };
     }
     return {};
   } catch (error) {

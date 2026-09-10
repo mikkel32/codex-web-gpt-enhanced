@@ -34,6 +34,36 @@ The diagnostic panel identifies the **launcher computer** and labels the **Codex
 
 ## Safety while work is running
 
+### Full local access and tool safety checks
+
+The active task's inventory reports `environment.sandbox`. When that value is
+`dangerFullAccess`, Maria has received Codex's full local access setting. Commands
+and edits still run through that task's native tools and current approval policy.
+Maria does not infer approval policy from the sandbox mode or grant permissions
+from a message saying that all actions are allowed.
+
+ChatGPT app permissions and tool safety checks are separate from the local
+filesystem boundary. An error such as **could not determine the safety status of
+the request** does not establish that the user withheld permission, the tunnel is
+broken, or a service such as Colnect rejected authentication. It also does not
+establish that the requested action was classified as unsafe: the reported result
+is indeterminate. Preserve the exact failed operation and its returned message.
+
+Do not change tool annotations to conceal a command's effects, silently switch
+tools or computers, or replay the blocked operation to get around the check.
+Keep earlier edits and test results, and distinguish them from the unavailable
+result. Independent work may continue within the remaining authorized scope.
+An external rejection that occurs before the connector receives a call cannot
+be repaired or verified by changing Maria's local permission settings. Persistent
+failures require review through the host's support process; include only redacted
+operation details and any host-provided error reference, never credentials.
+
+OpenAI documents the separate controls in [Developer mode and MCP apps](https://help.openai.com/en/articles/12584461),
+[Codex execution controls](https://openai.com/index/running-codex-safely/), and
+[tool annotations](https://developers.openai.com/plugins/reference#annotations).
+
+### Active task preservation
+
 Setup waits for running operations, testing/running browser tabs, pending Manual prompts, active browser turns reported by the connection monitor, and runtime recovery. It rechecks after asynchronous probes and again before publishing success. A sign-out, access pause, changed workflow, removed installation, missing credentials, or pending Codex restart cannot turn a stale snapshot into a green result.
 
 A failed installation is not replayed by subsequent state events. Continuing after a failure is an explicit action. Error details from the connector and doctor are retained for diagnosis, with key and bearer-token redaction in the UI.

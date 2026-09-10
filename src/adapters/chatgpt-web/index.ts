@@ -797,7 +797,7 @@ export function createChatGptWebAdapter(
             releaseContextPlan();
             releaseContextPlan = plan.release;
             console.info(`[chatgpt-web] context-plan trace=${traceId} ${JSON.stringify(plan.stats)}`);
-            return ready({ ...nativeContextPrompt(plan.compiled, plan.files), release: plan.release });
+            return ready({ ...nativeContextPrompt(plan.compiled, plan.files, plan.options), release: plan.release });
           }
           await broker.setContextFiles(turnToken, []);
           releaseContextPlan();

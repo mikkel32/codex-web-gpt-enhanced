@@ -4,6 +4,7 @@ import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { notifyLauncherTurn, readLauncherBrowserHostDescriptor } from "../../launcher-browser-host";
 import { ChatGptWebAdapterError } from "./adapter-error";
+import { chatGptBrowserAbortReason } from "./abort-reason";
 import type { CompiledChatGptWebPrompt } from "./prompt";
 import type { BrowserTurn, ResolvedBrowserConfig } from "./browser-worker";
 import {
@@ -231,6 +232,7 @@ export class LauncherBrowserHelperClient {
               return;
             }
             void this.send({ type: "abort", id: turn.traceId,
+              abortReason: chatGptBrowserAbortReason(turn.abortSignal?.reason),
               ...(turn.nativeConnector && turn.requireRetainedConversation
                 && turn.abortSignal?.reason?.message === "Structured compaction handoff accepted"
                 ? { checkpointAccepted: true } : {}),
@@ -545,7 +547,7 @@ export class LauncherBrowserHelperClient {
   private abortWithLocalFailure(id: string, error: Error, pending: PendingTurn): void {
     if (this.pending.get(id) !== pending || pending.localFailure) return;
     pending.localFailure = error;
-    void this.send({ type: "abort", id }).catch(sendError => {
+    void this.send({ type: "abort", id, abortReason: "helper_protocol_failed" }).catch(sendError => {
       if (this.pending.get(id) !== pending) return;
       this.finishWithError(
         id,

@@ -55,6 +55,39 @@ async function waitForTurnCount(turns: HttpTurnCounter, expected: number): Promi
   expect(turns.count()).toBe(expected);
 }
 
+test("repeated review conflicts fail once at HTTP preflight without reopening the chat", async () => {
+  const config = defaultConfig("browser-only"); config.proAvailable = true;
+  const body = {
+    model: "chatgpt-web/astra-pro", stream: true,
+    client_metadata: { "x-codex-turn-metadata": JSON.stringify({ thread_id: "thread_review_failure", turn_id: "turn_review_failure" }) },
+    input: [{ type: "message", role: "user", content: "Continue the existing project", internal_chat_message_metadata_passthrough: { turn_id: "turn_review_failure" } }],
+  };
+  const parsed = parseRequest(body); routeChatGptWebRequest(parsed, config);
+  const trace = chatGptWebTraceId(providerConfig(config), parsed);
+  const failure = new ChatGptWebAdapterError("Inspect the saved chat before a new message", {
+    status: 409, errorType: "invalid_request_error", code: "previous_turn_needs_attention", retryable: false,
+  });
+  chatGptTurnSessions.clear();
+  const browser = Promise.reject(failure);
+  const session = chatGptTurnSessions.getOrCreate("review-conflict", () => ({
+    mode: "read-only", browser, physicalSettlement: browser.then(() => {}, () => {}),
+    trace: new ChatGptTraceFeed(), text: new ChatGptTextFeed(), cancel() {},
+  }), trace);
+  try {
+    await session.browserOutcome;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const response = await responseRequest(new Request("http://127.0.0.1/v1/responses", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+      }), config, () => { throw new Error("must not recreate the browser or start another stream"); });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "previous_turn_needs_attention", message: failure.message } });
+    }
+    const changed = parseRequest({ ...body, input: [{ ...body.input[0], content: "I reviewed it; continue with a new request" }] });
+    routeChatGptWebRequest(changed, config);
+    expect(chatGptTurnSessions.requestStateError(chatGptWebTraceId(providerConfig(config), changed))).toBeUndefined();
+  } finally { chatGptTurnSessions.clear(); }
+});
+
 test("HTTP turn tracking follows the response stream instead of Bun's global request count", async () => {
   const turns = new HttpTurnCounter();
   let source!: ReadableStreamDefaultController<Uint8Array>;
