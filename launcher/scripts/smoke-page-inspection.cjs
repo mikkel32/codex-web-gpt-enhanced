@@ -24,11 +24,19 @@ let window;
 const views = [];
 let observer;
 async function inspectorReady(contents, label) {
-  await waitFor(() => contents.isDevToolsOpened() && contents.devToolsWebContents
-    && !contents.devToolsWebContents.isLoading(), label);
+  await waitFor(() => contents.isDevToolsOpened() && contents.devToolsWebContents, `${label} opened`);
+  await waitFor(() => !contents.devToolsWebContents.isLoading(), `${label} loaded`);
   const tools = contents.devToolsWebContents;
   await waitFor(async () => !tools.isDestroyed()
     && await tools.executeJavaScript("document.readyState === 'complete'"), `${label} frontend`);
+}
+async function focusPage(contents) {
+  window.show();
+  window.focus();
+  contents.focus();
+  // Native focus transfer after closing a detached window is asynchronous.
+  await waitFor(() => window.isFocused() && contents.isFocused(), "page input focus");
+  await waitFor(() => contents.executeJavaScript("document.hasFocus()"), "renderer input focus");
 }
 async function closeInspector(contents) {
   const tools = contents.devToolsWebContents;
@@ -103,7 +111,7 @@ app.whenReady().then(async () => {
       let contextParams;
       contents.once("context-menu", (_event, params) => { contextParams = params; });
       lastMenu = undefined;
-      window.show(); window.focus(); contents.focus();
+      await focusPage(contents);
       contents.sendInputEvent({ type: "mouseDown", button: "right", clickCount: 1, ...point });
       contents.sendInputEvent({ type: "mouseUp", button: "right", clickCount: 1, ...point });
       await waitFor(() => lastMenu && contextParams, `native context menu ${identity.id}`);
@@ -134,13 +142,13 @@ app.whenReady().then(async () => {
       }
       await closeInspector(contents);
       console.log(`INSPECTION_STAGE surface=${index} F12`);
-      window.focus(); contents.focus();
+      await focusPage(contents);
       contents.sendInputEvent({ type: "keyDown", keyCode: "F12" });
       contents.sendInputEvent({ type: "keyUp", keyCode: "F12" });
       await inspectorReady(contents, "F12 inspector");
       await closeInspector(contents);
       console.log(`INSPECTION_STAGE surface=${index} platform-shortcut`);
-      window.focus(); contents.focus();
+      await focusPage(contents);
       const modifiers = process.platform === "darwin" ? ["meta", "alt"] : ["control", "shift"];
       contents.sendInputEvent({ type: "keyDown", keyCode: "I", modifiers });
       contents.sendInputEvent({ type: "keyUp", keyCode: "I", modifiers });
