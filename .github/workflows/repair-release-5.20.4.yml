@@ -1,0 +1,292 @@
+name: Repair 5.20.4 release assets
+
+on:
+  push:
+    branches: ["codex/repair-release-5.20.4"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repair-release-v5.20.4
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      publish: ${{ steps.release.outputs.publish }}
+      source_sha: ${{ steps.release.outputs.source_sha }}
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: eba6489d2b9fe1f39560e684d6b0c3213ee983f8
+          fetch-depth: 0
+      - name: Hold renamed release while rebuilding correct assets
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = mikkel32/codex-web-gpt-enhanced
+          test "$(jq -r .version package.json)" = 5.20.4
+          test "$(git rev-list -n 1 v5.20.4)" = eba6489d2b9fe1f39560e684d6b0c3213ee983f8
+          gh api repos/$GITHUB_REPOSITORY/releases/386653799 > release-before-repair.json
+          jq -e '.id == 386653799 and .tag_name == "v5.20.4" and (.immutable == false)' release-before-repair.json
+          jq -e '[.assets[].name | select(startswith("codex-web-gpt-5.20.4-rc.1-"))] | length == 6' release-before-repair.json
+          gh release edit v5.20.4 --repo "$GITHUB_REPOSITORY" --draft=true
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+          echo "source_sha=eba6489d2b9fe1f39560e684d6b0c3213ee983f8" >> "$GITHUB_OUTPUT"
+          echo "tag=v5.20.4" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: repair-metadata-before-release
+          path: release-before-repair.json
+
+  build:
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            runtime_asset: codex-chatgpt-web-darwin-arm64.tar.gz
+          - runner: macos-15-intel
+            runtime_asset: codex-chatgpt-web-darwin-amd64.tar.gz
+          - runner: ubuntu-latest
+            runtime_asset: codex-chatgpt-web-linux-amd64.tar.gz
+          - runner: windows-latest
+            runtime_asset: codex-chatgpt-web-windows-amd64.zip
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile
+        working-directory: launcher
+      - name: Prepare AVX2-independent Windows runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/prepare-windows-baseline-bun.ps1 -Version 1.4.0 -GitHubEnv $env:GITHUB_ENV
+      - name: Prepare compatible Linux libnotify
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build pkg-config libglib2.0-dev libgdk-pixbuf-2.0-dev binutils
+          ./scripts/prepare-linux-libnotify.sh
+      - name: Prepare owned AppImage toolset
+        if: runner.os == 'Linux'
+        run: bun run launcher/scripts/prepare-linux-appimage-tools.cjs
+      - name: Ensure virtual display is available
+        if: runner.os == 'Linux'
+        run: command -v xvfb-run || (sudo apt-get update && sudo apt-get install -y xvfb)
+      - name: Verify Astra picker in real Electron
+        run: bun run smoke:astra-picker
+      - run: bun run verify
+      - name: Verify guided workspace in isolated Electron
+        if: runner.os == 'Linux'
+        env:
+          MARIA_UI_ELECTRON: "1"
+        run: xvfb-run -a node launcher/scripts/smoke-workspace-ui.cjs
+      - run: bun run app:package
+      - name: Verify Linux AppImage ABI on current Arch
+        if: runner.os == 'Linux'
+        run: |
+          artifact="$(find launcher/artifacts -maxdepth 1 -name '*-linux-x64.AppImage' -print -quit)"
+          test -n "$artifact"
+          docker run --rm -v "$PWD:/work:ro" -e APPIMAGE_PATH="/work/$artifact" archlinux:base \
+            sh -lc 'pacman -Sy --noconfirm binutils file glibc alsa-lib at-spi2-core cairo cups gtk3 libx11 libxcb libxcomposite libxdamage libxext libxfixes libxkbcommon libxrandr mesa nspr nss pango >/dev/null && /work/launcher/scripts/smoke-linux-appimage-symbols.sh "$APPIMAGE_PATH"'
+      - run: bun run app:smoke
+      - name: Verify embedded macOS runtime signature
+        if: runner.os == 'macOS'
+        run: codesign --verify --deep --strict launcher/build/runtime/runtime/bun
+      - name: Verify packaged macOS application signature
+        if: runner.os == 'macOS'
+        run: |
+          archive="$(find launcher/artifacts -maxdepth 1 -name '*-mac-*.zip' -print -quit)"
+          test -n "$archive"
+          stage="$(mktemp -d)"
+          ditto -x -k "$archive" "$stage"
+          codesign --verify --deep --strict --verbose=2 "$stage/Maria WebGPT.app"
+      - name: Archive runtime
+        if: runner.os != 'Windows'
+        run: tar -czf "${{ matrix.runtime_asset }}" -C launcher/build/runtime .
+      - name: Archive Windows runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path launcher/build/runtime/* -DestinationPath "${{ matrix.runtime_asset }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.runner }}
+          path: |
+            ${{ matrix.runtime_asset }}
+            launcher/artifacts/*.dmg
+            launcher/artifacts/*.zip
+            launcher/artifacts/*.exe
+            launcher/artifacts/*.AppImage
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, build]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      RELEASE_SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+      RELEASE_EVENT_NAME: ${{ github.event_name }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile
+        working-directory: launcher
+      - run: bun run licenses
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: release-*
+          merge-multiple: true
+      - name: Verify release tag matches package version
+        run: |
+          expected="v$(jq -r .version package.json)"
+          test "$RELEASE_TAG" = "$expected"
+      - name: Add licenses and installers
+        run: |
+          cp LICENSE release-assets/LICENSE
+          cp LICENSES/Bun-1.4.0.md release-assets/Bun-1.4.0.md
+          cp LICENSES/libnotify-0.8.7-LGPL-2.1.md release-assets/libnotify-0.8.7-LGPL-2.1.md
+          cp dist/THIRD_PARTY_NOTICES.txt release-assets/THIRD_PARTY_NOTICES.txt
+          cp scripts/install.sh release-assets/install.sh
+          cp scripts/install-launcher.sh release-assets/install-launcher.sh
+          cp scripts/install-launcher.ps1 release-assets/install-launcher.ps1
+      - name: Flatten release assets
+        run: |
+          cd release-assets
+          while IFS= read -r -d '' file; do
+            name="$(basename "$file")"
+            if [ -e "$name" ]; then
+              echo "Duplicate release asset name: $name" >&2
+              exit 1
+            fi
+            mv "$file" "$name"
+          done < <(find . -mindepth 2 -type f -print0 | sort -z)
+          find . -mindepth 1 -type d -empty -delete
+      - name: Create checksums
+        run: |
+          cd release-assets
+          checksum_file="$(mktemp)"
+          find . -maxdepth 1 -type f ! -name checksums.txt -print0 \
+            | sort -z \
+            | xargs -0 sha256sum \
+            | sed 's#  \./#  #' > "$checksum_file"
+          mv "$checksum_file" checksums.txt
+      - name: Verify every built asset is checksummed
+        run: |
+          cd release-assets
+          missing=""
+          while IFS= read -r -d '' file; do
+            name="${file#./}"
+            if [ "$name" = checksums.txt ]; then continue; fi
+            if ! awk -v asset="$name" '$2 == asset { found = 1 } END { exit found ? 0 : 1 }' checksums.txt; then
+              missing="$missing $name"
+            fi
+          done < <(find . -type f -print0)
+          if [ -n "$missing" ]; then
+            echo "checksums.txt is missing entries for:$missing" >&2
+            exit 1
+          fi
+      - name: Tag only the fully verified release source
+        run: |
+          set -euo pipefail
+          git fetch origin main --tags
+          test "$(git rev-parse HEAD)" = "$RELEASE_SOURCE_SHA"
+          if [ "$RELEASE_EVENT_NAME" = "workflow_run" ]; then
+            test "$(git rev-parse origin/main)" = "$RELEASE_SOURCE_SHA"
+          fi
+          if tagged_sha="$(git rev-list -n 1 "$RELEASE_TAG" 2>/dev/null)"; then
+            test "$tagged_sha" = "$RELEASE_SOURCE_SHA"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$RELEASE_TAG" "$RELEASE_SOURCE_SHA" -m "Maria WebGPT $RELEASE_TAG"
+            git push origin "refs/tags/$RELEASE_TAG"
+          fi
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mapfile -d '' release_files < <(find release-assets -type f -print0)
+          test "${#release_files[@]}" -gt 0
+          release_flags=(--latest)
+          notes_flags=(--generate-notes)
+          notes_file="docs/releases/release-${RELEASE_TAG#v}.md"
+          if [ -f "$notes_file" ]; then notes_flags=(--notes-file "$notes_file"); fi
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            release_flags=(--prerelease --latest=false)
+          fi
+          if existing_draft="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null)"; then
+            test "$existing_draft" = true
+            gh release upload "$RELEASE_TAG" "${release_files[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$RELEASE_TAG" "${release_files[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$RELEASE_TAG" \
+              --draft \
+              "${notes_flags[@]}"
+          fi
+
+          # Remove only the six obsolete prerelease installers after replacements upload.
+          for name in \
+            codex-web-gpt-5.20.4-rc.1-linux-x64.AppImage \
+            codex-web-gpt-5.20.4-rc.1-mac-arm64.dmg \
+            codex-web-gpt-5.20.4-rc.1-mac-arm64.zip \
+            codex-web-gpt-5.20.4-rc.1-mac-x64.dmg \
+            codex-web-gpt-5.20.4-rc.1-mac-x64.zip \
+            codex-web-gpt-5.20.4-rc.1-win-x64.exe; do
+            gh release delete-asset "$RELEASE_TAG" "$name" --repo "$GITHUB_REPOSITORY" --yes
+          done
+
+          # Compare the uploaded bytes against the original local build. Rebuilding
+          # checksums from remote digests would silently bless a mismatched upload.
+          remote_assets="$(mktemp)"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets > "$remote_assets"
+          bun run scripts/verify-release-assets.ts release-assets/checksums.txt "$remote_assets"
+
+          while IFS=$'\t' read -r name digest; do
+            if [ "$name" = checksums.txt ]; then continue; fi
+            expected="$(awk -v asset="$name" '$2 == asset { print $1 }' release-assets/checksums.txt)"
+            if [ -z "$expected" ] || [ "sha256:$expected" != "$digest" ]; then
+              echo "Published asset checksum mismatch: $name" >&2
+              exit 1
+            fi
+          done < <(gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '.assets[] | [.name, .digest] | @tsv')
+
+          local_manifest_digest="$(sha256sum release-assets/checksums.txt | awk '{ print $1 }')"
+          remote_manifest_digest="$(gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '.assets[] | select(.name == "checksums.txt") | .digest')"
+          test "sha256:$local_manifest_digest" = "$remote_manifest_digest"
+          if [ "$RELEASE_EVENT_NAME" = "workflow_run" ]; then
+            git fetch origin main
+            test "$(git rev-parse origin/main)" = "$RELEASE_SOURCE_SHA"
+          fi
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease=false --title "$RELEASE_TAG" --notes-file "$notes_file" "${release_flags[@]}"
