@@ -34,13 +34,16 @@ test("connected Gmail sends the existing incident to the same account without a 
 });
 
 test("missing permission or a different connected account does not consume a delivery attempt", async t => {
-  const f = fixture(t);
   for (const response of [{ isError: true, content: [{ type: "text", text: "Access denied" }] }, { structuredContent: { email: "different@gmail.com" } }]) {
+    const f = fixture(t);
     const result = await deliverConnectedGmailReport(f.home, async name => {
       assert.equal(name, GMAIL_PROFILE_TOOL); return response;
     });
     assert.equal(result.actionRequired, "connect_gmail");
     assert.equal(f.store.read(f.id).delivery.attempts, 0);
+    assert.equal(f.store.read(f.id).delivery.state, "blocked");
+    const paused = await deliverConnectedGmailReport(f.home, async () => { throw new Error("A paused connection must not be called again"); });
+    assert.equal(paused.actionRequired, "resume_connected_gmail");
   }
 });
 
@@ -53,6 +56,15 @@ test("Gmail uncertainty is never resent and a generic tool success is not a mail
   await deliverConnectedGmailReport(f.home, invoke);
   assert.equal(f.store.read(f.id).delivery.state, "uncertain");
   await deliverConnectedGmailReport(f.home, invoke); assert.equal(sends, 1);
+});
+
+test("an unread task context cannot be misclassified as a broken Gmail connection", async t => {
+  const f = fixture(t);
+  const result = await deliverConnectedGmailReport(f.home, async () => ({ isError: true,
+    content: [{ type: "text", text: JSON.stringify({ error: "Required context acknowledgement is incomplete; no work was executed." }) }] }));
+  assert.equal(result.actionRequired, "read_required_context");
+  assert.equal(f.store.read(f.id).delivery.state, "pending");
+  assert.equal(fs.existsSync(path.join(f.store.directory, "gmail-paused.json")), false);
 });
 
 test("independent queue owners cannot deliver the same report twice", async t => {

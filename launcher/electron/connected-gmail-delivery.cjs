@@ -1,4 +1,4 @@
-const { ErrorReportStore } = require("./error-report-store.cjs");
+const { ErrorReportStore, atomicJson } = require("./error-report-store.cjs");
 const { ReportDeliveryQueue } = require("./error-report-delivery.cjs");
 const { formatIncidentEmail } = require("./error-report-email.cjs");
 
@@ -19,6 +19,9 @@ class ConnectedGmailReportSender {
   configured() { return this.ready; }
   async prepare() {
     const values = gmailObjects(await this.invoke(GMAIL_PROFILE_TOOL, {}));
+    if (values.some(item => typeof item.error === "string" && item.error.startsWith("Required context acknowledgement is incomplete"))) {
+      throw Object.assign(new Error("Required task context must be acknowledged before Gmail delivery"), { code: "EREPORTCONTEXT" });
+    }
     const profile = values.find(item => typeof item.email === "string");
     if (values.some(item => item.isError) || !profile || profile.email.toLowerCase() !== this.recipient.toLowerCase()) {
       throw Object.assign(new Error("Connect Gmail using the same account as the report recipient; no email was attempted"), { code: "EREPORTCONFIG" });
@@ -66,7 +69,14 @@ async function deliverConnectedGmailReport(coreHome, invoke) {
   }
   // Capability/account verification happens before claiming an incident or consuming a send attempt.
   try { await sender.prepare(); }
-  catch { return { delivered: false, actionRequired: "connect_gmail", message: "The matching Gmail connection is unavailable or rejected access. No email was attempted. Do not retry through a different tool or browser." }; }
+  catch (error) {
+    if (error.code === "EREPORTCONTEXT") return { delivered: false, actionRequired: "read_required_context", message: error.message };
+    atomicJson(queue.pauseFile, { version: 1, pausedAt: Date.now() });
+    for (const report of store.records()) if (eligible(report) && ["pending", "needs_sender"].includes(report.delivery.state)) {
+      store.update(report, { state: "blocked", reason: "Connected Gmail access requires attention; reconnect Gmail and resume delivery. No email was attempted." });
+    }
+    return { delivered: false, actionRequired: "connect_gmail", message: "The matching Gmail connection is unavailable or rejected access. Reconnect Gmail and resume delivery in Automatic error reports. No email was attempted. Do not retry through a different tool or browser." };
+  }
   const before = new Set(store.records().filter(report => report.delivery.state === "sent").map(report => report.id));
   await queue.drain({ immediate: true });
   const reports = store.records().filter(eligible);
