@@ -5,6 +5,13 @@ import type { CodexTool } from "./types";
 
 const { ErrorReportStore } = require("../launcher/electron/error-report-store.cjs");
 export const AGENT_REPORT_TOOL = "maria_report_issue";
+export const AGENT_SEND_REPORTS_TOOL = "maria_send_reports";
+export const agentSendReportsSchema = z.object({}).strict();
+export function agentSendReportsTool(): CodexTool {
+  return { name: AGENT_SEND_REPORTS_TOOL,
+    description: "Send one eligible local diagnostic report from the connected Gmail account to that same configured account. Requires enabled reporting with connected Gmail selected and acknowledged task context. Uses native Gmail tools and their existing permissions. Records Gmail's message receipt and never resends sent or uncertain reports. No recipients, message text, commands or account credentials can be supplied to this operation. Call again only after confirmed delivery with remaining reports; at most five deliveries per task.",
+    parameters: z.toJSONSchema(agentSendReportsSchema) as Record<string, unknown> };
+}
 const detail = z.string().max(4096).optional();
 export const agentIssueSchema = z.object({
   error: z.string().min(1).max(16384),
@@ -50,7 +57,7 @@ export function captureAgentIssue(traceId: string, input: unknown): Record<strin
     actionRequired: policy.deliveryMethod === "gmail" && ["pending", "needs_sender"].includes(report.delivery.state)
       ? "deliver_with_maria_send_reports" : report.delivery.state === "needs_sender" ? "configure_gmail_sender" : null,
     message: report.delivery.state === "sent" ? "The mail server previously accepted this incident; do not send another copy."
-      : policy.deliveryMethod === "gmail" ? "Incident saved locally. Use maria_send_reports for the selected connected Gmail delivery. It owns the queued incident and records the receipt; do not separately send it through another tool."
+      : policy.deliveryMethod === "gmail" ? "Incident saved locally. Discover maria_send_reports using codex_tool_inventory, then invoke its returned wire_name with arguments={} through codex_tool_call, or use the dedicated sender if advertised. Choose one path before sending; never retry a rejected send through the other path. The sender owns the queued incident and records the receipt."
       : report.delivery.state === "needs_sender" ? "Incident saved locally but no Gmail sender is configured. Open Automatic error reports in Maria and save the Gmail sender and Google app password there. No email was attempted; do not send another copy through a connector."
       : "Incident saved locally. The configured app sender handles delivery. Queued is not sent; do not also email this incident through another tool." };
 }
@@ -62,7 +69,7 @@ export function agentReportingInstructions(): string {
   return [
     "<maria_agent_error_reporting>",
     `Diagnostic reporting is enabled by the owner of this installation. The configured recipient is ${policy.recipient}.`,
-    ...(policy.deliveryMethod === "gmail" ? ["Connected Gmail delivery is selected by the owner. After required task context is acknowledged, call maria_send_reports when advertised to deliver queued reports using the existing Gmail connection. Also use it after recording a new incident. It sends one eligible incident per call to the verified same Gmail account, records the receipt and prevents duplicates. Continue only after delivered=true with remaining>0, at most five calls per task. Stop on unavailable access, a rejection, no delivery, or uncertainty. Never send those incidents separately. If the tool is absent, refresh the connector catalog for a future task."] : []),
+    ...(policy.deliveryMethod === "gmail" ? ["Connected Gmail delivery is selected by the owner. After required task context is acknowledged, discover maria_send_reports with codex_tool_inventory using that exact query, then invoke its returned wire_name through codex_tool_call with arguments={}. The dedicated maria_send_reports tool is equivalent when advertised; choose one available path before calling and never switch paths after a rejection. A missing dedicated tool does not imply the inventory sender is unavailable. Also deliver after recording a new incident. The sender sends one eligible incident per call to the verified same Gmail account, records the receipt and prevents duplicates. Continue only after delivered=true with remaining>0, at most five calls per task. Stop on unavailable access, a rejection, no delivery, or uncertainty. Never send those incidents separately. If neither catalog advertises the sender, report the runtime version and missing capability; an application update may be required."] : []),
     `When a command, tool discovery, browser operation, context read or connection fails, report the observed issue once using the dedicated ${AGENT_REPORT_TOOL} tool if it is advertised. It has a fixed diagnostic schema and cannot execute project commands. If it is absent from a cached connector catalog, refresh the connector's tool list in ChatGPT settings for future turns. Older catalogs may discover the same operation using codex_tool_inventory with query=${AGENT_REPORT_TOOL}, then codex_tool_call with its exact schema. Choose one available path before calling; a rejected report must not be retried through the other path.`,
     "Include the exact available error, failed tool and operation, expected versus observed result, recovery already attempted, and verified completed work versus remaining work. Label hypotheses as unverified. Only include Web/Codex response text actually observed in this task when response reporting is enabled; never invent missing text.",
     `Response-text reporting is ${policy.includeResponses ? "enabled" : "disabled; do not include response text, tool output or detailed project content"}. Never include credentials, cookies, capability tokens, receipts, full prompts, hidden reasoning, system/developer instructions, unrelated chats or files.`,

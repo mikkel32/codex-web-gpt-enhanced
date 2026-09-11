@@ -6,7 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { randomUUID } from "node:crypto";
 import { defaultBrokerEndpoint } from "../src/config";
-import { agentReportingInstructions, captureAgentIssue, AGENT_REPORT_TOOL } from "../src/agent-reporting";
+import { agentReportingInstructions, captureAgentIssue, AGENT_REPORT_TOOL, AGENT_SEND_REPORTS_TOOL } from "../src/agent-reporting";
 import { nativeContextPrompt } from "../src/adapters/chatgpt-web/native-context";
 import { TurnBroker } from "../src/adapters/chatgpt-web/turn-broker";
 const { ErrorReportStore, DEFAULT_REPORT_RECIPIENT } = require("../launcher/electron/error-report-store.cjs");
@@ -91,6 +91,12 @@ test("agent reporting works through the real MCP broker with broken native execu
     expect(store.records()).toHaveLength(0);
     const inventory = await invoke("codex_tool_inventory", { turn_token: token, query: AGENT_REPORT_TOOL });
     expect(inventory.structuredContent).toMatchObject({ total: 1, tools: [{ wire_name: AGENT_REPORT_TOOL, kind: "function" }] });
+    // Discovery must settle locally even when the native gateway cannot execute anything.
+    expect((await invoke("codex_tool_inventory", { turn_token: token, query: AGENT_SEND_REPORTS_TOOL })).structuredContent)
+      .toMatchObject({ total: 1, tools: [{ wire_name: AGENT_SEND_REPORTS_TOOL, parameters: { type: "object", additionalProperties: false } }] });
+    expect((await invoke("codex_tool_inventory", { turn_token: probeToken, query: AGENT_SEND_REPORTS_TOOL })).structuredContent)
+      .toMatchObject({ total: 0, tools: [] });
+    expect((await invoke("codex_tool_call", { turn_token: probeToken, wire_name: AGENT_SEND_REPORTS_TOOL, arguments: {} })).isError).toBe(true);
     const tools = await client.listTools(); expect(tools.tools).toHaveLength(11);
     expect(tools.tools.find(tool => tool.name === AGENT_REPORT_TOOL)?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true });
     const args = { turn_token: token, wire_name: AGENT_REPORT_TOOL, arguments: { error: "Required context read failed", stage: "context", completedWork: "One previously verified change" } };
@@ -107,6 +113,9 @@ test("agent reporting works through the real MCP broker with broken native execu
     expect(command.isError).toBe(true);
     expect(JSON.stringify(command)).toContain("Required context acknowledgement is incomplete");
     store.configure({ ...store.settings(), enabled: false });
+    expect((await invoke("codex_tool_inventory", { turn_token: token, query: AGENT_SEND_REPORTS_TOOL })).structuredContent)
+      .toMatchObject({ total: 0, tools: [] });
+    expect((await invoke("codex_tool_call", { turn_token: token, wire_name: AGENT_SEND_REPORTS_TOOL, arguments: {} })).isError).toBe(true);
     expect((await invoke(AGENT_REPORT_TOOL, { turn_token: token, ...args.arguments })).isError).toBe(true);
     broker.revoke(token);
     expect((await invoke(AGENT_REPORT_TOOL, { turn_token: token, ...args.arguments })).isError).toBe(true);
@@ -115,7 +124,7 @@ test("agent reporting works through the real MCP broker with broken native execu
   } finally { await client.close(); broker.revoke(token); broker.revoke(probeToken); await broker.close(); }
 }), 15000);
 
-test("connected Gmail delivery crosses the real MCP/native boundary and persists its receipt", () => fixture(async (home, store) => {
+test("a cached connector discovers and dispatches Gmail delivery through inventory and persists one receipt", () => fixture(async (home, store) => {
   const profileName = "mcp__codex_apps__gmail_get_profile", sendName = "mcp__codex_apps__gmail_send_email";
   store.configure({ enabled: true, recipient: "owner@gmail.com", includeResponses: false, deliveryMethod: "gmail" });
   const { id } = store.capture({ source: "agent", traceId: "queued-before-this-task", error: "Observed issue" });
@@ -124,13 +133,34 @@ test("connected Gmail delivery crosses the real MCP/native boundary and persists
   const broker = TurnBroker.forSocket(socket);
   const token = await broker.register({ cwd: home, roots: [home], writableRoots: [], sandboxPolicy: { type: "readOnly", networkAccess: false },
     tools: [profileName, sendName].map(name => ({ name, description: "Native Gmail fixture", parameters: { type: "object" } })) }, 60000, "mail-task");
-  broker.setContextFiles(token, [{ name: "codex-context-1-of-2.json", text: "{}", required: false }], { allowAgentReporting: true });
+  const contextName = "codex-context-1-of-2.json";
+  broker.setContextFiles(token, [{ name: contextName, text: "{}", required: true }], { allowAgentReporting: true, requireReceipts: true });
   const client = new Client({ name: "gmail-report-fixture", version: "1" });
   const transport = new StdioClientTransport({ command: process.execPath, args: ["src/cli.ts", "mcp", "--broker-socket", socket],
     cwd: process.cwd(), stderr: "pipe", env: { ...process.env, CODEX_CHATGPT_WEB_HOME: home } as Record<string, string> });
   try {
     await client.connect(transport);
-    const sending = client.callTool({ name: "maria_send_reports", arguments: { turn_token: token } });
+    // Use only the old inventory/call surface for discovery and delivery, never a
+    // directly listed sender. Gmail responses are fixtures; MCP routing is real.
+    const inventory = await client.callTool({ name: "codex_tool_inventory", arguments: { turn_token: token, query: AGENT_SEND_REPORTS_TOOL } });
+    const catalog = inventory.structuredContent as { tools: Array<{ wire_name: string; parameters: Record<string, unknown> }> };
+    expect(catalog.tools).toHaveLength(1);
+    const sender = catalog.tools[0]!;
+    expect(sender.wire_name).toBe(AGENT_SEND_REPORTS_TOOL);
+    expect(sender.parameters).toMatchObject({ type: "object", additionalProperties: false, properties: {} });
+    const send = (arguments_: Record<string, unknown> = {}, input?: string) => client.callTool({ name: "codex_tool_call", arguments: {
+      turn_token: token, wire_name: sender.wire_name, arguments: arguments_, ...(input === undefined ? {} : { input }),
+    } });
+    for (const fields of [{ recipient: "different@gmail.com" }, { cmd: "must not execute" }, { turn_token: "another-task" }]) {
+      expect((await send(fields)).isError).toBe(true);
+    }
+    expect((await send({}, "executable input")).isError).toBe(true);
+    expect((await send()).structuredContent).toMatchObject({ delivered: false, actionRequired: "read_required_context" });
+    expect(store.read(id).delivery.attempts).toBe(0);
+    const context = await client.callTool({ name: "codex_context_read", arguments: { turn_token: token, name: contextName, offset: 0 } });
+    const page = JSON.parse((context.content as Array<{ text: string }>)[0]!.text);
+    await client.callTool({ name: "codex_context_read", arguments: { turn_token: token, name: contextName, offset: page.total_chars, receipt: page.receipt } });
+    const sending = send();
     const [profile] = await Promise.race([broker.nextToolBatch(token), sending.then(value => { throw new Error(`Delivery ended before native account check: ${JSON.stringify(value)}`); })]);
     expect(profile?.wireName).toBe(profileName);
     broker.completeTool(token, profile!.callId, { content: [], structuredContent: { email: "owner@gmail.com" } });
@@ -142,5 +172,8 @@ test("connected Gmail delivery crosses the real MCP/native boundary and persists
     expect(store.read(id).delivery).toMatchObject({ state: "sent", transport: "gmail", messageId: "native-gmail-id" });
     expect((await client.callTool({ name: "maria_send_reports", arguments: { turn_token: token } })).structuredContent)
       .toMatchObject({ delivered: false, remaining: 0 });
+    expect((await send()).structuredContent).toMatchObject({ delivered: false, remaining: 0 });
+    broker.revoke(token);
+    expect((await send()).isError).toBe(true);
   } finally { await client.close(); broker.revoke(token); await broker.close(); }
 }), 15000);

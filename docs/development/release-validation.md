@@ -1,7 +1,9 @@
 # Release validation
 
-CI proves that the runtime builds, the launcher starts, and native packages pass their smoke
-contract on macOS, Windows, and Linux. It does not prove an authenticated ChatGPT session, a live
+Run verification locally following [local verification](local-verification.md). GitHub-hosted
+workflows require an explicit request and are not a prerequisite for publication. A successful
+local package check proves the runtime builds and the launcher passes its smoke contract only
+on the tested platform. It does not prove an authenticated ChatGPT session, a live
 MCP connector, or a complete Codex turn. A release candidate is not ready until those account-bound
 flows are exercised manually on the platforms below.
 
@@ -60,6 +62,6 @@ interactive account flow.
 
 ## Linux gate
 
-CI packaging smoke is required. Before claiming interactive Linux support for a release, repeat
+Local Linux packaging smoke is required. Before claiming interactive Linux support for a release, repeat
 items 2 through 7 under a supported desktop session and record the display server and packaging
 format used.

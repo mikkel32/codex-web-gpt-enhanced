@@ -73,6 +73,8 @@ export function nativeContextPage(file: NativeContextFile, offset: number, recei
   return page;
 }
 
+import { TURN_ACCESS_GUIDANCE } from "../../lib/tool-access";
+
 export function nativeContextPrompt(compiled: CompiledChatGptWebPrompt, suppliedFiles?: NativeContextFile[], options: NativeContextOptions = {}): CompiledChatGptWebPrompt {
   if (!compiled.multipart) return compiled;
   const files: NativeContextFile[] = suppliedFiles ?? chatGptContextFiles(compiled.multipart);
@@ -92,6 +94,7 @@ export function nativeContextPrompt(compiled: CompiledChatGptWebPrompt, supplied
     "Supplied attachments also have private temporary local_path copies in the index. For large datasets, native formats, calculations or PDF page rendering, use the current native tools on those paths under their existing sandbox. This avoids loading the entire file into model context. Respect extraction limitations; a text-only PDF read does not inspect page graphics. Do not delete, move, or disclose the temporary files; the task owns their cleanup.",
     "Use the current native tool inventory and workspace from the index. Prefer bounded directory listings and targeted rg searches. Keep native sandbox and approval boundaries.",
     "The current Codex task supplies local execution permissions. A dangerFullAccess sandbox describes local access; it does not disable ChatGPT app permissions or tool safety checks. Do not infer a missing local permission merely from an external tool rejection.",
+    TURN_ACCESS_GUIDANCE,
     "If a tool reports that its safety status could not be determined, report that specific tool-side failure and preserve previously verified actions. The cause is unresolved, not proof of an authentication, filesystem or tunnel fault. Do not retry or reroute the blocked operation to evade the check, or claim that a plugin change has removed it without verification.",
     "If a read fails with TimeoutError or a temporary connection interruption, retry the identical name, offset and receipt at most twice. Preserve received pages and the same task. After three total attempts stop and report that page failure. Authorization, revoked/expired binding, safety rejection, invalid-offset and invalid-receipt errors are terminal and must not be retried.",
     "Once required context is acknowledged, use those records and the work already visible in this chat. A missing optional search result or later read failure is not a failed initial context load and does not undo completed work. Report the specific unavailable evidence and preserve verified prior changes; do not claim that no files changed without evidence.",

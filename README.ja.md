@@ -2,7 +2,6 @@
 
 # Maria WebGPT
 
-[![CI](https://github.com/mikkel32/codex-web-gpt-enhanced/actions/workflows/ci.yml/badge.svg)](https://github.com/mikkel32/codex-web-gpt-enhanced/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/mikkel32/codex-web-gpt-enhanced)](https://github.com/mikkel32/codex-web-gpt-enhanced/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -67,8 +66,10 @@ bun install --frozen-lockfile --cwd launcher
 bun run app
 ```
 
-コードの変更を提案する前に `bun run verify` を実行してください。
-[開発ガイド](docs/development/README.md) で構成と検証手順を、[貢献ガイド](CONTRIBUTING.md) でレビュー方針を確認できます。
+変更に応じた検証をローカルで実行し、リリース候補には `bun run verify` を使ってください。
+GitHub の CI と Release は明示的に実行するワークフローです。プッシュでは自動起動しません。
+[ローカル検証ガイド](docs/development/local-verification.md) に検証と公開の手順を、
+[開発ガイド](docs/development/README.md) にリポジトリの構成をまとめています。
 
 ## 関連情報
 

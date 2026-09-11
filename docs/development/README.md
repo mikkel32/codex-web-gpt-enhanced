@@ -37,8 +37,9 @@ and MCP development.
 | `bun run app:smoke` | Test the packaged application |
 | `bun run app:performance` | Isolated UI performance check |
 
-Package on the matching operating system. CI covers Apple Silicon Mac, Intel Mac,
-Windows x64 and Linux x64. Synthetic browser fixtures and package smoke checks
+Package and verify locally on the matching operating system. See
+[local verification](local-verification.md); GitHub workflows are manual opt-in.
+Synthetic browser fixtures and package smoke checks
 do not replace account-bound validation; record exactly what ran.
 
 ## Documentation and releases
@@ -49,7 +50,8 @@ for navigation instead of appending release announcements to the front page.
 
 The [release validation guide](release-validation.md) separates automated and live
 checks. An already published version is not rebuilt or retagged by later docs
-changes. A new version still requires the complete release matrix and asset checks.
+changes. Check the assets for every platform a release claims to provide. Label
+a release with a limited platform set explicitly; do not substitute older binaries.
 See [fork maintenance](../../FORK.md) for upstream comparison and release ownership.
 
 The upstream baseline workflow runs when `UPSTREAM.lock` changes or on manual

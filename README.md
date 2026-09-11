@@ -2,7 +2,6 @@
 
 # Maria WebGPT
 
-[![CI](https://github.com/mikkel32/codex-web-gpt-enhanced/actions/workflows/ci.yml/badge.svg)](https://github.com/mikkel32/codex-web-gpt-enhanced/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/mikkel32/codex-web-gpt-enhanced)](https://github.com/mikkel32/codex-web-gpt-enhanced/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -68,8 +67,10 @@ bun install --frozen-lockfile --cwd launcher
 bun run app
 ```
 
-Run `bun run verify` before proposing code changes. The [development guide](docs/development/README.md)
-maps the repository and its checks; [Contributing](CONTRIBUTING.md) explains the review process.
+Run appropriate checks locally; use `bun run verify` for a release candidate.
+GitHub CI and Release jobs are explicit opt-in workflows, never automatic on a push.
+The [local verification guide](docs/development/local-verification.md) covers checks and
+publication; the [development guide](docs/development/README.md) maps the repository.
 
 ## Explore
 

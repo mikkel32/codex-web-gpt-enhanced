@@ -18,10 +18,14 @@ refactoring out of a fix. Add a regression test when behavior changes; for docs-
 work, check links, commands and translated README parity instead of inventing
 runtime tests. Report unexecuted checks explicitly.
 
-Run `bun run verify` for code changes. For browser changes, use observed DOM evidence
+Run checks locally in the current checkout. Start with focused tests, then run
+`bun run verify` for a release candidate. Do not dispatch or poll GitHub Actions
+unless the user explicitly requests GitHub-hosted jobs; see the
+[local verification guide](docs/development/local-verification.md).
+For browser changes, use observed DOM evidence
 and a reproducible fixture. For execution changes, separately record validation
 through an installed Codex integration. Package changes need the affected native
-platform's smoke checks; CI alone is not proof of a signed-in account flow.
+platform's smoke checks; passing tests alone is not proof of a signed-in account flow.
 
 ## Preserve these contracts
 

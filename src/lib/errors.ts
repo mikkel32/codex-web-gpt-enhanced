@@ -1,3 +1,5 @@
+import { externalToolAccessCode } from "./tool-access";
+
 export interface CodexErrorPayload {
   message: string;
   type: string;
@@ -86,6 +88,10 @@ export function classifyError(status: number, type: string, message: string): Co
     isClientClosedMessage(text)
   ) {
     return { message, type: "invalid_request_error", code: "client_closed_request" };
+  }
+  const accessCode = externalToolAccessCode(message);
+  if (accessCode && status !== 401 && type !== "authentication_error") {
+    return { message, type: "permission_error", code: accessCode };
   }
   if (
     text.includes("context_length_exceeded") ||
@@ -193,6 +199,7 @@ export function inferHttpStatusFromAdapterMessage(message: string): number {
   const lower = message.toLowerCase();
   // Client aborts must not look like upstream 502s in /api/logs.
   if (isClientClosedMessage(lower)) return 499;
+  if (externalToolAccessCode(message)) return 403;
   if (
     lower.includes("resource_exhausted") ||
     lower.includes("resource exhausted") ||
@@ -231,7 +238,7 @@ export function adapterFailureFromMessage(message: string): { httpStatus: number
   const httpStatus = inferHttpStatusFromAdapterMessage(message);
   let finalMessage = message;
   const retryAfterSeconds = parseRetryAfterFromMessage(message);
-  if (retryAfterSeconds && !/please try again in /i.test(message)) {
+  if (retryAfterSeconds && httpStatus !== 401 && httpStatus !== 403 && !/please try again in /i.test(message)) {
     finalMessage = `${message} Please try again in ${retryAfterSeconds}s.`;
   }
   const errorType = httpStatus === 499
@@ -265,6 +272,8 @@ export function httpStatusFromTerminalError(error: {
   if (error.type === "authentication_error" || error.code === "invalid_api_key") return 401;
   if (
     error.type === "permission_error" ||
+    error.code === "conversation_mcp_scope_restricted" ||
+    error.code === "tool_safety_status_unknown" ||
     error.code === "permission_denied" ||
     error.code === "subscription_required"
   ) return 403;

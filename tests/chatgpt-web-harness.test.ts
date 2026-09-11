@@ -2699,7 +2699,18 @@ describe("ChatGPT outer-native harness v4", () => {
         return await pending;
       };
 
-      // Even an empty inventory query crosses the broker through the native exec gateway. The
+      // No broker consumer is running here: an exact advertised name must settle without
+      // queuing an unnecessary native discovery call or changing the permission contract.
+      const exactNativeInventory = await call("codex_tool_inventory", {
+        turn_token: token, query: "exec", include_schema: true,
+      });
+      expect(exactNativeInventory.structuredContent).toMatchObject({
+        contract: "native", catalog_scope: "advertised_native_tools",
+        tools: [{ wire_name: "exec", kind: "freeform" }, { wire_name: "wait", kind: "function" }],
+        total: 2,
+      });
+
+      // A broad empty-result inventory query crosses the broker through the native exec gateway. The
       // browser therefore observes a real tool boundary before the model plans its next call.
       const emptyGatewayInventory = await inventoryThroughGateway(
         "clink opencode pal",
@@ -2708,6 +2719,19 @@ describe("ChatGPT outer-native harness v4", () => {
       );
       expect(emptyGatewayInventory.structuredContent).toEqual({
         contract: "native",
+        catalog_scope: "native_and_deferred_tools",
+        access: {
+          source: "current_codex_turn",
+          runtime_version: expect.stringMatching(/^\d+\.\d+\.\d+/),
+          contract: "native",
+          native_policy_fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+          native_tool_catalog_fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+          native_tool_catalog_scope: "advertised_native_tools",
+          native_approval_policy: "not_supplied_by_this_inventory",
+          chatgpt_app_authorization: "not_observable_from_native_inventory",
+          listing_grants_permission: false,
+          reusable_across_turns: false,
+        },
         environment: {
           cwd: gatewayOnlyEnvironment.cwd,
           roots: gatewayOnlyEnvironment.roots,
@@ -2718,6 +2742,8 @@ describe("ChatGPT outer-native harness v4", () => {
         total: 0,
         next_offset: null,
       });
+      const exactAccess = (exactNativeInventory.structuredContent as { access: unknown }).access;
+      expect(emptyGatewayInventory.structuredContent).toHaveProperty("access", exactAccess);
 
       const rawGatewayInventory = await inventoryThroughGateway(
         "Run nested Codex tools",
@@ -2880,12 +2906,11 @@ describe("ChatGPT outer-native harness v4", () => {
       broker.completeTool(token, waitRequest!.callId, toolResult({ output: "completed" }));
       expect((await waitPromise).structuredContent).toEqual({ output: "completed" });
 
-      const agentInventory = await inventoryThroughGateway(
-        "wait_agent",
-        true,
-        ["multi_agent_v1__wait_agent"],
-      );
+      const agentInventory = await call("codex_tool_inventory", {
+        turn_token: token, query: "wait_agent", include_schema: true,
+      });
       expect(agentInventory.structuredContent).toMatchObject({
+        catalog_scope: "advertised_native_tools",
         total: 1,
         tools: [{
           wire_name: "multi_agent_v1__wait_agent",

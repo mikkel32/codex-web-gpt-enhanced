@@ -4,12 +4,13 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import * as z from "zod/v4";
 import { namespacedToolName, type CodexTool } from "../../types";
 import { VERSION } from "../../version";
-import { AGENT_REPORT_TOOL, agentReportTool, agentIssueSchema } from "../../agent-reporting";
+import { AGENT_REPORT_TOOL, AGENT_SEND_REPORTS_TOOL, agentReportTool, agentIssueSchema, agentSendReportsTool, agentSendReportsSchema } from "../../agent-reporting";
 import type { ChatGptTurnEnvironment } from "./environment";
 import { CODEX_COMPACTION_CONTROL_WIRE_NAME } from "./native-compaction-control";
 import { nativeContextResult, nativeContextTextResult, type NativeContextPage } from "./native-context";
 import { CONTEXT_FILE_NAME } from "./context-store";
 import { projectInspectionCommand, projectInspectionSchema } from "./project-inspection";
+import { nativeAccessSnapshot, nativeCatalogHasExactName } from "./access-snapshot";
 import { getConfigDir } from "../../config";
 const { deliverConnectedGmailReport } = require("../../../launcher/electron/connected-gmail-delivery.cjs");
 import { callTurnBroker, TurnBrokerTimeoutError, type BrokerToolResult } from "./turn-broker";
@@ -27,7 +28,7 @@ const BRIDGE_TOOL_NAMES = new Set([
   "codex_turn_start",
   "codex_project_inspect",
   AGENT_REPORT_TOOL,
-  "maria_send_reports",
+  AGENT_SEND_REPORTS_TOOL,
   "codex_exec",
   "codex_write_stdin",
   "codex_apply_patch",
@@ -644,20 +645,22 @@ export async function runChatGptMcpServer(options: {
     }, signal).then(gatewayMcpResult);
   };
 
+  const sendReports = async (claimed: ClaimedTurn, extra: McpRequestExtra) => {
+    if (contract !== "native" || claimed.reportingEnabled !== true) throw new Error("Agent error reporting is not enabled for this task");
+    return result(await deliverConnectedGmailReport(getConfigDir(), async (name: string, args: Record<string, unknown>) => {
+      const direct = claimed.environment.tools.find(tool => wireName(tool) === name);
+      if (direct) return invoke(claimed.bindingId, claimed.environment, direct, { arguments: args }, extra.signal);
+      return invokeNestedNative(claimed.bindingId, claimed.environment, name, false, { arguments: args }, extra.signal);
+    }));
+  };
+
   if (contract === "native") {
-    server.registerTool("maria_send_reports", {
+    server.registerTool(AGENT_SEND_REPORTS_TOOL, {
       title: "Deliver one queued report through connected Gmail",
-      description: "Send one eligible local diagnostic report from the connected Gmail account to that same configured account. Requires enabled reporting with connected Gmail selected and acknowledged task context. Uses native Gmail tools and their existing permissions. Records Gmail's message receipt and never resends sent or uncertain reports. No recipients, message text, commands or account credentials can be supplied to this operation. Call again only after confirmed delivery with remaining reports; at most five deliveries per task.",
+      description: agentSendReportsTool().description,
       inputSchema: { turn_token: turnTokenSchema },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    }, async (input, extra) => withClaimedTurn("maria_send_reports", input.turn_token, extra, async claimed => {
-      if (claimed.reportingEnabled !== true) throw new Error("Agent error reporting is not enabled for this task");
-      return result(await deliverConnectedGmailReport(getConfigDir(), async (name: string, args: Record<string, unknown>) => {
-        const direct = claimed.environment.tools.find(tool => wireName(tool) === name);
-        if (direct) return invoke(claimed.bindingId, claimed.environment, direct, { arguments: args }, extra.signal);
-        return invokeNestedNative(claimed.bindingId, claimed.environment, name, false, { arguments: args }, extra.signal);
-      }));
-    }));
+    }, async (input, extra) => withClaimedTurn(AGENT_SEND_REPORTS_TOOL, input.turn_token, extra, claimed => sendReports(claimed, extra)));
 
     server.registerTool("codex_project_inspect", {
       title: "Inspect project files without changing them",
@@ -856,9 +859,10 @@ export async function runChatGptMcpServer(options: {
         const bound = claimed.environment;
         const needle = query?.trim().toLowerCase();
         const reporting = contract === "native" && claimed.reportingEnabled === true;
-        const reportingOnly = reporting && needle === AGENT_REPORT_TOOL;
-        const available = safeVisibleTools(bound, contract).filter(tool => wireName(tool) !== AGENT_REPORT_TOOL);
-        if (reporting) available.push(agentReportTool());
+        const reportingNames = [AGENT_REPORT_TOOL, AGENT_SEND_REPORTS_TOOL];
+        const reportingOnly = reportingNames.includes(needle ?? "");
+        const available = safeVisibleTools(bound, contract).filter(tool => !reportingNames.includes(wireName(tool)));
+        if (reporting) available.push(agentReportTool(), agentSendReportsTool());
         const directMatches = available.filter(tool => !needle || [
           wireName(tool),
           tool.name,
@@ -876,8 +880,10 @@ export async function runChatGptMcpServer(options: {
         let nestedTotal = 0;
         let nestedPage: Array<Record<string, unknown>> = [];
         const gateway = execGateway(bound);
-        if (gateway && !reportingOnly) {
-          const excludedGatewayNames = [...bound.tools.map(wireName), AGENT_REPORT_TOOL];
+        const exactNativeLookup = nativeCatalogHasExactName(query, available.flatMap(tool => [wireName(tool), tool.name]));
+        const inspectDeferredCatalog = Boolean(gateway && !reportingOnly && !exactNativeLookup);
+        if (gateway && inspectDeferredCatalog) {
+          const excludedGatewayNames = [...bound.tools.map(wireName), ...reportingNames];
           const nestedOffset = Math.max(0, offset - directMatches.length);
           const nestedLimit = Math.max(0, limit - directPage.length);
           const response = await invoke(claimed.bindingId, bound, gateway, {
@@ -920,6 +926,8 @@ export async function runChatGptMcpServer(options: {
             sandbox: bound.sandboxPolicy.type,
           },
           contract,
+          access: nativeAccessSnapshot(bound, VERSION, contract),
+          catalog_scope: inspectDeferredCatalog ? "native_and_deferred_tools" : "advertised_native_tools",
           tools: page,
           total,
           next_offset: offset + page.length < total ? offset + page.length : null,
@@ -1010,6 +1018,11 @@ export async function runChatGptMcpServer(options: {
       }
       return withClaimedTurn("codex_tool_call", requestId, extra, async claimed => {
         const bound = claimed.environment;
+        if (wire_name === AGENT_SEND_REPORTS_TOOL) {
+          if (input !== undefined) throw new Error("Report delivery requires empty structured arguments, not executable input");
+          agentSendReportsSchema.parse(args ?? {});
+          return sendReports(claimed, extra);
+        }
         if (wire_name === AGENT_REPORT_TOOL) {
           if (contract !== "native" || claimed.reportingEnabled !== true) throw new Error("Agent error reporting is not enabled for this task");
           if (input !== undefined) throw new Error("Agent reports require structured diagnostic fields, not executable input");

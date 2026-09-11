@@ -2,7 +2,6 @@
 
 # Maria WebGPT
 
-[![CI](https://github.com/mikkel32/codex-web-gpt-enhanced/actions/workflows/ci.yml/badge.svg)](https://github.com/mikkel32/codex-web-gpt-enhanced/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/mikkel32/codex-web-gpt-enhanced)](https://github.com/mikkel32/codex-web-gpt-enhanced/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -65,8 +64,10 @@ bun install --frozen-lockfile --cwd launcher
 bun run app
 ```
 
-提出代码变更前请运行 `bun run verify`。
-[开发指南](docs/development/README.md) 介绍仓库结构和检查流程；[贡献指南](CONTRIBUTING.md) 介绍审核方式。
+请在本地运行与变更相关的检查，并对发布候选版本运行 `bun run verify`。
+GitHub CI 和 Release 工作流仅在明确请求时手动运行，推送不会自动触发。
+[本地验证指南](docs/development/local-verification.md) 介绍检查与发布流程；
+[开发指南](docs/development/README.md) 介绍仓库结构。
 
 ## 更多信息
 
