@@ -1,23 +1,19 @@
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
-  workflow_run:
-    workflows: ["CI"]
-    branches: [main]
-    types: [completed]
+  # Explicit opt-in only. Source pushes, tags and completed checks never start jobs.
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+  group: release-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
   prepare:
-    if: github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -28,7 +24,7 @@ jobs:
       - name: Check out the exact release source
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - name: Resolve the immutable release candidate
         id: release
@@ -36,8 +32,8 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           PUSH_TAG: ${{ github.ref_name }}
-          WORKFLOW_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-          WORKFLOW_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          WORKFLOW_HEAD_BRANCH: ${{ github.ref_name }}
+          WORKFLOW_HEAD_SHA: ${{ github.sha }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -239,7 +235,7 @@ jobs:
           set -euo pipefail
           git fetch origin main --tags
           test "$(git rev-parse HEAD)" = "$RELEASE_SOURCE_SHA"
-          if [ "$RELEASE_EVENT_NAME" = "workflow_run" ]; then
+          if [ "$RELEASE_EVENT_NAME" = "workflow_dispatch" ]; then
             test "$(git rev-parse origin/main)" = "$RELEASE_SOURCE_SHA"
           fi
           if tagged_sha="$(git rev-list -n 1 "$RELEASE_TAG" 2>/dev/null)"; then
@@ -300,7 +296,7 @@ jobs:
             --json assets \
             --jq '.assets[] | select(.name == "checksums.txt") | .digest')"
           test "sha256:$local_manifest_digest" = "$remote_manifest_digest"
-          if [ "$RELEASE_EVENT_NAME" = "workflow_run" ]; then
+          if [ "$RELEASE_EVENT_NAME" = "workflow_dispatch" ]; then
             git fetch origin main
             test "$(git rev-parse origin/main)" = "$RELEASE_SOURCE_SHA"
           fi

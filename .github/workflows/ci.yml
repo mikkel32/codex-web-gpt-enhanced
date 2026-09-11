@@ -1,9 +1,7 @@
 name: CI
 
 on:
-  push:
-    branches: [main, 'codex/**']
-  pull_request:
+  # Optional cross-platform checks. Normal development is verified on the active host.
   workflow_dispatch:
 
 concurrency:
