@@ -4,6 +4,7 @@ import { VERSION } from "./version";
 import type { CodexTool } from "./types";
 
 const { ErrorReportStore } = require("../launcher/electron/error-report-store.cjs");
+const { ReportDeliveryQueue } = require("../launcher/electron/error-report-delivery.cjs");
 export const AGENT_REPORT_TOOL = "maria_report_issue";
 export const AGENT_SEND_REPORTS_TOOL = "maria_send_reports";
 export const agentSendReportsSchema = z.object({}).strict();
@@ -52,11 +53,19 @@ export function captureAgentIssue(traceId: string, input: unknown): Record<strin
     notes: "Agent-reported evidence from this authenticated turn. Operation descriptions, recovery steps and hypotheses are agent statements; not independently verified. The reporting tool executed no project command." });
   if (!outcome.id) return { recorded: false, reason: outcome.reason, emailSent: false };
   const report = store.read(outcome.id);
+  const delivery = policy.deliveryMethod === "gmail"
+    ? new ReportDeliveryQueue(store, { deliveryMethod: "gmail", configured: () => true }).reportStatus(report)
+    : report.delivery;
+  const waiting = delivery.state === "pending" && delivery.attempts > 0 && delivery.nextAttemptAt > Date.now();
+  const stopped = ["blocked", "failed", "uncertain", "sending", "held"].includes(delivery.state);
   return { recorded: true, duplicate: !outcome.captured, reportId: outcome.id, recipient: report.recipient,
-    deliveryState: report.delivery.state, emailAccepted: report.delivery.state === "sent", inboxVerified: false,
-    actionRequired: policy.deliveryMethod === "gmail" && ["pending", "needs_sender"].includes(report.delivery.state)
+    deliveryState: delivery.state, deliveryReason: delivery.reason ?? null, emailAccepted: report.delivery.state === "sent", inboxVerified: false,
+    actionRequired: stopped ? null : waiting ? "wait_for_delivery_schedule"
+      : policy.deliveryMethod === "gmail" && ["pending", "needs_sender"].includes(delivery.state)
       ? "deliver_with_maria_send_reports" : report.delivery.state === "needs_sender" ? "configure_gmail_sender" : null,
     message: report.delivery.state === "sent" ? "The mail server previously accepted this incident; do not send another copy."
+      : stopped ? `Incident remains ${delivery.state}. ${delivery.reason ?? "No delivery is scheduled."} Do not invoke a sender or resend this incident automatically.`
+      : waiting ? `Incident remains pending until ${new Date(delivery.nextAttemptAt).toISOString()}. Do not poll or invoke the sender before the scheduled attempt.`
       : policy.deliveryMethod === "gmail" ? "Incident saved locally. Discover maria_send_reports using codex_tool_inventory, then invoke its returned wire_name with arguments={} through codex_tool_call, or use the dedicated sender if advertised. Choose one path before sending; never retry a rejected send through the other path. The sender owns the queued incident and records the receipt."
       : report.delivery.state === "needs_sender" ? "Incident saved locally but no Gmail sender is configured. Open Automatic error reports in Maria and save the Gmail sender and Google app password there. No email was attempted; do not send another copy through a connector."
       : "Incident saved locally. The configured app sender handles delivery. Queued is not sent; do not also email this incident through another tool." };

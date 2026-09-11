@@ -1,6 +1,8 @@
-const { ErrorReportStore, atomicJson } = require("./error-report-store.cjs");
+const { ErrorReportStore, atomicJson, redact } = require("./error-report-store.cjs");
 const { ReportDeliveryQueue } = require("./error-report-delivery.cjs");
 const { formatIncidentEmail } = require("./error-report-email.cjs");
+
+const { externalToolAccessCode } = require("./tool-access-error.cjs");
 
 const GMAIL_PROFILE_TOOL = "mcp__codex_apps__gmail_get_profile";
 const GMAIL_SEND_TOOL = "mcp__codex_apps__gmail_send_email";
@@ -14,6 +16,19 @@ function gmailObjects(value, depth = 0) {
   return [value, ...nested.flatMap(item => gmailObjects(item, depth + 1))];
 }
 
+function gmailAccessFailure(values) {
+  if (!values.some(value => value.isError || value.error)) return undefined;
+  for (const value of values) {
+    const messages = [value.message, value.error, value.error?.message,
+      ...(Array.isArray(value.content) ? value.content.filter(part => part.type === "text").map(part => part.text) : [])];
+    for (const message of messages) {
+      const code = externalToolAccessCode(message);
+      if (code) return Object.assign(new Error(redact(message).slice(0, 4096)), { code });
+    }
+  }
+  return undefined;
+}
+
 class ConnectedGmailReportSender {
   constructor(invoke, recipient) { this.invoke = invoke; this.recipient = recipient; this.deliveryMethod = "gmail"; this.ready = false; }
   configured() { return this.ready; }
@@ -22,6 +37,8 @@ class ConnectedGmailReportSender {
     if (values.some(item => typeof item.error === "string" && item.error.startsWith("Required context acknowledgement is incomplete"))) {
       throw Object.assign(new Error("Required task context must be acknowledged before Gmail delivery"), { code: "EREPORTCONTEXT" });
     }
+    const accessFailure = gmailAccessFailure(values);
+    if (accessFailure) throw accessFailure;
     const profile = values.find(item => typeof item.email === "string");
     if (values.some(item => item.isError) || !profile || profile.email.toLowerCase() !== this.recipient.toLowerCase()) {
       throw Object.assign(new Error("Connect Gmail using the same account as the report recipient; no email was attempted"), { code: "EREPORTCONFIG" });
@@ -47,6 +64,9 @@ class ConnectedGmailReportSender {
     const values = gmailObjects(response);
     const receipt = values.find(item => typeof item.id === "string" && item.id.length > 0
       && Array.isArray(item.label_ids) && item.label_ids.includes("SENT"));
+    // A conflicting receipt remains uncertain; it is never eligible for an automatic resend.
+    const accessFailure = !receipt && gmailAccessFailure(values);
+    if (accessFailure) throw accessFailure;
     if (values.some(item => item.isError) || !receipt) {
       // A connector response without a message receipt is never an acknowledgement,
       // even if an outer exec cell itself completed successfully.
@@ -71,10 +91,17 @@ async function deliverConnectedGmailReport(coreHome, invoke) {
   try { await sender.prepare(); }
   catch (error) {
     if (error.code === "EREPORTCONTEXT") return { delivered: false, actionRequired: "read_required_context", message: error.message };
-    atomicJson(queue.pauseFile, { version: 1, pausedAt: Date.now() });
+    const accessCode = externalToolAccessCode(error.message);
+    const accessMessage = accessCode
+      ? `Tool access was rejected (${accessCode}). No email was attempted. ${redact(error.message).slice(0, 4096)} Stop this attempt; a catalog refresh or account reconnection does not establish that the rejection has cleared.`
+      : undefined;
+    atomicJson(queue.pauseFile, { version: 1, pausedAt: Date.now(), ...(accessCode ? { accessCode } : {}) });
     for (const report of store.records()) if (eligible(report) && ["pending", "needs_sender"].includes(report.delivery.state)) {
-      store.update(report, { state: "blocked", reason: "Connected Gmail access requires attention; reconnect Gmail and resume delivery. No email was attempted." });
+      store.update(report, { state: "blocked", ...(accessCode ? { accessCode } : {}),
+        reason: accessMessage || "Connected Gmail access requires attention; reconnect Gmail and resume delivery. No email was attempted." });
     }
+    if (accessCode) return { delivered: false, emailAccepted: false, actionRequired: "review_tool_access",
+      code: accessCode, retryable: false, message: accessMessage };
     return { delivered: false, actionRequired: "connect_gmail", message: "The matching Gmail connection is unavailable or rejected access. Reconnect Gmail and resume delivery in Automatic error reports. No email was attempted. Do not retry through a different tool or browser." };
   }
   const before = new Set(store.records().filter(report => report.delivery.state === "sent").map(report => report.id));

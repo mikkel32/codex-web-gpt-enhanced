@@ -177,3 +177,63 @@ test("a cached connector discovers and dispatches Gmail delivery through invento
     expect((await send()).isError).toBe(true);
   } finally { await client.close(); broker.revoke(token); await broker.close(); }
 }), 15000);
+
+
+test("Gmail incident guidance does not dispatch blocked, uncertain, failed or in-flight reports", () => fixture((_home, store) => {
+  store.configure({ enabled: true, recipient: "owner@gmail.com", includeResponses: false, deliveryMethod: "gmail" });
+  for (const state of ["blocked", "uncertain", "failed", "sending", "sent"]) {
+    const issue = { stage: "command", error: "Observed fixture failure" };
+    const first = captureAgentIssue(`state-${state}`, issue);
+    store.update(store.read(first.reportId), { state });
+    const repeated = captureAgentIssue(`state-${state}`, issue);
+    expect(repeated.actionRequired).not.toBe("deliver_with_maria_send_reports");
+    expect(String(repeated.message)).not.toContain("Discover maria_send_reports");
+    expect(repeated.emailAccepted).toBe(state === "sent");
+  }
+}));
+
+
+test("a rejected deferred inventory retains both report tools and explicit advertised discovery needs no gateway", () => fixture(async (home, store) => {
+  store.configure({ enabled: true, recipient: "owner@gmail.com", includeResponses: false, deliveryMethod: "gmail" });
+  const base = join(tmpdir(), `mci-${randomUUID().slice(0, 8)}`);
+  const socket = process.platform === "win32" ? defaultBrokerEndpoint(base, "win32") : `${base}.sock`;
+  const broker = TurnBroker.forSocket(socket);
+  const token = await broker.register({ cwd: home, roots: [home], writableRoots: [],
+    sandboxPolicy: { type: "readOnly", networkAccess: false }, tools: [
+      { name: "exec", freeform: true, description: "Deferred catalog fixture", parameters: {} },
+    ] }, 60000, "catalog-failure");
+  broker.setContextFiles(token, [{ name: "codex-context-1-of-2.json", text: "{}", required: false }], { allowAgentReporting: true });
+  const client = new Client({ name: "partial-inventory-fixture", version: "1" });
+  const transport = new StdioClientTransport({ command: process.execPath, args: ["src/cli.ts", "mcp", "--broker-socket", socket],
+    cwd: process.cwd(), stderr: "pipe", env: { ...process.env, CODEX_CHATGPT_WEB_HOME: home } as Record<string, string> });
+  try {
+    await client.connect(transport);
+    const inventory = (fields: Record<string, unknown>) => client.callTool({ name: "codex_tool_inventory",
+      arguments: { turn_token: token, query: "maria", ...fields } }, undefined, { timeout: 3000 });
+    // No broker worker is serving the gateway: these calls can only settle locally.
+    const first = await inventory({ catalog: "advertised", limit: 1, include_schema: false });
+    expect(first.isError).not.toBe(true);
+    expect(first.structuredContent).toMatchObject({ total: 2, next_offset: 1, catalog_complete: true,
+      catalog_scope: "advertised_native_tools", tools: [{ wire_name: AGENT_REPORT_TOOL }] });
+    expect((first.structuredContent as any).tools[0]).not.toHaveProperty("parameters");
+    expect((await inventory({ catalog: "advertised", offset: 1 })).structuredContent)
+      .toMatchObject({ total: 2, next_offset: null, tools: [{ wire_name: AGENT_SEND_REPORTS_TOOL }] });
+    const pending = inventory({ catalog: "all" });
+    const [call] = await Promise.race([broker.nextToolBatch(token), pending.then(value => {
+      throw new Error(`Expected one deferred lookup: ${JSON.stringify(value)}`);
+    })]);
+    expect(call?.wireName).toBe("exec");
+    const denied = "Dette værktøj blev blokeret af OpenAI's sikkerhedstjek.";
+    broker.completeTool(token, call!.callId, { isError: true, content: [{ type: "text", text: denied }] });
+    const partial = await pending;
+    expect(partial.isError).toBe(true);
+    expect(partial.structuredContent).toMatchObject({ total: 2, catalog_complete: false,
+      catalog_scope: "advertised_native_tools", next_offset: null,
+      deferred_discovery: { status: "failed", code: "tool_safety_rejected", retryable: false },
+      tools: [{ wire_name: AGENT_REPORT_TOOL }, { wire_name: AGENT_SEND_REPORTS_TOOL }] });
+    expect(JSON.stringify(partial.structuredContent)).toContain(denied);
+    expect(store.records()).toHaveLength(0);
+    broker.revoke(token);
+    expect((await inventory({ catalog: "advertised" })).isError).toBe(true);
+  } finally { await client.close(); broker.revoke(token); await broker.close(); }
+}), 15000);

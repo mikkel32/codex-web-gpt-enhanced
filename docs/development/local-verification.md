@@ -73,3 +73,24 @@ Record the blocked operation once, preserve completed work, and continue indepen
 authorized operations. A catalog refresh can expose newly installed tools for later
 tasks, but cannot prove that an external rejection has disappeared. Do not replay a
 rejected operation through a different conversation, account, machine or gateway.
+
+
+## Report discovery and platform denials in 5.20.7
+
+For broad inventory inspection, `catalog: "advertised"` reads the current task's
+supplied catalog without invoking a deferred discovery gateway. `catalog: "all"`
+retains the existing full search. Exact advertised-name lookups remain local.
+An unsuccessful deferred search returns an MCP error containing the known tools,
+`catalog_complete: false`, and the specific `deferred_discovery` failure. Its
+`total` and pagination describe only the advertised catalog; they cannot establish
+that no deferred tools exist. Transport timeouts retain their retired-binding
+result. Neither catalog mode changes permissions or authorizes a retry.
+
+The launcher and runtime share classification for observed English and Danish
+OpenAI safety rejections. A rejected Gmail profile or send operation pauses the
+queue, preserves its access cause, and does not suggest that reconnecting an
+account resolves a platform verdict. Capture guidance respects blocked, uncertain,
+sent, failed, in-flight, paused, and scheduled-retry states. A conflicting mail
+receipt and error remain uncertain. Connected delivery tests use simulated Gmail
+responses through the real MCP discovery/dispatch path; they are not live email
+or external-authorization verification.
