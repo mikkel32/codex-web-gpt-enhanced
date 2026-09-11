@@ -3,6 +3,8 @@ const path = require("node:path");
 const { ErrorReportStore, emailAddress, atomicJson, privateDirectory, readPrivateJson } = require("./error-report-store.cjs");
 const { formatIncidentEmail } = require("./error-report-email.cjs");
 const lockfile = require("proper-lockfile");
+const { externalToolAccessCode } = require("./tool-access-error.cjs");
+const { redact } = require("./error-report-store.cjs");
 
 function secureStorage(storage) {
   if (!storage?.isEncryptionAvailable() || storage.getSelectedStorageBackend?.() === "basic_text") {
@@ -65,6 +67,7 @@ class GmailReportSender {
 }
 
 function failureDisposition(error) {
+  if (externalToolAccessCode(error?.message)) return "blocked";
   if (["EAUTH", "EREPORTCONFIG"].includes(error?.code) || [530, 534, 535].includes(error?.responseCode)) return "blocked";
   if (Number.isInteger(error?.responseCode) && error.responseCode >= 500) return "failed";
   if (Number.isInteger(error?.responseCode) && error.responseCode >= 400) return "retry";
@@ -97,7 +100,7 @@ class ReportDeliveryQueue {
     }
     if (!settings.enabled) return { ...report.delivery, state: "held", reason: "Reporting is disabled" };
     if (this.method === "gmail") return { ...report.delivery, state: paused ? "blocked" : "pending", reason: paused
-      ? "Reconnect Gmail and resume delivery in Automatic error reports"
+      ? "Delivery is paused. Review the recorded access or account error before resuming in Automatic error reports"
       : "Waiting for an active Codex task to deliver through connected Gmail" };
     if (!this.sender.configured()) return { ...report.delivery, state: "needs_sender",
       reason: "Not sent: set up the Gmail sender and Google app password in Automatic error reports" };
@@ -186,12 +189,15 @@ class ReportDeliveryQueue {
         reason: "Accepted by the email server; inbox delivery is not independently verified" });
     } catch (error) {
       const disposition = failureDisposition(error);
+      const accessCode = externalToolAccessCode(error?.message);
       const retry = disposition === "retry" && attempt < 5;
       // Keep authentication pauses independent of report deletion and changed capture settings.
-      if (disposition === "blocked") atomicJson(this.pauseFile, { version: 1, pausedAt: this.now() });
+      if (disposition === "blocked") atomicJson(this.pauseFile, { version: 1, pausedAt: this.now(), ...(accessCode ? { accessCode } : {}) });
       this.store.update(this.store.read(report.id), { state: retry ? "pending" : disposition === "retry" ? "failed" : disposition,
         nextAttemptAt: this.now() + Math.min(3_600_000, 60_000 * 2 ** (attempt - 1)),
-        reason: retry ? "Email connection failed before confirmed delivery; retry scheduled" : disposition === "blocked"
+        ...(accessCode ? { accessCode } : {}),
+        reason: accessCode ? `Tool access was rejected (${accessCode}); delivery is paused with no automatic retry. ${redact(error.message).slice(0, 4096)}`
+          : retry ? "Email connection failed before confirmed delivery; retry scheduled" : disposition === "blocked"
           ? "Sender credentials are unavailable or sign-in was rejected; update the sender" : disposition === "failed" || disposition === "retry"
             ? "Email server rejected delivery or the retry budget was exhausted" : "Email delivery is uncertain; check your inbox before a manual resend" });
     }

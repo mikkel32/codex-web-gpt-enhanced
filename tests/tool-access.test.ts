@@ -72,3 +72,15 @@ test("native policy and advertised catalog changes are independently observable"
   const network = environment(); network.sandboxPolicy = { type: "workspaceWrite", writableRoots: ["/workspace"], networkAccess: true };
   expect(nativeAccessSnapshot(network, "5.20.5", "native").native_policy_fingerprint).not.toBe(original.native_policy_fingerprint);
 });
+
+
+test("Danish platform refusals remain terminal permission errors", () => {
+  for (const message of [
+    "Dette værktøj blev blokeret af OpenAI's sikkerhedstjek. Dobbelttjek det, du sender.",
+    "Dette værktøj blev blokeret af OpenAI’s sikkerhedstjek.",
+  ]) {
+    expect(adapterFailureFromMessage(message)).toEqual({
+      httpStatus: 403, error: { message, type: "permission_error", code: "tool_safety_rejected" },
+    });
+  }
+});

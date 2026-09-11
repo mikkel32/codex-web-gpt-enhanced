@@ -88,3 +88,50 @@ test("choosing connected Gmail keeps existing reporting consent but disabling pr
   await deliverConnectedGmailReport(f.home, async () => { throw new Error("must not be called"); });
   assert.equal(f.store.read(f.id).delivery.attempts, 0);
 });
+
+
+test("platform rejection before Gmail account lookup preserves its cause without recommending reconnection", async t => {
+  for (const [message, code] of [
+    ["This tool call was blocked by OpenAI's safety checks.", "tool_safety_rejected"],
+    ["Dette værktøj blev blokeret af OpenAI's sikkerhedstjek.", "tool_safety_rejected"],
+    ["This tool call was blocked by OpenAI because we couldn't determine the safety status of the request.", "tool_safety_status_unknown"],
+    ["FORBIDDEN: This conversation is restricted to developer MCPs.", "conversation_mcp_scope_restricted"],
+  ]) {
+    const f = fixture(t); let calls = 0;
+    const result = await deliverConnectedGmailReport(f.home, async name => {
+      calls++; assert.equal(name, GMAIL_PROFILE_TOOL);
+      return { isError: true, content: [{ type: "text", text: message }] };
+    });
+    assert.equal(result.actionRequired, "review_tool_access");
+    assert.equal(result.code, code); assert.equal(result.retryable, false);
+    assert(!/^reconnect|reconnect gmail/i.test(result.message));
+    assert.equal(f.store.read(f.id).delivery.state, "blocked");
+    assert.equal(f.store.read(f.id).delivery.attempts, 0);
+    await deliverConnectedGmailReport(f.home, async () => { calls++; throw new Error("must remain paused"); });
+    assert.equal(calls, 1);
+  }
+});
+
+
+test("a rejected send pauses delivery and preserves the access code without another attempt", async t => {
+  const f = fixture(t); let sends = 0;
+  const invoke = async name => {
+    if (name === GMAIL_PROFILE_TOOL) return { structuredContent: { email: "owner@gmail.com" } };
+    sends++;
+    return { isError: true, content: [{ type: "text", text: "This tool call was blocked by OpenAI's safety checks." }] };
+  };
+  const result = await deliverConnectedGmailReport(f.home, invoke);
+  assert.equal(result.delivered, false); assert.equal(result.needsAttention, true);
+  assert.equal(f.store.read(f.id).delivery.state, "blocked");
+  assert.equal(f.store.read(f.id).delivery.accessCode, "tool_safety_rejected");
+  await deliverConnectedGmailReport(f.home, invoke); assert.equal(sends, 1);
+});
+
+test("a conflicting error and mail receipt remains uncertain instead of eligible for resending", async t => {
+  const f = fixture(t);
+  await deliverConnectedGmailReport(f.home, async name => name === GMAIL_PROFILE_TOOL
+    ? { structuredContent: { email: "owner@gmail.com" } }
+    : { isError: true, structuredContent: { id: "possible-receipt", label_ids: ["SENT"] },
+      content: [{ type: "text", text: "This tool call was blocked by OpenAI's safety checks." }] });
+  assert.equal(f.store.read(f.id).delivery.state, "uncertain");
+});

@@ -4,6 +4,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import * as z from "zod/v4";
 import { namespacedToolName, type CodexTool } from "../../types";
 import { VERSION } from "../../version";
+import { externalToolAccessCode } from "../../lib/tool-access";
+const { redact } = require("../../../launcher/electron/error-report-store.cjs");
 import { AGENT_REPORT_TOOL, AGENT_SEND_REPORTS_TOOL, agentReportTool, agentIssueSchema, agentSendReportsTool, agentSendReportsSchema } from "../../agent-reporting";
 import type { ChatGptTurnEnvironment } from "./environment";
 import { CODEX_COMPACTION_CONTROL_WIRE_NAME } from "./native-compaction-control";
@@ -855,7 +857,11 @@ export async function runChatGptMcpServer(options: {
       turnReference(contract, input),
       extra,
       async claimed => {
-        const { query, offset, limit, include_schema } = input;
+        const { query: rawQuery, offset, limit, include_schema } = input;
+        // Keep the published input schema stable for cached connectors. The query selector
+        // only limits catalog inspection; it cannot authorize a rejected operation.
+        const advertisedQuery = /^@advertised(?:\s+([\s\S]*))?$/i.exec(rawQuery?.trim() ?? "");
+        const query = advertisedQuery ? advertisedQuery[1]?.trim() : rawQuery;
         const bound = claimed.environment;
         const needle = query?.trim().toLowerCase();
         const reporting = contract === "native" && claimed.reportingEnabled === true;
@@ -881,7 +887,8 @@ export async function runChatGptMcpServer(options: {
         let nestedPage: Array<Record<string, unknown>> = [];
         const gateway = execGateway(bound);
         const exactNativeLookup = nativeCatalogHasExactName(query, available.flatMap(tool => [wireName(tool), tool.name]));
-        const inspectDeferredCatalog = Boolean(gateway && !reportingOnly && !exactNativeLookup);
+        const inspectDeferredCatalog = Boolean(gateway && !advertisedQuery && !reportingOnly && !exactNativeLookup);
+        let discoveryFailure: { code: string; message: string; retryable: false } | undefined;
         if (gateway && inspectDeferredCatalog) {
           const excludedGatewayNames = [...bound.tools.map(wireName), ...reportingNames];
           const nestedOffset = Math.max(0, offset - directMatches.length);
@@ -897,22 +904,32 @@ export async function runChatGptMcpServer(options: {
               excludedNames: excludedGatewayNames,
             }),
           }, extra.signal);
-          const catalog = gatewayToolCatalogPage(response, new Set(excludedGatewayNames));
-          nestedTotal = catalog.total;
-          nestedPage = catalog.tools.map(tool => ({
-            wire_name: tool.name,
-            name: tool.name,
-            namespace: null,
-            description: gatewayToolDescription(tool),
-            kind: "gateway",
-            ...(include_schema ? {
-              parameters: {
-                type: "object",
-                additionalProperties: true,
-                description: "Pass the exact structured arguments declared in this tool's description. For a declared freeform tool, use codex_tool_call.input instead.",
-              },
-            } : {}),
-          }));
+          // A timeout retires the binding; preserve that terminal result instead of presenting
+          // a partial catalog as usable by the abandoned turn.
+          if (response.isError && response.structuredContent?.code === "codex_tool_timeout") return response;
+          try {
+            const catalog = gatewayToolCatalogPage(response, new Set(excludedGatewayNames));
+            nestedTotal = catalog.total;
+            nestedPage = catalog.tools.map(tool => ({
+              wire_name: tool.name,
+              name: tool.name,
+              namespace: null,
+              description: gatewayToolDescription(tool),
+              kind: "gateway",
+              ...(include_schema ? {
+                parameters: {
+                  type: "object",
+                  additionalProperties: true,
+                  description: "Pass the exact structured arguments declared in this tool's description. For a declared freeform tool, use codex_tool_call.input instead.",
+                },
+              } : {}),
+            }));
+          } catch (error) {
+            // Keep the authoritative catalog visible, but retain the failed discovery as an
+            // error. No alternate gateway, permission change or automatic retry is attempted.
+            const message = redact(error instanceof Error ? error.message : "Deferred tool discovery failed").slice(0, 4096);
+            discoveryFailure = { code: externalToolAccessCode(message) ?? "deferred_tool_inventory_failed", message, retryable: false };
+          }
         }
         const page = [...directPage, ...nestedPage];
         const total = directMatches.length + nestedTotal;
@@ -927,11 +944,19 @@ export async function runChatGptMcpServer(options: {
           },
           contract,
           access: nativeAccessSnapshot(bound, VERSION, contract),
-          catalog_scope: inspectDeferredCatalog ? "native_and_deferred_tools" : "advertised_native_tools",
+          catalog_scope: inspectDeferredCatalog && !discoveryFailure ? "native_and_deferred_tools" : "advertised_native_tools",
+          // Preserve successful legacy responses. New metadata belongs to the explicit
+          // selector and incomplete results, whose scope otherwise cannot be understood.
+          ...(advertisedQuery || discoveryFailure ? {
+            catalog_complete: !discoveryFailure,
+            deferred_discovery: discoveryFailure
+              ? { status: "failed", ...discoveryFailure }
+              : { status: "not_requested" },
+          } : {}),
           tools: page,
           total,
           next_offset: offset + page.length < total ? offset + page.length : null,
-        });
+        }, Boolean(discoveryFailure));
       },
     ),
   );
