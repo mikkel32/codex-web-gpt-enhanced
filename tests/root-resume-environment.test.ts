@@ -65,6 +65,19 @@ test("resumed root authority never comes from the historical XML", () => {
   expect(f.resolve().cwd).toBe(f.cwd);
 });
 
+test("a native forwarded task message recovers only the receiving task's verified local authority", () => {
+  const f = fixture();
+  const request = f.request();
+  const input = (request._rawBody as { input: unknown[] }).input;
+  input[3] = { type: "function_call_output", id: "fco_forwarded", namespace: "codex_app", name: "send_message_to_thread",
+    output: "<codex_delegation><source_thread_id>another_task</source_thread_id><input>Check status</input></codex_delegation>",
+    internal_chat_message_metadata_passthrough: { turn_id: turnId } };
+  expect(new ChatGptThreadEnvironmentStore(undefined, Date.now, f.home).resolve(request))
+    .toMatchObject({ cwd: f.cwd, roots: [f.cwd], sandboxPolicy: { type: "dangerFullAccess" }, tools: [{ name: "current_tool" }] });
+  f.turn.payload.turn_id = "33333333-3333-4333-8333-333333333333"; f.save();
+  expect(() => new ChatGptThreadEnvironmentStore(undefined, Date.now, f.home).resolve(request)).toThrow("requires one current canonical rollout");
+});
+
 test("current tool-result rounds retain the earlier historical boundary", () => {
   const f = fixture();
   const request = f.request();

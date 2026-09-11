@@ -1,4 +1,4 @@
-export type ExternalToolAccessCode = "conversation_mcp_scope_restricted" | "tool_safety_status_unknown";
+export type ExternalToolAccessCode = "conversation_mcp_scope_restricted" | "tool_safety_status_unknown" | "tool_safety_rejected";
 
 /** Classify observed service errors only; native sandbox permissions cannot predict these decisions. */
 export function externalToolAccessCode(message: string): ExternalToolAccessCode | undefined {
@@ -10,6 +10,7 @@ export function externalToolAccessCode(message: string): ExternalToolAccessCode 
     && (text.includes("couldn't determine the safety status") || text.includes("could not determine the safety status"))) {
     return "tool_safety_status_unknown";
   }
+  if (text.includes("this tool call was blocked by openai's safety checks")) return "tool_safety_rejected";
   return undefined;
 }
 

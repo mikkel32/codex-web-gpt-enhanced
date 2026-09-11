@@ -17,6 +17,7 @@ import { readCompactionCheckpoint } from "./compaction";
 import { previousResponseReplayPrefixLength } from "./state";
 import { decodeReasoningEnvelope } from "./reasoning-envelope";
 import { recordNativeMessageTurn } from "./message-provenance";
+import { nativeTaskMessage } from "./native-task-message";
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -574,6 +575,13 @@ export function parseRequest(body: unknown): CodexParsedRequest {
 
       if (effectiveType === "function_call_output") {
         pendingReasoning.length = 0;
+        const forwarded = nativeTaskMessage(item);
+        if (forwarded) {
+          messages.push({ role: "toolResult", toolCallId: forwarded.id,
+            toolName: "send_message_to_thread", toolNamespace: "codex_app",
+            content: outputToToolResultContent(forwarded.text), isError: false, timestamp: now });
+          continue;
+        }
         const output = item as { call_id: string; output?: string | unknown[] };
         const toolInfo = findToolById(messages, output.call_id);
         messages.push({

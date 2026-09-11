@@ -274,6 +274,7 @@ export function httpStatusFromTerminalError(error: {
     error.type === "permission_error" ||
     error.code === "conversation_mcp_scope_restricted" ||
     error.code === "tool_safety_status_unknown" ||
+    error.code === "tool_safety_rejected" ||
     error.code === "permission_denied" ||
     error.code === "subscription_required"
   ) return 403;

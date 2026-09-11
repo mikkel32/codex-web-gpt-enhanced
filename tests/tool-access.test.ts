@@ -15,7 +15,9 @@ test("exact advertised discovery does not need a second tool call, while broader
 });
 
 test("conversation scope and indeterminate safety keep their exact cause and are terminal permission responses", () => {
-  for (const [message, code] of [[scope, "conversation_mcp_scope_restricted"], [safety, "tool_safety_status_unknown"]]) {
+  for (const [message, code] of [[scope, "conversation_mcp_scope_restricted"], [safety, "tool_safety_status_unknown"],
+    ["This tool call was blocked by OpenAI's safety checks. Please double check what you are sending.", "tool_safety_rejected"],
+    ["This tool call was blocked by OpenAI’s safety checks.", "tool_safety_rejected"]]) {
     const result = adapterFailureFromMessage(message!);
     expect(result).toEqual({ httpStatus: 403, error: { message, type: "permission_error", code } });
     expect(httpStatusFromTerminalError({ code })).toBe(403);

@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isReadableCompactionSummaryText, OPAQUE_COMPACTION_NOTE } from "../../responses/compaction";
 import type { CodexContentPart, CodexParsedRequest, CodexTool } from "../../types";
+import { nativeTaskMessage } from "../../responses/native-task-message";
 
 export type ChatGptSandboxPolicy =
   | { type: "dangerFullAccess" }
@@ -143,6 +144,7 @@ export function extractChatGptResumedRootTurn(parsed: CodexParsedRequest): ChatG
   for (let index = 0; index < input.length; index += 1) {
     const item = record(input[index]);
     if (!item) continue;
+    if (nativeTaskMessage(item)?.turnId === turnId) lastUser = index;
     if (item.type !== "message") continue;
     if (/<\/?environment_context\b/i.test(rawMessageText(item))) envelopes.push(index);
     if (item.role === "user" && !contextualUserMessage(item)) lastUser = index;
@@ -220,6 +222,8 @@ function latestChatGptTurnUserRevision(parsed: CodexParsedRequest, expectedTurnI
   const input = Array.isArray(body?.input) ? body.input : [];
   for (let index = input.length - 1; index >= 0; index -= 1) {
     const item = record(input[index]);
+    const forwarded = nativeTaskMessage(item);
+    if (forwarded) return { content: [{ type: "input_text", text: forwarded.text }], turnId: forwarded.turnId };
     if (item?.type !== "message" || item.role !== "user") continue;
     const messageTurnId = itemTurnId(item);
     // Codex appends an abort report as a user-shaped item carrying the interrupted turn's id. Only
@@ -457,6 +461,9 @@ function rawEnvironmentText(parsed: CodexParsedRequest): string | undefined {
   let activeUserIndex = -1;
   for (let index = input.length - 1; index >= 0; index -= 1) {
     const item = record(input[index]);
+    // A forwarded follow-up has no new user/environment pair. Resolve the
+    // receiving task's current native rollout instead of adopting old XML.
+    if (nativeTaskMessage(item)) return undefined;
     if (item?.role === "user" && !contextualUserMessage(item)) {
       activeUserIndex = index;
       break;
