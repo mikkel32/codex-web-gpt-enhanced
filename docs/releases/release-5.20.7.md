@@ -33,7 +33,8 @@ The automated Gmail tests exercise real broker discovery and dispatch with fixtu
 service responses. They do not send a real diagnostic or prove that an external
 service will approve a future request.
 
-Update the app and refresh the connector catalog to expose the new optional
-`catalog` parameter. Existing cached catalogs retain the inventory/call sender
-path. Queued is not sent; a message receipt establishes mail-server acceptance,
+Update the app to use `query: "@advertised"` for local catalog inspection, or
+append a search term such as `query: "@advertised maria"`. The published tool
+interface is unchanged, so cached connectors need no schema refresh. Existing
+catalogs retain the inventory/call sender path. Queued is not sent; a message receipt establishes mail-server acceptance,
 not independently verified inbox delivery.

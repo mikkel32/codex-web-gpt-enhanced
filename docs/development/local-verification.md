@@ -77,9 +77,12 @@ rejected operation through a different conversation, account, machine or gateway
 
 ## Report discovery and platform denials in 5.20.7
 
-For broad inventory inspection, `catalog: "advertised"` reads the current task's
-supplied catalog without invoking a deferred discovery gateway. `catalog: "all"`
-retains the existing full search. Exact advertised-name lookups remain local.
+For broad inventory inspection, `query: "@advertised"` reads the current task's
+supplied catalog without invoking a deferred discovery gateway. Append search text,
+for example `query: "@advertised maria"`, to filter that catalog. Ordinary queries
+retain the existing full search. Exact advertised-name lookups remain local.
+The public input schema and its pinned compatibility fingerprint are unchanged;
+existing connector catalogs support this selector without a refresh.
 An unsuccessful deferred search returns an MCP error containing the known tools,
 `catalog_complete: false`, and the specific `deferred_discovery` failure. Its
 `total` and pagination describe only the advertised catalog; they cannot establish

@@ -849,9 +849,6 @@ export async function runChatGptMcpServer(options: {
         offset: z.number().int().min(0).max(100_000).default(0),
         limit: z.number().int().min(1).max(50).default(20),
         include_schema: z.boolean().default(true),
-        catalog: z.enum(["all", "advertised"]).default("all").describe(
-          "Choose advertised to inspect the already supplied tool catalog without executing discovery. All also searches deferred tools. Neither selection grants permission or authorizes retrying a rejected operation.",
-        ),
       },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
@@ -860,7 +857,11 @@ export async function runChatGptMcpServer(options: {
       turnReference(contract, input),
       extra,
       async claimed => {
-        const { query, offset, limit, include_schema, catalog: requestedCatalog } = input;
+        const { query: rawQuery, offset, limit, include_schema } = input;
+        // Keep the published input schema stable for cached connectors. The query selector
+        // only limits catalog inspection; it cannot authorize a rejected operation.
+        const advertisedQuery = /^@advertised(?:\s+([\s\S]*))?$/i.exec(rawQuery?.trim() ?? "");
+        const query = advertisedQuery ? advertisedQuery[1]?.trim() : rawQuery;
         const bound = claimed.environment;
         const needle = query?.trim().toLowerCase();
         const reporting = contract === "native" && claimed.reportingEnabled === true;
@@ -886,7 +887,7 @@ export async function runChatGptMcpServer(options: {
         let nestedPage: Array<Record<string, unknown>> = [];
         const gateway = execGateway(bound);
         const exactNativeLookup = nativeCatalogHasExactName(query, available.flatMap(tool => [wireName(tool), tool.name]));
-        const inspectDeferredCatalog = Boolean(gateway && requestedCatalog === "all" && !reportingOnly && !exactNativeLookup);
+        const inspectDeferredCatalog = Boolean(gateway && !advertisedQuery && !reportingOnly && !exactNativeLookup);
         let discoveryFailure: { code: string; message: string; retryable: false } | undefined;
         if (gateway && inspectDeferredCatalog) {
           const excludedGatewayNames = [...bound.tools.map(wireName), ...reportingNames];
@@ -944,10 +945,14 @@ export async function runChatGptMcpServer(options: {
           contract,
           access: nativeAccessSnapshot(bound, VERSION, contract),
           catalog_scope: inspectDeferredCatalog && !discoveryFailure ? "native_and_deferred_tools" : "advertised_native_tools",
-          catalog_complete: !discoveryFailure,
-          deferred_discovery: discoveryFailure
-            ? { status: "failed", ...discoveryFailure }
-            : { status: inspectDeferredCatalog ? "complete" : "not_requested" },
+          // Preserve successful legacy responses. New metadata belongs to the explicit
+          // selector and incomplete results, whose scope otherwise cannot be understood.
+          ...(advertisedQuery || discoveryFailure ? {
+            catalog_complete: !discoveryFailure,
+            deferred_discovery: discoveryFailure
+              ? { status: "failed", ...discoveryFailure }
+              : { status: "not_requested" },
+          } : {}),
           tools: page,
           total,
           next_offset: offset + page.length < total ? offset + page.length : null,

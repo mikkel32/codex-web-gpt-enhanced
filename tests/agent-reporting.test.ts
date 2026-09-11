@@ -211,14 +211,14 @@ test("a rejected deferred inventory retains both report tools and explicit adver
     const inventory = (fields: Record<string, unknown>) => client.callTool({ name: "codex_tool_inventory",
       arguments: { turn_token: token, query: "maria", ...fields } }, undefined, { timeout: 3000 });
     // No broker worker is serving the gateway: these calls can only settle locally.
-    const first = await inventory({ catalog: "advertised", limit: 1, include_schema: false });
+    const first = await inventory({ query: "@advertised maria", limit: 1, include_schema: false });
     expect(first.isError).not.toBe(true);
     expect(first.structuredContent).toMatchObject({ total: 2, next_offset: 1, catalog_complete: true,
       catalog_scope: "advertised_native_tools", tools: [{ wire_name: AGENT_REPORT_TOOL }] });
     expect((first.structuredContent as any).tools[0]).not.toHaveProperty("parameters");
-    expect((await inventory({ catalog: "advertised", offset: 1 })).structuredContent)
+    expect((await inventory({ query: "@advertised maria", offset: 1 })).structuredContent)
       .toMatchObject({ total: 2, next_offset: null, tools: [{ wire_name: AGENT_SEND_REPORTS_TOOL }] });
-    const pending = inventory({ catalog: "all" });
+    const pending = inventory({});
     const [call] = await Promise.race([broker.nextToolBatch(token), pending.then(value => {
       throw new Error(`Expected one deferred lookup: ${JSON.stringify(value)}`);
     })]);
@@ -234,6 +234,6 @@ test("a rejected deferred inventory retains both report tools and explicit adver
     expect(JSON.stringify(partial.structuredContent)).toContain(denied);
     expect(store.records()).toHaveLength(0);
     broker.revoke(token);
-    expect((await inventory({ catalog: "advertised" })).isError).toBe(true);
+    expect((await inventory({ query: "@advertised maria" })).isError).toBe(true);
   } finally { await client.close(); broker.revoke(token); await broker.close(); }
 }), 15000);
