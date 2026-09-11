@@ -25,13 +25,16 @@ in effect; this fixes discovery and dispatch, not OpenAI's authorization decisio
 
 ## Packages and verification
 
-This preview release contains locally built **macOS Apple Silicon** app and runtime
+This normal release contains locally built **macOS Apple Silicon** app and runtime
 packages. Intel Mac, Windows and Linux binaries are not included; their previous
-packages remain available in the latest full stable release, 5.20.5. The preview
-label keeps platforms without a new binary on that stable release. GitHub CI and
-Release jobs were not run.
+packages remain available in 5.20.5. This is published as a normal release at the
+maintainer's request, with its limited platform set stated explicitly. GitHub CI
+and Release jobs were not run.
 Local verification includes types, core and launcher tests, Electron fixtures,
 runtime relocation, native package smoke and strict macOS signature verification.
+The packaged 5.20.6 runtime was also tested through inventory discovery and
+`codex_tool_call` against connected Gmail: its single test message received a
+message ID and was independently verified in Sent and Inbox.
 
 Update Maria to 5.20.6. Agents can discover `maria_send_reports` through
 `codex_tool_inventory` and call the returned name with `arguments: {}`. Refreshing
