@@ -765,7 +765,8 @@ export class ChatGptTurnSessions {
       if (session.traceId !== traceId) continue;
       const outcome = session.settledOutcome();
       if (outcome?.type === "error" && outcome.error instanceof ChatGptWebAdapterError
-        && ["astra_pro_unavailable", "previous_turn_needs_attention"].includes(outcome.error.code)
+        && ["astra_pro_unavailable", "previous_turn_needs_attention", "chatgpt_response_observation_failed",
+          "chatgpt_generation_stopped", "browser_stream_inconsistent"].includes(outcome.error.code)
         && !outcome.error.retryable) return outcome.error;
     }
     return undefined;

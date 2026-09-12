@@ -3627,7 +3627,7 @@ test("Full mode fails closed when ChatGPT exposes completion without a post-tool
   // Citation/markup hydration is not a new final answer and cannot release the boundary.
   expect(tracker.update({ ...partialLookingFinal, currentHtml: '<p data-hydrated="true">partial answer</p>' }, 1_999)).toBeFalse();
   expect(() => tracker.update(partialLookingFinal, 2_000))
-    .toThrow("completed without producing a final answer after its last Codex tool call");
+    .toThrow("finished with an unchanged answer after its last Codex tool call; the visible answer does not summarize those later tool results");
 });
 
 test("a future progress timestamp is not treated as liveness", () => {

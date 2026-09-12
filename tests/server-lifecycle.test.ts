@@ -1295,3 +1295,37 @@ test("authenticated shutdown requires a verified idle drain", async () => {
     await server.stop(true);
   }
 });
+
+
+test("terminal response observation errors stop identical reconnects without reopening an SSE stream", async () => {
+  const config = defaultConfig("browser-only"); config.proAvailable = true;
+  const body = { model: "chatgpt-web/astra-pro", stream: true,
+    client_metadata: { "x-codex-turn-metadata": JSON.stringify({ thread_id: "receipt_failure_thread", turn_id: "receipt_failure_turn" }) },
+    input: [{ type: "message", role: "user", content: "Read the current task", internal_chat_message_metadata_passthrough: { turn_id: "receipt_failure_turn" } }],
+  };
+  const parsed = parseRequest(body); routeChatGptWebRequest(parsed, config);
+  const traceId = chatGptWebTraceId(providerConfig(config), parsed);
+  const failure = new ChatGptWebAdapterError("The visible answer was not updated after its last native tool call", {
+    status: 502, errorType: "server_error", code: "chatgpt_response_observation_failed", retryable: false,
+  });
+  chatGptTurnSessions.clear();
+  const browser = Promise.reject(failure);
+  const session = chatGptTurnSessions.getOrCreate("observation-retry-fixture", () => ({
+    mode: "read-only", browser, physicalSettlement: browser.then(() => {}, () => {}),
+    trace: new ChatGptTraceFeed(), text: new ChatGptTextFeed(), cancel() {},
+  }), traceId);
+  try {
+    await session.browserOutcome;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const response = await responseRequest(new Request("http://127.0.0.1/v1/responses", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+      }), config, () => { throw new Error("must not reopen the settled adapter"); });
+      expect(response.status).toBe(400);
+      expect(response.headers.get("content-type")).toBe("application/json");
+      expect(await response.json()).toMatchObject({ error: { code: failure.code, message: failure.message, retryable: false } });
+    }
+    const changed = parseRequest({ ...body, input: [{ ...body.input[0], content: "Continue after reviewing this failed turn" }] });
+    routeChatGptWebRequest(changed, config);
+    expect(chatGptTurnSessions.requestStateError(chatGptWebTraceId(providerConfig(config), changed))).toBeUndefined();
+  } finally { chatGptTurnSessions.clear(); }
+});

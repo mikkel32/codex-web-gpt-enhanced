@@ -36,6 +36,29 @@ test("receipts cannot cross tasks or authorize unseen pages", () => {
   expect(() => first.read(core[0]!.name, 0, "forged")).toThrow("receipt");
 });
 
+test("a rejected offset does not consume the accompanying valid receipt", () => {
+  const store = new NativeContextStore(core, { requireReceipts: true });
+  const first = store.read(core[0]!.name, 0);
+  const before = store.pendingRequired();
+  expect(() => store.read(first.name, first.total_chars, first.receipt)).toThrow("offset");
+  expect(store.pendingRequired()).toEqual(before);
+  expect(() => store.read(first.name, first.next_offset!)).toThrow("receipt");
+  expect(store.read(first.name, first.next_offset!, first.receipt).offset).toBe(first.next_offset!);
+});
+
+test("an over-budget evidence read cannot acknowledge the last required page", () => {
+  const required = { name: core[0]!.name, text: "{}" };
+  const evidence: NativeContextFile = { name: "codex-evidence-0123456789abcdef.txt",
+    text: "evidence that exceeds the budget", kind: "evidence", required: false };
+  const store = new NativeContextStore([required, evidence], { requireReceipts: true, optionalTokenBudget: 0 });
+  const page = store.read(required.name, 0);
+  const before = store.pendingRequired();
+  expect(() => store.read(evidence.name, 0, page.receipt)).toThrow("budget");
+  expect(store.pendingRequired()).toEqual(before);
+  expect(() => store.search("evidence")).toThrow("required context");
+  expect(store.read(required.name, page.total_chars, page.receipt).acknowledged).toBe(true);
+});
+
 test("optional evidence is searchable without becoming a mandatory full-history read", () => {
   const evidence: NativeContextFile = { name: "codex-evidence-0123456789abcdef.txt", text: "noise ".repeat(10000) + "rare-target-value", kind: "evidence", required: false };
   const store = new NativeContextStore([...core, evidence], { requireReceipts: true });
@@ -106,4 +129,45 @@ test("receipt-bearing Unicode pages remain under the encoded byte cap", () => {
   expect(text).toBe(file.text);
   store.read(file.name, page.total_chars, page.receipt);
   expect(store.missingRequired()).toEqual([]);
+});
+
+
+test("a mistyped receipt offers bounded replay of an already served page without advancing acknowledgement", () => {
+  const store = new NativeContextStore(core, { requireReceipts: true });
+  const first = store.read(core[0]!.name, 0);
+  const second = store.read(first.name, first.next_offset!, first.receipt);
+  const pending = store.pendingRequired();
+  let failure: any;
+  try { store.read(second.name, second.next_offset!, "x".repeat(43)); } catch (error) { failure = error; }
+  expect(failure.result).toMatchObject({ code: "context_receipt_invalid", retryable: false,
+    recovery: { action: "reread_context_page", read: { name: second.name, offset: second.offset } } });
+  expect(failure.result.recovery.read).not.toHaveProperty("receipt");
+  expect(store.pendingRequired()).toEqual(pending);
+  expect(() => store.search("task")).toThrow("required context");
+  const replay = store.read(failure.result.recovery.read.name, failure.result.recovery.read.offset);
+  expect(replay).toEqual(second);
+  expect(replay.next_read).toEqual({ name: second.name, offset: second.next_offset!, receipt: second.receipt! });
+  const third = store.read(replay.next_read!.name, replay.next_read!.offset, replay.next_read!.receipt);
+  expect(first.text + second.text + third.text).toBe(core[0]!.text);
+  store.read(third.name, third.total_chars, third.receipt);
+  acknowledge(store, core[1]!);
+  expect(store.missingRequired()).toEqual([]);
+});
+
+test("invalid receipts never unlock another task and repeated corrections have a finite budget", () => {
+  const owner = new NativeContextStore(core, { requireReceipts: true });
+  const other = new NativeContextStore(core, { requireReceipts: true });
+  const first = owner.read(core[0]!.name, 0);
+  let failure: any;
+  try { other.read(first.name, 0, first.receipt); } catch (error) { failure = error; }
+  expect(failure.result.code).toBe("context_receipt_invalid");
+  expect(failure.result.recovery).toBeUndefined();
+  expect(other.pendingRequired().every(page => page.offset === 0 && page.served_to === 0)).toBe(true);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try { owner.read(first.name, first.next_offset!, "wrong".padEnd(43, "x")); } catch (error) { failure = error; }
+    expect(Boolean(failure.result.recovery)).toBe(attempt < 2);
+    expect(owner.pendingRequired()[0]!.offset).toBe(0);
+    expect(owner.read(first.name, 0)).toEqual(first);
+  }
+  expect(owner.read(first.name, first.next_offset!, first.receipt).offset).toBe(first.next_offset!);
 });

@@ -1331,7 +1331,7 @@ export class ChatGptCompletionTracker {
       }
       this.missingPostToolAnswerSince ??= now;
       if (now - this.missingPostToolAnswerSince >= this.missingPostToolAnswerMs) {
-        throw chatGptResponseObservationError("ChatGPT completed without producing a final answer after its last Codex tool call");
+        throw chatGptResponseObservationError("ChatGPT finished with an unchanged answer after its last Codex tool call; the visible answer does not summarize those later tool results");
       }
       return false;
     }
