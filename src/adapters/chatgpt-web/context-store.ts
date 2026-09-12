@@ -1,10 +1,17 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { estimateTokens } from "../../lib/token-estimate";
-import { nativeContextPage, nativeContextTextResult, NATIVE_CONTEXT_RESULT_BYTE_LIMIT, type NativeContextFile, type NativeContextOptions, type NativeContextPage } from "./native-context";
+import { nativeContextPage, nativeContextTextResult, NATIVE_CONTEXT_RESULT_BYTE_LIMIT, type NativeContextFile, type NativeContextOptions, type NativeContextPage, type NativeContextReadError } from "./native-context";
 
 export const CONTEXT_FILE_NAME = /^(?:codex-context-[1-3]-of-[23]\.json|codex-(?:evidence|attachment)-[a-f0-9]{16}\.txt|codex-input-image-\d{1,3}|codex-image-[a-f0-9]{16})$/;
 export const OPTIONAL_CONTEXT_TOKENS = 32_000;
 const MAX_CONTEXT_BYTES = 50_000_000;
+
+export class NativeContextReceiptError extends Error {
+  constructor(readonly result: NativeContextReadError) {
+    super(result.error);
+    this.name = "NativeContextReceiptError";
+  }
+}
 
 /** Immutable task data, with delivery receipts independent from served/read offsets. */
 export class NativeContextStore {
@@ -13,6 +20,7 @@ export class NativeContextStore {
   private readonly acknowledged = new Map<string, number>();
   private readonly receipts = new Map<string, { name: string; start: number; end: number }>();
   private readonly charged = new Set<string>();
+  private readonly receiptCorrections = new Map<string, number>();
   private readonly secret = randomBytes(24);
   private optionalTokens = 0;
 
@@ -52,27 +60,51 @@ export class NativeContextStore {
     const receipt = createHmac("sha256", this.secret).update(JSON.stringify([name, start, end])).digest("base64url");
     return receipt;
   }
-  private accept(receipt: string): void {
+  private invalidReceipt(): NativeContextReceiptError {
+    // Recover only data served by this store. No guessed, foreign or stale receipt is
+    // accepted, and issuing the replay instruction cannot acknowledge an unread page.
+    const pending = this.pendingRequired().find(page => page.served_to > page.offset);
+    const result: NativeContextReadError = {
+      code: "context_receipt_invalid", error: "Context receipt is invalid for this task", retryable: false,
+    };
+    if (pending) {
+      const key = JSON.stringify([pending.name, pending.offset]);
+      const attempts = this.receiptCorrections.get(key) ?? 0;
+      if (attempts < 2) {
+        this.receiptCorrections.set(key, attempts + 1);
+        result.recovery = {
+          action: "reread_context_page", read: { name: pending.name, offset: pending.offset },
+          attempts_remaining: 1 - attempts,
+          message: "No context acknowledgement advanced. Use this read with the same current turn_token and omit receipt. It replays an already served page. Copy that result's next_read exactly; do not resend the rejected receipt or change access settings.",
+        };
+      }
+    }
+    return new NativeContextReceiptError(result);
+  }
+
+  private validateReceipt(receipt: string): { name: string; end: number } {
     const entry = this.receipts.get(receipt);
-    if (!entry) throw new Error("Context receipt is invalid for this task");
+    if (!entry) throw this.invalidReceipt();
     const file = this.files.get(entry.name)!;
     const prior = this.acknowledged.get(entry.name) ?? 0;
     if (file.required !== false && entry.start > prior) throw new Error("A prior required context page has not been acknowledged");
-    this.acknowledged.set(entry.name, Math.max(prior, entry.end));
+    return { name: entry.name, end: Math.max(prior, entry.end) };
   }
 
   read(name: string, offset: number, receipt?: string): NativeContextPage {
     const file = this.files.get(name);
     if (!file || !Number.isSafeInteger(offset) || offset < 0 || offset > this.size(file)) throw new Error("Requested context file or offset is unavailable in this turn");
-    if (receipt !== undefined) this.accept(receipt);
+    const acknowledgement = receipt !== undefined ? this.validateReceipt(receipt) : undefined;
     const prior = this.served.get(name) ?? 0;
     if (file.required !== false && offset > prior) throw new Error("Requested sequential context offset is unavailable in this turn");
-    if (this.options.requireReceipts && file.required !== false && offset > (this.acknowledged.get(name) ?? 0)) {
+    const acknowledgedTo = acknowledgement?.name === name ? acknowledgement.end : (this.acknowledged.get(name) ?? 0);
+    if (this.options.requireReceipts && file.required !== false && offset > acknowledgedTo) {
       throw new Error("Pass the previous page receipt before advancing the required context offset");
     }
     const page: NativeContextPage = file.kind === "image"
       ? { name, offset, text: "", next_offset: null, total_chars: 1, kind: "image",
-        ...(offset === 0 ? { imageData: file.imageData, imageDetail: file.imageDetail, mimeType: file.mimeType, receipt: this.issue(name, 0, 1) } : { acknowledged: true }) }
+        ...(offset === 0 ? { imageData: file.imageData, imageDetail: file.imageDetail, mimeType: file.mimeType,
+          receipt: this.issue(name, 0, 1), next_read: { name, offset: 1, receipt: this.issue(name, 0, 1) } } : { acknowledged: true }) }
       : nativeContextPage(file, offset, this.options.requireReceipts ? end => this.issue(name, offset, end) : undefined);
     const end = file.kind === "image" ? 1 : offset + page.text.length;
     const chargeKey = JSON.stringify([name, offset, end]);
@@ -84,6 +116,9 @@ export class NativeContextStore {
       }
       this.optionalTokens += tokens; this.charged.add(chargeKey);
     }
+    // Commit delivery state only after the entire request passes validation. A rejected
+    // offset or evidence-budget check must leave the required-context gate unchanged.
+    if (acknowledgement) this.acknowledged.set(acknowledgement.name, acknowledgement.end);
     this.served.set(name, Math.max(prior, end));
     if (page.receipt) this.receipts.set(page.receipt, { name, start: offset, end });
     if (offset === this.size(file)) page.acknowledged = !this.options.requireReceipts || (this.acknowledged.get(name) ?? 0) === this.size(file);

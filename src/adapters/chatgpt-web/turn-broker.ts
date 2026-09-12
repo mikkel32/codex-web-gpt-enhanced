@@ -4,8 +4,8 @@ import { createConnection, createServer, type Server, type Socket } from "node:n
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { isWindowsPipeEndpoint } from "../../config";
 import { AGENT_REPORT_TOOL, agentReportingPolicy, captureAgentIssue } from "../../agent-reporting";
-import { nativeContextResult, type NativeContextFile, type NativeContextOptions } from "./native-context";
-import { NativeContextStore } from "./context-store";
+import { nativeContextResult, type NativeContextFile, type NativeContextPage, type NativeContextOptions } from "./native-context";
+import { NativeContextStore, NativeContextReceiptError } from "./context-store";
 import {
   CompactionTransactionStore,
   type CompactionTransactionHandle,
@@ -1202,7 +1202,14 @@ export class TurnBroker implements TurnBrokerOwner {
         this.recordContextProgress(channel);
         return result;
       }
-      const page = channel.context.read(request.contextName ?? "", request.contextOffset!, request.contextReceipt);
+      let page: NativeContextPage;
+      try {
+        page = channel.context.read(request.contextName ?? "", request.contextOffset!, request.contextReceipt);
+      } catch (error) {
+        if (!(error instanceof NativeContextReceiptError)) throw error;
+        console.info(`[chatgpt-web] broker trace=${channel.traceId} context-receipt-invalid recoverable=${Boolean(error.result.recovery)}`);
+        return error.result;
+      }
       this.recordContextProgress(channel);
       const resultBytes = Buffer.byteLength(JSON.stringify(nativeContextResult(page)), "utf8");
       console.info(`[chatgpt-web] broker trace=${channel.traceId} context-read file=${page.name} offset=${page.offset} chars=${page.text.length} complete=${page.next_offset === null} acknowledged=${page.acknowledged === true} resultBytes=${resultBytes}`);

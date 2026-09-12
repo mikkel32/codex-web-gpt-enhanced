@@ -4,6 +4,8 @@
 
 Source release notes, including historical prereleases. Use [GitHub Releases](https://github.com/mikkel32/codex-web-gpt-enhanced/releases) to check which packages were actually published.
 
+- [Maria WebGPT 5.20.12](release-5.20.12.md)
+- [Maria WebGPT 5.20.11](release-5.20.11.md)
 - [Maria WebGPT 5.20.10](release-5.20.10.md)
 - [Maria WebGPT 5.20.9](release-5.20.9.md)
 - [Maria WebGPT 5.20.8](release-5.20.8.md)

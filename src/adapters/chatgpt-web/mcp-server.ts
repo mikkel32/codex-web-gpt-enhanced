@@ -9,7 +9,7 @@ const { redact } = require("../../../launcher/electron/error-report-store.cjs");
 import { AGENT_REPORT_TOOL, AGENT_SEND_REPORTS_TOOL, agentReportTool, agentIssueSchema, agentSendReportsTool, agentSendReportsSchema } from "../../agent-reporting";
 import type { ChatGptTurnEnvironment } from "./environment";
 import { CODEX_COMPACTION_CONTROL_WIRE_NAME } from "./native-compaction-control";
-import { nativeContextResult, nativeContextTextResult, type NativeContextPage } from "./native-context";
+import { nativeContextResult, nativeContextTextResult, type NativeContextReadResult } from "./native-context";
 import { CONTEXT_FILE_NAME } from "./context-store";
 import { projectInspectionCommand, projectInspectionSchema } from "./project-inspection";
 import { nativeAccessSnapshot, nativeCatalogHasExactName } from "./access-snapshot";
@@ -980,7 +980,7 @@ export async function runChatGptMcpServer(options: {
       console.error(`[chatgpt-web-mcp] context-read started ${JSON.stringify(detail)}`);
       try {
         const response = await withClaimedTurn("codex_context_read", turnReference(contract, input), extra,
-          async claimed => nativeContextResult(await callTurnBroker<NativeContextPage>(options.brokerSocketPath, {
+          async claimed => nativeContextResult(await callTurnBroker<NativeContextReadResult>(options.brokerSocketPath, {
             method: "read_context", bindingId: claimed.bindingId,
             contextName: input.name, contextOffset: input.offset,
             contextReceipt: input.receipt,

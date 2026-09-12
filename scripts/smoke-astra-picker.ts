@@ -25,7 +25,17 @@ try {
   const driver = Bun.spawn([electron, driverPath, websocket], {
     cwd: root, env: { ...environment, ELECTRON_RUN_AS_NODE: "1" }, stdout: "pipe", stderr: "pipe",
   });
-  const [status, stdout, errors] = await Promise.all([driver.exited, new Response(driver.stdout).text(), new Response(driver.stderr).text()]);
+  // Bound the driver as well as its individual UI waits, including a stalled CDP connection.
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; driver.kill(); }, 180_000);
+  let result: [number, string, string];
+  try {
+    result = await Promise.all([driver.exited, new Response(driver.stdout).text(), new Response(driver.stderr).text()]);
+  } finally {
+    clearTimeout(timer);
+  }
+  const [status, stdout, errors] = result;
+  assert(!timedOut, "Real Electron selector exceeded its 180-second deadline");
   assert.equal(status, 0, `Real Electron selector failed: ${errors}`);
   assert(stdout.includes("ASTRA_ELECTRON_PICKER_OK"), "Picker driver did not finish");
   process.stdout.write(stdout);

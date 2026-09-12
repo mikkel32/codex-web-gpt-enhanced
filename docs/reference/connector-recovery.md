@@ -24,6 +24,27 @@ When migrating from the retired `Codex Native` connector, preserve the existing 
 
 The inventory result now includes the claimed task's `environment.cwd`, `environment.roots`, `environment.writable_roots`, and `environment.sandbox`, as well as the active contract. These are returned only after the existing turn capability is validated. Discovery grants no additional permissions. The public `tools/list` names, schemas, annotations, and ABI hash are unchanged by this addition.
 
+## Desktop control through Maria
+
+Use the native Computer Use tools supplied by the active Codex task through Maria's
+existing `codex_tool_inventory` and `codex_tool_call` gateway. Discover the actual
+tool name and schema with a focused `cua` or `computer` query, then follow the API
+documentation returned by that tool. Its native approval checks remain in force.
+Screenshot results remain images through the gateway; listing a tool alone is not
+proof that a screenshot or desktop action completed.
+
+This path does not require a Chat On Steroids app or a separate desktop tunnel.
+An independently installed `chat_on_steroids_desktop_mac` connector belongs to that
+companion, even if a generated description labels it differently. Its cached tool
+list can remain advertised while its owning app is closed. Removing that integration
+does not require changing Maria's working tunnel, adding unauthenticated aliases,
+or granting the replacement broader permissions.
+
+For reviewed native desktop integration tests, retain the Codex session history.
+An ephemeral test session can prevent the automatic reviewer from creating its
+review fork. Preserve and report any resulting access rejection; do not treat it as
+a successful image test or disable approval checks to make the test pass.
+
 ## “Unknown root /Users”
 
 A connector exposing Windows or virtual roots cannot open an arbitrary Mac path. In particular, a virtual `/codex` root can be a Windows configuration directory, not a substitute for `/Users/...` on a Mac.

@@ -591,9 +591,9 @@ export async function responseRequest(
   }
   const selectionError = traceId ? chatGptTurnSessions.requestStateError(traceId) : undefined;
   if (selectionError) {
-    // Repeating an unchanged selection/review conflict cannot repair it. Preserve its
+    // Repeating an unchanged selection, review or settled observation failure cannot repair it. Preserve its
     // exact cause in a terminal HTTP response, without reopening another SSE stream.
-    return new Response(JSON.stringify({ error: { type: selectionError.errorType, code: selectionError.code, message: selectionError.message } }), {
+    return new Response(JSON.stringify({ error: { type: selectionError.errorType, code: selectionError.code, message: selectionError.message, retryable: false } }), {
       status: 400, headers: { "content-type": "application/json" },
     });
   }

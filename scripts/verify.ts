@@ -27,6 +27,7 @@ try {
   await run(["run", "launcher:typecheck"]);
   await run(["run", "launcher:test"]);
   await run(["run", "launcher:build"]);
+  await run(["run", "smoke:astra-picker"]);
   await run(["run", "smoke:guided-ui"]);
   await run(["run", "smoke:response-state"]);
   await run(["run", "scripts/smoke-error-reporting.ts"]);
