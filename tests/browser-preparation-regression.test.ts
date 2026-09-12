@@ -76,3 +76,34 @@ test("a persisted failed context draft is cleared before the next connector prom
   expect(keys).toEqual(["ControlOrMeta+A","Backspace","Enter"]);
   expect(text).toBe(""); expect(selected).toBe(true);
 });
+
+
+test("short connector mention insertion works when individual native key events are dropped", async () => {
+  let text = "";
+  let selected = false;
+  let keyTyping = 0;
+  const composer = {
+    fill: async (value: string) => { text = value; },
+    focus: async () => {},
+    pressSequentially: async () => { keyTyping += 1; },
+    press: async (key: string) => {
+      expect(key).toBe("Enter"); expect(text).toBe("@codex");
+      selected = true;
+    },
+  };
+  const row = {
+    count: async () => 1,
+    waitFor: async () => {
+      if (text !== "@codex") throw new Error("The connector mention never reached the composer");
+    },
+    getAttribute: async () => "",
+  };
+  const result = await (ChatGptBrowserWorker.prototype as any).selectConnector.call({
+    config: { appName: "Codex Native2 Mac" }, activeComposer: async () => composer,
+    connectorIsSelected: async () => selected,
+    connectorActivationSnapshot: async () => ({ generating: false, composerTexts: [""] }),
+    selectedConnectorControl: () => ({ waitFor: async () => { expect(selected).toBeTrue(); } }),
+  }, { locator: () => ({ filter: () => row }), getByText: () => ({}) },
+  undefined, false, { triggerAttempts: 0 }, undefined, true);
+  expect(result).toBe(composer); expect(selected).toBeTrue(); expect(keyTyping).toBe(0);
+});

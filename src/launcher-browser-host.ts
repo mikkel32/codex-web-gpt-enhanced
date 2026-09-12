@@ -294,13 +294,13 @@ export async function connectLauncherBrowserHost(
       surfaceId,
       abortSignal,
     );
-    if (surfaceId) {
-      // Focus emulation belongs to this helper's exact page, not every concurrent chat.
-      await boundedLauncherObservation((async () => {
-        const session = await context.newCDPSession(page);
-        await session.send("Emulation.setFocusEmulationEnabled", { enabled: true });
-      })(), remaining(), abortSignal);
-    }
+    // noDefaults disables Playwright's focus emulation. Both a leased turn and the
+    // descriptor-owned maintenance page need it, even when no explicit id was passed.
+    // The ownership lookup above selects exactly one page; other chats remain untouched.
+    await boundedLauncherObservation((async () => {
+      const session = await context.newCDPSession(page);
+      await session.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    })(), remaining(), abortSignal);
     return { descriptor, browser, context, page };
   } catch (error) {
     await browser.close().catch(() => {});

@@ -413,7 +413,9 @@ async function openChatGptStructuralPersonalizationState(
       `ChatGPT Temporary Chat exposed ${controlCount} structural personalization controls; expected exactly one`,
     );
   }
-  await control.click({
+  // Maintenance views can have DOM-visible controls without a pointer-active native view.
+  // Focused keyboard activation works there and retains the control's owned-menu contract.
+  await control.press("ArrowDown", {
     timeout: remainingChatGptPersonalizationMs(deadline, signal),
     signal,
   });
@@ -442,7 +444,7 @@ async function restoreChatGptPersonalizationChoice(
       await pressChatGptPersonalizationEscape(page, deadline, signal);
       return;
     }
-    await state.choices.nth(receipt.originalIndex).click({
+    await state.choices.nth(receipt.originalIndex).press("Enter", {
       timeout: remainingChatGptPersonalizationMs(deadline, signal),
       signal,
     });
@@ -471,7 +473,7 @@ async function toggleChatGptPersonalizationChoice(
     const state = await openChatGptStructuralPersonalizationState(page, deadline, signal);
     receipt = { originalIndex: state.checkedIndex };
     const nextIndex: ChatGptPersonalizationChoiceIndex = state.checkedIndex === 0 ? 1 : 0;
-    await state.choices.nth(nextIndex).click({
+    await state.choices.nth(nextIndex).press("Enter", {
       timeout: remainingChatGptPersonalizationMs(deadline, signal),
       signal,
     });
@@ -581,7 +583,7 @@ async function ensureChatGptPersonalizedConnectorAccessWithinDeadline(
   }
 
   await capture("personalization-unpersonalized");
-  await unpersonalized.click({
+  await unpersonalized.press("ArrowDown", {
     timeout: remainingChatGptPersonalizationMs(deadline, abortSignal),
     signal: abortSignal,
   });
@@ -600,7 +602,7 @@ async function ensureChatGptPersonalizedConnectorAccessWithinDeadline(
         "ChatGPT personalization menu did not expose one exact Personalized choice",
       );
     }
-    await choice.click({
+    await choice.press("Enter", {
       timeout: remainingChatGptPersonalizationMs(deadline, abortSignal),
       signal: abortSignal,
     });
@@ -3084,8 +3086,7 @@ export class ChatGptBrowserWorker {
             timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
           });
           await withBrowserTurnAbort(settleChatGptUi(), personalizationSignal);
-          await composer.pressSequentially(CHATGPT_CONNECTOR_MENTION_QUERY, {
-            delay: 25,
+          await composer.fill(CHATGPT_CONNECTOR_MENTION_QUERY, {
             signal: personalizationSignal,
             timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
           });
@@ -3142,8 +3143,7 @@ export class ChatGptBrowserWorker {
         await composer.fill("", { signal: abortSignal, timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS });
         await composer.focus({ signal: abortSignal, timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS });
         await withBrowserTurnAbort(settleChatGptUi(), abortSignal);
-        await composer.pressSequentially(CHATGPT_CONNECTOR_MENTION_QUERY, {
-          delay: 25,
+        await composer.fill(CHATGPT_CONNECTOR_MENTION_QUERY, {
           signal: abortSignal,
           timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
         });
