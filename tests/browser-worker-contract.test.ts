@@ -380,7 +380,7 @@ test("a mutating stage timeout preserves a failed cleanup integrity error", asyn
   const unpersonalized = {
     filter: () => unpersonalized,
     count: async () => 1,
-    click: async () => { menuOpen = true; },
+    press: async (key: string) => { expect(key).toBe("ArrowDown"); menuOpen = true; },
     getAttribute: async () => "stage-timeout-menu",
   };
   const menu = {
@@ -1279,7 +1279,7 @@ test("connector selection re-resolves the active composer after ChatGPT replaces
     },
   };
   const initialComposer = {
-    fill: async (value: string) => { calls.push(["fill", value]); },
+    fill: async (value: string) => { calls.push([value ? "mentionText" : "fill", value]); },
     focus: async () => { calls.push(["focus"]); },
     pressSequentially: async (value: string, options: { delay: number; signal?: AbortSignal; timeout: number }) => {
       expect(options).toEqual({ delay: 25, signal: undefined, timeout: 10_000 });
@@ -1333,7 +1333,7 @@ test("connector selection re-resolves the active composer after ChatGPT replaces
     ["fill", ""],
     ["fill", ""],
     ["focus"],
-    ["pressSequentially", "@codex"],
+    ["mentionText", "@codex"],
     ["waitForResult"],
     ["press"],
     ["waitForSelectedConnector"],
@@ -1412,7 +1412,7 @@ test("connector selection retriggers the complete mention after a fresh-page hyd
     locator: () => ({ filter: () => selectedConnector }),
   };
   const initialComposer = {
-    fill: async () => { calls.push("clear"); },
+    fill: async (value?: string) => { calls.push(value ? "type" : "clear"); },
     focus: async () => { calls.push("focus"); },
     pressSequentially: async (value: string) => {
       expect(value).toBe("@codex");
@@ -1486,7 +1486,7 @@ test("connector verification preserves the host-refreshed catalog evidence", asy
     filter: (options: { has?: unknown; visible?: boolean }) => options.visible ? visibleRows : appResult,
   };
   const initialComposer = {
-    fill: async () => { calls.push("clear"); },
+    fill: async (value?: string) => { calls.push(value ? "type" : "clear"); },
     focus: async () => { calls.push("focus"); },
     pressSequentially: async () => { calls.push("type"); },
   };
@@ -1734,7 +1734,7 @@ test("tool-capable prompts use the shared Playwright connector selection before 
   const initialComposer = {
     fill: async (value: string, options?: { signal?: AbortSignal }) => {
       expect(options?.signal).toBeDefined();
-      calls.push(["fill", value]);
+      calls.push([value ? "type" : "fill", value]);
     },
     focus: async (options?: { signal?: AbortSignal }) => {
       expect(options?.signal).toBeDefined();
@@ -1828,7 +1828,7 @@ test("an aborted connector proof clears its mention before the preflight release
     fill: async (_value: string, { signal }: { signal?: AbortSignal }) => {
       expect(signal).toBeDefined();
       fillSignals.push(signal!);
-      calls.push(controller.signal.aborted ? "cleanup-fill" : "probe-fill");
+      calls.push(controller.signal.aborted ? "cleanup-fill" : _value ? "type" : "probe-fill");
     },
     focus: async () => { calls.push("focus"); },
     pressSequentially: async () => { calls.push("type"); },
@@ -1868,9 +1868,10 @@ test("an aborted connector proof clears its mention before the preflight release
   expect(calls).toEqual([
     "probe-fill", "focus", "type", "proof-wait", "escape", "cleanup-fill", "cleanup-read",
   ]);
-  expect(fillSignals).toHaveLength(2);
+  expect(fillSignals).toHaveLength(3);
   expect(fillSignals[0]?.aborted).toBeTrue();
-  expect(fillSignals[1]?.aborted).toBeFalse();
+  expect(fillSignals[1]?.aborted).toBeTrue();
+  expect(fillSignals[2]?.aborted).toBeFalse();
   await new Promise(resolve => setTimeout(resolve, 20));
   expect(calls).toEqual([
     "probe-fill", "focus", "type", "proof-wait", "escape", "cleanup-fill", "cleanup-read",
@@ -1894,7 +1895,7 @@ test("an aborted real connector selection clears the typed mention before return
     fill: async (value: string, { signal }: { signal?: AbortSignal }) => {
       expect(signal).toBeDefined();
       composerText = value;
-      calls.push(controller.signal.aborted ? "cleanup-fill" : "fill");
+      calls.push(controller.signal.aborted ? "cleanup-fill" : value ? "type" : "fill");
     },
     focus: async () => { calls.push("focus"); },
     pressSequentially: async (value: string) => {

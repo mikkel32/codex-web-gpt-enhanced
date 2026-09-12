@@ -56,7 +56,7 @@ test("an Unpersonalized Temporary Chat is switched through its owned radio menu 
     },
   });
   const unpersonalized = visibleLocator(() => enabled ? 0 : 1, {
-    click: async () => { menuOpen = true; events.push("control-clicked"); },
+    press: async (key: string) => { expect(key).toBe("ArrowDown"); menuOpen = true; events.push("control-opened-with-keyboard"); },
     getAttribute: async (name: string) => {
       expect(name).toBe("aria-controls");
       expect(menuOpen).toBeTrue();
@@ -70,7 +70,7 @@ test("an Unpersonalized Temporary Chat is switched through its owned radio menu 
   });
   const choice = {
     count: async () => 1,
-    click: async () => { enabled = true; events.push("choice-clicked"); },
+    press: async (key: string) => { expect(key).toBe("Enter"); enabled = true; events.push("choice-activated-with-keyboard"); },
   };
   const menu = {
     waitFor: async ({ state }: { state: string }) => {
@@ -107,9 +107,9 @@ test("an Unpersonalized Temporary Chat is switched through its owned radio menu 
   )).toBe("enabled");
   expect(diagnostics).toEqual(["personalization-unpersonalized", "personalization-enabled"]);
   expect(events).toEqual([
-    "control-clicked",
+    "control-opened-with-keyboard",
     "menu-visible",
-    "choice-clicked",
+    "choice-activated-with-keyboard",
     "personalized-visible",
     "unpersonalized-hidden",
   ]);
@@ -143,7 +143,7 @@ test("a localized Unpersonalized Temporary Chat toggles the structural state and
         if (name === "data-state") return index === (personalized ? 1 : 0) ? "checked" : "unchecked";
         return null;
       },
-      click: async () => {
+      press: async (key: string) => { expect(key).toBe("Enter");
         expect(index).toBe(1);
         personalized = true;
         connectorCatalogAvailable = true;
@@ -172,7 +172,7 @@ test("a localized Unpersonalized Temporary Chat toggles the structural state and
       expect(name).toBe("aria-controls");
       return "localized-personalization-menu";
     },
-    click: async () => { menuOpen = true; },
+    press: async (key: string) => { expect(key).toBe("ArrowDown"); menuOpen = true; },
   };
   const controls = {
     filter: () => controls,
@@ -217,7 +217,7 @@ test("a localized preflight waits for its semantic control to hydrate without as
         if (name === "data-state") return index === (personalized ? 1 : 0) ? "checked" : "unchecked";
         return null;
       },
-      click: async (options?: { signal?: AbortSignal; timeout?: number }) => {
+      press: async (key: string, options?: { signal?: AbortSignal; timeout?: number }) => { expect(key).toBe("Enter");
         expect(options?.signal).toBeDefined();
         expect(options?.timeout).toBeGreaterThan(0);
         expect(index).toBe(1);
@@ -234,7 +234,7 @@ test("a localized preflight waits for its semantic control to hydrate without as
       expect(timeout).toBeGreaterThan(0);
       controlReady = true;
     },
-    click: async (options?: { signal?: AbortSignal; timeout?: number }) => {
+    press: async (key: string, options?: { signal?: AbortSignal; timeout?: number }) => { expect(key).toBe("ArrowDown");
       expect(options?.signal).toBeDefined();
       expect(options?.timeout).toBeGreaterThan(0);
       menuOpen = true;
@@ -295,7 +295,7 @@ test("a localized preflight waits for its semantic control to hydrate without as
   expect(ownershipReads).toBe(2);
 });
 
-test("an aborted localized preflight cannot click after its structural readiness wait", async () => {
+test("an aborted localized preflight cannot activate after its structural readiness wait", async () => {
   const controller = new AbortController();
   let controlClicks = 0;
   let markControlWaitStarted!: () => void;
@@ -309,7 +309,7 @@ test("an aborted localized preflight cannot click after its structural readiness
         signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
       });
     },
-    click: async () => { controlClicks += 1; },
+    press: async (key: string) => { expect(key).toBe("ArrowDown"); controlClicks += 1; },
   };
   const controls = {
     filter: () => controls,
@@ -353,7 +353,7 @@ test("an abort during localized connector proof restores the exact preflight per
         if (name === "data-state") return index === (personalized ? 1 : 0) ? "checked" : "unchecked";
         return null;
       },
-      click: async (options?: { signal?: AbortSignal; timeout?: number }) => {
+      press: async (key: string, options?: { signal?: AbortSignal; timeout?: number }) => { expect(key).toBe("Enter");
         expect(options?.signal?.aborted).toBeFalse();
         expect(options?.timeout).toBeGreaterThan(0);
         choiceClicks.push(index);
@@ -373,7 +373,7 @@ test("an abort during localized connector proof restores the exact preflight per
     waitFor: async ({ signal }: { signal?: AbortSignal }) => {
       expect(signal?.aborted).toBeFalse();
     },
-    click: async ({ signal }: { signal?: AbortSignal }) => {
+    press: async (key: string, { signal }: { signal?: AbortSignal }) => { expect(key).toBe("ArrowDown");
       expect(signal?.aborted).toBeFalse();
       menuOpen = true;
     },
@@ -428,7 +428,7 @@ test("a missing owned personalization menu closes the opened control and returns
   const absent = visibleLocator(() => 0);
   const control = {
     waitFor: async () => {},
-    click: async () => {},
+    press: async (key: string) => { expect(key).toBe("ArrowDown");},
     getAttribute: async () => "missing-personalization-menu",
   };
   const controls = {
@@ -479,7 +479,7 @@ test("personalization menu cleanup completes before the preflight error is retur
   const absent = visibleLocator(() => 0);
   const control = {
     waitFor: async () => {},
-    click: async () => {},
+    press: async (key: string) => { expect(key).toBe("ArrowDown");},
     getAttribute: async () => "delayed-cleanup-menu",
   };
   const controls = { filter: () => controls, first: () => control, count: async () => 1 };
@@ -539,7 +539,7 @@ test("the labeled Unpersonalized path never hides an unclosed menu", async () =>
   let menuOpen = false;
   const personalized = visibleLocator(() => 0);
   const unpersonalized = visibleLocator(() => 1, {
-    click: async () => { menuOpen = true; },
+    press: async (key: string) => { expect(key).toBe("ArrowDown"); menuOpen = true; },
     getAttribute: async () => "labeled-cleanup-menu",
   });
   const page = {
@@ -606,7 +606,7 @@ test("an absolute deadline never hides a failed personalization rollback", async
         if (name === "data-state") return index === (personalized ? 1 : 0) ? "checked" : "unchecked";
         return null;
       },
-      click: async () => {
+      press: async (key: string) => { expect(key).toBe("Enter");
         personalized = index === 1;
         menuOpen = false;
       },
@@ -620,7 +620,7 @@ test("an absolute deadline never hides a failed personalization rollback", async
   };
   const control = {
     waitFor: async () => {},
-    click: async () => { menuOpen = true; },
+    press: async (key: string) => { expect(key).toBe("ArrowDown"); menuOpen = true; },
     getAttribute: async () => "deadline-rollback-menu",
   };
   const controls = { filter: () => controls, first: () => control, count: async () => 1 };
@@ -670,4 +670,51 @@ test("ambiguous personalization controls fail before connector selection", async
     code: "connector_not_found",
     retryable: false,
   });
+});
+
+
+test("a background maintenance view enables personalization when pointer activation is ignored", async () => {
+  let enabled = false;
+  let menuOpen = false;
+  let pointerCalls = 0;
+  const keys: string[] = [];
+  const personalized = visibleLocator(() => enabled ? 1 : 0, {
+    waitFor: async () => { expect(enabled).toBeTrue(); },
+  });
+  const unpersonalized = visibleLocator(() => enabled ? 0 : 1, {
+    // A DOM-visible control can still belong to an inactive native WebContentsView.
+    click: async () => { pointerCalls += 1; },
+    press: async (key: string, options: { signal: AbortSignal }) => {
+      expect(key).toBe("ArrowDown"); expect(options.signal.aborted).toBeFalse();
+      keys.push(key); menuOpen = true;
+    },
+    getAttribute: async () => {
+      if (!menuOpen) throw new Error("Pointer activation left the owned menu closed");
+      return "owned-personalization";
+    },
+    waitFor: async () => { expect(enabled).toBeTrue(); },
+  });
+  const choice = {
+    count: async () => 1,
+    click: async () => { pointerCalls += 1; },
+    press: async (key: string, options: { signal: AbortSignal }) => {
+      expect(key).toBe("Enter"); expect(options.signal.aborted).toBeFalse();
+      expect(menuOpen).toBeTrue(); keys.push(key); enabled = true; menuOpen = false;
+    },
+  };
+  const page = {
+    getByRole: (_role: string, options: { name: string }) => options.name === "Personalized" ? personalized : unpersonalized,
+    locator: (selector: string) => {
+      if (selector === "body") return { press: async () => { menuOpen = false; } };
+      expect(selector).toBe('[id="owned-personalization"]');
+      return {
+        waitFor: async () => { expect(menuOpen).toBeTrue(); },
+        locator: () => ({ filter: () => choice }),
+      };
+    },
+  } as any;
+  expect(await ensureChatGptPersonalizedConnectorAccess(page)).toBe("enabled");
+  expect(keys).toEqual(["ArrowDown", "Enter"]);
+  expect(pointerCalls).toBe(0);
+  expect(menuOpen).toBeFalse();
 });
